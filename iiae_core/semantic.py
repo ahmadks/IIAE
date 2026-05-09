@@ -1,5 +1,18 @@
 import os
+import warnings
+import logging
 from dotenv import load_dotenv
+
+# --- SUPPRESS TECHNICAL NOISE ---
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Accessing __path__ from.*")
+
+try:
+    import transformers
+    transformers.utils.logging.set_verbosity_error()
+except ImportError:
+    pass
+
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np

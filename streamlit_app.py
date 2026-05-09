@@ -1,6 +1,22 @@
 import streamlit as st
 import pandas as pd
 import json
+import warnings
+import logging
+import os
+
+# --- SUPPRESS TECHNICAL NOISE ---
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*Accessing __path__ from.*")
+
+try:
+    import transformers
+    transformers.utils.logging.set_verbosity_error()
+except ImportError:
+    pass
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from iiae_core.pipeline import IIAE_Pipeline
 
 # --- PAGE CONFIG ---
@@ -48,32 +64,32 @@ if "last_result" not in st.session_state:
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
 
-# --- SCENARIOS (ENGLISH - REFINED AXIOMS) ---
+# --- SCENARIOS (REFINED FOR SEMANTIC DQE - ENGLISH ONLY) ---
 SCENARIOS = {
-    "🟩 Scenario 1: Perfect Alignment (Ds≈0)": {
+    "🟩 Scenario 1: Perfect Alignment (Ds ≈ 0.03)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system maintains its behavior and does not depend on the hardware.",
-        "explanation": "Response perfectly mirrors the refined axioms. Near-zero drift expected."
+        "ai_response": "The system maintains the same behavior.\nThe system does not depend on hardware or platform.",
+        "explanation": "The response perfectly preserves the axioms. No noise or deviation detected."
     },
-    "🟨 Scenario 2: Partial Alignment (Ds≈0.5)": {
+    "🟦 Scenario 2: Partial Alignment (Ds ≈ 0.33)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system maintains its behavior, but might depend on the hardware in some cases.",
-        "explanation": "A1 is preserved, but A2 is explicitly weakened. Drift detected."
+        "ai_response": "The system maintains the same behavior, although in rare cases it may vary depending on execution conditions.",
+        "explanation": "The response partially preserves A1 but introduces noise regarding A2."
     },
-    "🟧 Scenario 3: Irrelevant Response (Ds=1)": {
+    "🟨 Scenario 3: Irrelevant Response (Ds ≈ 0.74)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "IIAE is a universal framework for verifying information integrity.",
-        "explanation": "Response discusses a different topic. Total structural violation."
+        "ai_response": "The system supports a wide range of applications and can be integrated into different workflows depending on user needs.",
+        "explanation": "The response discusses unrelated topics. It does not contradict but fails to preserve the axioms."
     },
-    "🟥 Scenario 4: Contradictory Output (Ds=1)": {
+    "🟥 Scenario 4: Direct Contradiction (Ds ≈ 0.92)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system does not maintain its behavior and depends entirely on the hardware.",
-        "explanation": "Response explicitly negates the axioms. Direct conflict."
+        "ai_response": "The system does not maintain the same behavior and depends heavily on the hardware where it runs.",
+        "explanation": "The response directly contradicts both core axioms."
     },
-    "🟦 Scenario 5: Creative Preservation (Ds≈0.2)": {
+    "🟪 Scenario 5: Creative but Correct (Ds ≈ 0.11)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system behaves consistently and functions identically regardless of where it is executed.",
-        "explanation": "Uses different words but the same meaning. Registered via semantic overlap."
+        "ai_response": "The system behaves consistently in all situations and operates independently of the hardware or platform where it is executed.",
+        "explanation": "The response preserves the core meaning while using more natural, creative phrasing."
     }
 }
 
