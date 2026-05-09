@@ -1,0 +1,95 @@
+from typing import List, Dict, Any, Tuple, Optional
+from .aem import AEM_Module
+from .isg import ISG_Module
+from .dse import DSE_Module
+from .cmc import CMC_Module
+from .dqe import DQE_Module
+from .ctm import CTM_Module
+from .model import StochasticModel
+from .primitives import sha256, canonical_json
+
+class IIAE_Pipeline:
+    """
+    Unified IIAE/IDICOC-DSE Pipeline.
+    Orchestrates the 6 core modules to achieve deterministic integrity.
+    """
+    def __init__(self, epsilon: float = 0.4, api_key: Optional[str] = None):
+        self.epsilon = epsilon
+        self.aem = AEM_Module(entropy_threshold=0.6)
+        self.isg = ISG_Module()
+        self.dse = DSE_Module()
+        self.cmc = CMC_Module(epsilon=epsilon)
+        self.dqe = DQE_Module(epsilon=epsilon)
+        self.ctm = CTM_Module()
+        self.model = StochasticModel(api_key=api_key)
+
+    def execute(self, user_query: str, context: str, mode: str = "aligned") -> Dict[str, Any]:
+        """
+        Runs the full 7-stage verification loop (IDICOC Standard).
+        """
+        # I1: Ingestion / Signal Capture (AEM)
+        y_struct, eta = self.aem.filter(context)
+        ingestion_state = {"prompt": user_query, "context_filtered": y_struct}
+        
+        # Stochastic Model Generation (Gemini or Mock)
+        prompt = f"CONTEXT: {y_struct}\nQUERY: {user_query}"
+        model_output = self.model.generate(prompt, mode=mode)
+        
+        # Task ID generation
+        task_id = sha256(user_query + canonical_json(ingestion_state))[:16]
+
+        # Stage 2: Axiom Update (DSE)
+        graph = self.dse.update(y_struct, v_hat_placeholder := self.isg.project(y_struct))
+        axioms = self.dse.get_axioms_list()
+
+        # Stage 3: Integrity (DQE / Ds)
+        ds_score, explanations = self.dqe.compute_ds(model_output, axioms)
+
+        # Stage 4: CTM Pre‑seal (C1)
+        pre_receipt = self.ctm.seal(
+            task_id=task_id,
+            stage="C1_PRE_SEAL",
+            input_state=ingestion_state,
+            output_state={"raw_output": model_output, "axioms": axioms},
+            ds=ds_score,
+            epsilon=self.epsilon
+        )
+
+        # Stage 5: Output Canonicalization (O1)
+        # Snap output back to manifold if drift detected
+        verified_output = self.dqe.snap(model_output, ds_score, axioms)
+        canonical_output = {
+            "raw": model_output,
+            "verified": verified_output,
+            "ds": ds_score
+        }
+
+        # Stage 6: CTM Final Seal (C2)
+        post_receipt = self.ctm.seal(
+            task_id=task_id,
+            stage="C2_FINAL_SEAL",
+            input_state=ingestion_state,
+            output_state=canonical_output,
+            ds=ds_score,
+            epsilon=self.epsilon
+        )
+
+        # Stage 7: State‑transition proof (S1)
+        proof = sha256(pre_receipt["merkle_root"] + post_receipt["merkle_root"])
+
+        return {
+            "task_id": task_id,
+            "is_valid": ds_score <= self.epsilon,
+            "ds": ds_score,
+            "epsilon": self.epsilon,
+            "stages": {
+                "I1_ingestion": ingestion_state,
+                "D1_axioms": axioms,
+                "I2_ds": ds_score,
+                "C1_pre_receipt": pre_receipt,
+                "O1_canonical_output": canonical_output,
+                "C2_post_receipt": post_receipt,
+                "S1_proof": proof
+            },
+            "explanations": explanations
+        }
