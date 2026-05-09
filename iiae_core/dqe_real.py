@@ -76,9 +76,10 @@ class DQEReal:
             doc, score = self.rag.query(c)
             rag_scores.append(score)
             
+            # Labeling for UI clarity (doesn't affect math)
             status = "Unsupported"
-            if score >= 0.80: status = "Supported"
-            elif score >= 0.50: status = "Weakly Supported"
+            if score >= 0.70: status = "Supported"
+            elif score >= 0.40: status = "Partial Support"
             
             rag_details.append({
                 "clause": c, 
@@ -87,6 +88,7 @@ class DQEReal:
                 "status": status
             })
 
+        # Calculation using raw continuous scores
         noise = compute_noise_score(rag_scores)
         hallucination = compute_hallucination_score(rag_scores)
 

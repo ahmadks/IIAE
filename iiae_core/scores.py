@@ -7,7 +7,8 @@ def compute_noise_score(rag_scores):
     if not rag_scores:
         return 0.0
     # Precise IIAE Noise formula: 1 - average support
-    return 1 - (sum(rag_scores) / len(rag_scores))
+    avg_support = sum(rag_scores) / len(rag_scores)
+    return max(0.0, 1 - avg_support)
 
 def compute_hallucination_score(clause_support_scores):
     if not clause_support_scores:
