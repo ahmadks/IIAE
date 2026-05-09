@@ -3,12 +3,11 @@ def compute_preservation_score(similarities):
         return 0.0
     return sum(similarities) / len(similarities)
 
-def compute_noise_score(clause_support_scores):
-    if not clause_support_scores:
+def compute_noise_score(rag_scores):
+    if not rag_scores:
         return 0.0
-    # Noise = 1 - average support (Continuous drift measurement)
-    avg_support = sum(clause_support_scores) / len(clause_support_scores)
-    return max(0.0, 1.0 - avg_support)
+    # Precise IIAE Noise formula: 1 - average support
+    return 1 - (sum(rag_scores) / len(rag_scores))
 
 def compute_hallucination_score(clause_support_scores):
     if not clause_support_scores:
