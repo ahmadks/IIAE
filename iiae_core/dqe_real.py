@@ -28,27 +28,31 @@ class DQEReal:
 
     def get_status(self, analysis):
         """
-        Determines the Epistemic Status (REGISTERED, SPECULATIVE, QUARANTINED)
+        Determines the Epistemic Status (REGISTERED, SUPPORTED, SPECULATIVE, QUARANTINED)
         """
         p = analysis["preservation_score"]
         h = analysis["hallucination_score"]
         n = analysis["noise_score"]
         c = analysis["contradiction_score"]
         
-        # Priority 1: Contradiction (Hard Lock)
+        # 1. Contradiction (Critical Failure)
         if c > 0.4:
             return "QUARANTINED (CONTRADICTION)", "#ef4444"
         
-        # Priority 2: Severe Hallucination
+        # 2. Severe Hallucination (Critical Failure)
         if h > 0.3:
             return "QUARANTINED (HALLUCINATION)", "#ef4444"
             
-        # Priority 3: Speculative / Noisy content
-        if n > 0.4 or p < 0.5:
+        # 3. Speculative / High Noise (Warning State)
+        if n > 0.5 or p < 0.4:
             return "SPECULATIVE", "#f59e0b"
+            
+        # 4. Ideal state (Total Preservation)
+        if p > 0.9 and n < 0.1:
+            return "REGISTERED", "#10b981"
         
-        # Priority 4: Admissible (may have minor noise)
-        return "REGISTERED", "#10b981"
+        # 5. Admissible state (Minor drift)
+        return "SUPPORTED", "#10b981"
 
     def evaluate(self, axioms, response):
         clauses = self.split_clauses(response)

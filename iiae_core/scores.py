@@ -6,8 +6,7 @@ def compute_preservation_score(similarities):
 def compute_noise_score(clause_support_scores):
     if not clause_support_scores:
         return 0.0
-    # Noise = 1 - average support (Professional drift measurement)
-    # This captures subtle semantic additions that aren't quite hallucinations
+    # Noise = 1 - average support (Continuous drift measurement)
     avg_support = sum(clause_support_scores) / len(clause_support_scores)
     return max(0.0, 1.0 - avg_support)
 
@@ -21,6 +20,6 @@ def compute_hallucination_score(clause_support_scores):
 def compute_contradiction_score(entailment_results):
     if not entailment_results:
         return 0.0
-    # Average probability of contradiction across all axioms
+    # Average probability of contradiction
     contradictions = [e["contradiction"] for e in entailment_results]
     return sum(contradictions) / len(contradictions)
