@@ -1,11 +1,10 @@
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any
 from .aem import AEM_Module
 from .isg import ISG_Module
 from .dse import DSE_Module
 from .cmc import CMC_Module
 from .dqe import DQE_Module
 from .ctm import CTM_Module
-from .model import StochasticModel
 from .primitives import sha256, canonical_json
 
 class IIAE_Pipeline:
@@ -13,7 +12,7 @@ class IIAE_Pipeline:
     Unified IIAE/IDICOC-DSE Pipeline.
     Orchestrates the 6 core modules to achieve deterministic integrity.
     """
-    def __init__(self, epsilon: float = 0.4, api_key: Optional[str] = None):
+    def __init__(self, epsilon: float = 0.4):
         self.epsilon = epsilon
         self.aem = AEM_Module(entropy_threshold=0.6)
         self.isg = ISG_Module()
@@ -21,9 +20,8 @@ class IIAE_Pipeline:
         self.cmc = CMC_Module(epsilon=epsilon)
         self.dqe = DQE_Module(epsilon=epsilon)
         self.ctm = CTM_Module()
-        self.model = StochasticModel(api_key=api_key)
 
-    def execute(self, user_query: str, context: str, mode: str = "aligned") -> Dict[str, Any]:
+    def execute(self, user_query: str, context: str, ai_response: str) -> Dict[str, Any]:
         """
         Runs the full 7-stage verification loop (IDICOC Standard).
         """
@@ -31,9 +29,8 @@ class IIAE_Pipeline:
         y_struct, eta = self.aem.filter(context)
         ingestion_state = {"prompt": user_query, "context_filtered": y_struct}
         
-        # Stochastic Model Generation (Gemini or Mock)
-        prompt = f"CONTEXT: {y_struct}\nQUERY: {user_query}"
-        model_output = self.model.generate(prompt, mode=mode)
+        # In this version, we use the provided ai_response directly
+        model_output = ai_response
         
         # Task ID generation
         task_id = sha256(user_query + canonical_json(ingestion_state))[:16]

@@ -48,65 +48,93 @@ st.markdown("""
 
 # Initialization
 if "pipeline" not in st.session_state:
-    st.session_state.pipeline = IIAE_Pipeline(epsilon=0.4)
+    st.session_state.pipeline = IIAE_Pipeline()
 if "last_result" not in st.session_state:
     st.session_state.last_result = None
-if "last_api_key" not in st.session_state:
-    st.session_state.last_api_key = None
 
-# Sidebar Configuration
+# SCENARIOS DEFINITION
+SCENARIOS = {
+    "🟩 Scenario 1: Perfectly Aligned": {
+        "context": "A1: The system must enforce invariance.\nA2: The system must remain substrate-agnostic.",
+        "ai_response": "The system enforces invariance and remains substrate-agnostic.",
+        "description": "100% semantic preservation. No noise introduced."
+    },
+    "🟨 Scenario 2: Partially Aligned": {
+        "context": "A1: The model must preserve invariance.\nA2: The model must avoid substrate dependence.",
+        "ai_response": "The model preserves invariance but may depend on the substrate in some cases.",
+        "description": "A1 preserved, A2 violated."
+    },
+    "🟧 Scenario 3: Irrelevant Response": {
+        "context": "A1: The system must enforce invariance.\nA2: The system must remain substrate-agnostic.",
+        "ai_response": "IIAE is a universal framework for information integrity.",
+        "description": "Does not preserve A1 or A2. Structural drift detected."
+    },
+    "🟥 Scenario 4: Contradictory Response": {
+        "context": "A1: The system must enforce invariance.\nA2: The system must remain substrate-agnostic.",
+        "ai_response": "The system does not enforce invariance and depends entirely on the substrate.",
+        "description": "Explicit structural contradiction."
+    },
+    "🟦 Scenario 5: Creative Preservation": {
+        "context": "A1: The system must enforce invariance.\nA2: The system must remain substrate-agnostic.",
+        "ai_response": "The system maintains its invariant behavior and does not rely on any specific substrate, regardless of implementation.",
+        "description": "Axioms preserved with added descriptive content."
+    }
+}
+
+# Scenario Selection
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/000000/guarantee.png", width=80)
     st.title("IIAE Control")
     st.markdown("---")
     
-    # API Key Handling
-    api_key = st.text_input("Gemini API Key:", type="password", help="Leave blank for simulation mode")
-    
-    if api_key != st.session_state.last_api_key:
-        st.session_state.pipeline = IIAE_Pipeline(epsilon=0.4, api_key=api_key)
-        st.session_state.last_api_key = api_key
-        st.toast("Pipeline re-initialized with new key")
-
-    st.markdown("---")
-    epsilon = st.slider("Strictness Threshold (ϵ)", 0.0, 1.0, 0.4, 0.05)
-    st.session_state.pipeline.epsilon = epsilon
-    st.session_state.pipeline.dqe.epsilon = epsilon
-    st.session_state.pipeline.cmc.epsilon = epsilon
-    
-    st.markdown("### Operational Mode")
-    op_mode = st.selectbox("Operational Mode", ["Factual (ϵ→0.1)", "Hybrid (0.4)", "Creative (ϵ→0.8)"])
-    if "Factual" in op_mode: st.session_state.pipeline.epsilon = 0.1
-    elif "Creative" in op_mode: st.session_state.pipeline.epsilon = 0.8
+    st.markdown("### 🎭 Select Scenario")
+    selected_scenario_name = st.selectbox("Load Scenarios", list(SCENARIOS.keys()), key="selected_scenario")
+    scenario_data = SCENARIOS[selected_scenario_name]
     
     st.markdown("---")
-    st.markdown("### Simulation Fallback")
-    sim_mode = st.selectbox("Simulation Target", ["aligned", "partial", "misaligned"], 
-                            help="Only used if no API Key is provided")
+    st.markdown("### 📏 Deterministic Epsilon (ϵ)")
+    # We calculate epsilon based on the scenario axioms count
+    n_axioms = len([l for l in scenario_data["context"].split('\n') if l.strip()])
+    calc_epsilon = st.session_state.pipeline.cmc.calculate_deterministic_epsilon(n_axioms)
+    st.metric("Auto-calculated ϵ", f"{calc_epsilon:.3f}")
+    st.caption("Formula: 1 - (1 / (1 + log(1+N)))")
     
-    st.info("Architecture: IDICOC-DSE v1.0")
+    st.markdown("---")
+    st.info("Architecture: IDICOC-DSE v1.0 (OFFLINE MODE)")
 
 # Header
 st.markdown("<h1 style='text-align: center;'>⚖️ IIAE Deterministic Standard</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; opacity: 0.7;'>Integrated Information Integrity Framework — Architectural Reboot</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align: center; opacity: 0.7;'>{scenario_data['description']}</p>", unsafe_allow_html=True)
 
 # --- 1. INPUT LAYER ---
 st.markdown("<div class='section-header'><h3>📥 Layer 1: Exogenous Input & Signal Capture</h3></div>", unsafe_allow_html=True)
-c1, c2 = st.columns([2, 1])
+c1, c2 = st.columns(2)
 
 with c1:
+    # Use dynamic key based on scenario to force widget reset
     context_input = st.text_area("Immutable Truth Context (Canon):", 
-        "Axiom 1: Information must be invariant.\nAxiom 2: IDICOC ensures chain of custody.\nAxiom 3: DQE quantifies drift.", height=150)
-    query_input = st.text_input("User Query:", "What are the core pillars of IIAE?")
+        value=scenario_data["context"], 
+        height=150, 
+        key=f"ctx_{selected_scenario_name}")
 
 with c2:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    if st.button("🚀 EXECUTE IDICOC PIPELINE", type="primary", use_container_width=True):
-        st.session_state.last_result = st.session_state.pipeline.execute(
-            query_input, 
-            context_input, 
-            mode=sim_mode
-        )
+    # Use dynamic key based on scenario to force widget reset
+    ai_response_input = st.text_area("AI Response to Verify (Stochastic):", 
+        value=scenario_data["ai_response"], 
+        height=150, 
+        key=f"resp_{selected_scenario_name}")
+
+if st.button("🚀 EXECUTE DETERMINISTIC PIPELINE", type="primary", use_container_width=True):
+    # Set the calculated epsilon before execution
+    st.session_state.pipeline.epsilon = calc_epsilon
+    st.session_state.pipeline.dqe.epsilon = calc_epsilon
+    st.session_state.pipeline.cmc.epsilon = calc_epsilon
+    
+    st.session_state.last_result = st.session_state.pipeline.execute(
+        "IIAE Verification Task", 
+        context_input, 
+        ai_response_input
+    )
 
 # --- 2. EXECUTION & RESULTS ---
 res = st.session_state.last_result
@@ -121,7 +149,7 @@ if res:
     with col2:
         st.markdown(f"<div class='metric-box'><h4>Dissonance (Ds)</h4><h2>{res['ds']:.3f}</h2></div>", unsafe_allow_html=True)
     with col3:
-        st.markdown(f"<div class='metric-box'><h4>Threshold (ϵ)</h4><h2>{res['epsilon']:.2f}</h2></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box'><h4>Threshold (ϵ)</h4><h2>{res['epsilon']:.3f}</h2></div>", unsafe_allow_html=True)
     with col4:
         st.markdown(f"<div class='metric-box'><h4>Axioms</h4><h2>{len(res['stages']['D1_axioms'])}</h2></div>", unsafe_allow_html=True)
 
@@ -137,7 +165,7 @@ if res:
             st.code(ax)
 
     with st.expander("⚖️ I₂ Integrity & C₁ Pre-Seal (DQE Engine)", expanded=False):
-        st.write(f"**I₂: Deviation Quantification** (Ds calculated: {stages['I2_ds']:.3f})")
+        st.write(f"**I₂: Deviation Quantification** (Ds calculado: {stages['I2_ds']:.3f})")
         for exp in res["explanations"]:
             st.write(exp)
         st.write("**C₁: Pre-Seal Receipt** (State commitment before correction)")
@@ -145,8 +173,8 @@ if res:
 
     with st.expander("🛠️ O₁ Canonicalization & C₂ Final Seal (Re-alignment)", expanded=False):
         st.write("**O₁: Output Canonicalization** (Manifold Snapping)")
-        st.write(f"Raw: `{stages['O1_canonical_output']['raw']}`")
-        st.write(f"Verified: `{stages['O1_canonical_output']['verified']}`")
+        st.write(f"Raw Input: `{stages['O1_canonical_output']['raw']}`")
+        st.write(f"Verified Result: `{stages['O1_canonical_output']['verified']}`")
         st.write("**C₂: Final Seal Receipt** (Verification state locked)")
         st.json(stages["C2_post_receipt"])
 
@@ -157,8 +185,6 @@ if res:
 
     st.divider()
     st.subheader("Final Manifold Snapping")
-    st.write("**Raw AI Output:**")
-    st.info(stages["O1_canonical_output"]["raw"])
     st.write("**Verified Output (After Invariant Projection):**")
     if res["is_valid"]:
         st.success(stages["O1_canonical_output"]["verified"])
@@ -166,7 +192,6 @@ if res:
         st.error(stages["O1_canonical_output"]["verified"])
 
 else:
-    st.info("Awaiting execution... Fill the inputs above and press the button.")
+    st.info("Awaiting execution... Select a scenario or enter manual text and press the button.")
 
-
-st.markdown("<div style='text-align: center; padding: 40px; opacity: 0.3;'>Powered by IIAE Core Engine — v1.0.0-Deterministic-Zero</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; padding: 40px; opacity: 0.3;'>Powered by IIAE Core Engine — v1.0.0-Deterministic-Zero-Offline</div>", unsafe_allow_html=True)
