@@ -19,9 +19,13 @@ import numpy as np
 
 # Load environment variables (HF_TOKEN)
 load_dotenv()
-hf_token = os.getenv("HF_TOKEN")
+try:
+    import streamlit as st
+    hf_token = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+except Exception:
+    hf_token = os.getenv("HF_TOKEN")
 
-# Initialize the model using the auth token for stability and speed
+# Initialize the model using the auth token if available
 # all-MiniLM-L6-v2 is the standard for lightweight semantic verification
 cache_dir = os.path.join(os.getcwd(), "models_cache")
 try:

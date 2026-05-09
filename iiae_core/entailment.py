@@ -13,7 +13,11 @@ class EntailmentModel:
         self.cache_dir = os.path.join(os.getcwd(), "models_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         
-        token = os.getenv("HF_TOKEN")
+        try:
+            import streamlit as st
+            token = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
+        except Exception:
+            token = os.getenv("HF_TOKEN")
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,

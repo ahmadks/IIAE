@@ -95,7 +95,7 @@ class IIAE_Pipeline:
 
         # Stage 7: State‑transition proof (S1)
         proof = sha256(pre_receipt["merkle_root"] + post_receipt["merkle_root"])
-        is_registered = analysis["status"] in ["SUPPORTED", "SPECULATIVE"]
+        is_registered = analysis["status"] in ["REGISTERED", "SPECULATIVE"]
 
         return {
             "task_id": task_id,

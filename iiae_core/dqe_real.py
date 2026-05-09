@@ -1,3 +1,4 @@
+import re
 from sentence_transformers import SentenceTransformer, util
 from iiae_core.rag import MiniRAG
 from iiae_core.entailment import EntailmentModel
@@ -9,39 +10,41 @@ from iiae_core.scores import (
 )
 
 class DQEReal:
-    """
-    DQEReal Engine - The professional standard for Epistemic Auditing.
-    Combines semantic alignment, RAG verification, and logical entailment.
-    """
     def __init__(self):
         import os
         self.cache_dir = os.path.join(os.getcwd(), "models_cache")
+        # Ensure we use the lightweight model for speed and cloud compatibility
         self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", cache_folder=self.cache_dir)
         self.rag = MiniRAG()
         self.entail = EntailmentModel()
 
     def split_clauses(self, text):
-        # Improved splitting logic for complex sentences
+        # Professional clause splitting (Case-insensitive 'and', punctuation, newlines)
         import re
-        parts = [p.strip() for p in re.split(r' and |\. | but | although | however |\n', text) if p.strip()]
+        # We use regex to split by common conjunctions and sentence delimiters
+        delimiters = r'(?i)\. |\n| and | but | although | however |; '
+        parts = [p.strip() for p in re.split(delimiters, text) if p.strip()]
         return parts
 
     def get_status(self, analysis):
         """
-        Determines the Epistemic Status of the response based on the 4 scores.
+        Determines the Epistemic Status (REGISTERED, SPECULATIVE, QUARANTINED)
         """
         p = analysis["preservation_score"]
         h = analysis["hallucination_score"]
+        n = analysis["noise_score"]
         c = analysis["contradiction_score"]
         
-        if c > 0.5:
-            return "CONTRADICTED", "#ef4444" # Red
-        if p > 0.85 and h < 0.15:
-            return "SUPPORTED", "#10b981" # Green
-        if p > 0.60 and h < 0.40:
-            return "SPECULATIVE", "#f59e0b" # Orange
+        if c > 0.4:
+            return "QUARANTINED (CONTRADICTION)", "#ef4444"
+        if p < 0.65:
+            return "QUARANTINED (LOW PRESERVATION)", "#ef4444"
+        if h > 0.2:
+            return "SPECULATIVE (HALLUCINATION)", "#f59e0b"
+        if n > 0.3:
+            return "SPECULATIVE (NOISE)", "#f59e0b"
         
-        return "QUARANTINED", "#ef4444" # Red
+        return "REGISTERED", "#10b981"
 
     def evaluate(self, axioms, response):
         clauses = self.split_clauses(response)
@@ -49,13 +52,14 @@ class DQEReal:
             clauses = [response]
 
         # 1. Preservation Score (Axiom Alignment)
+        # We compare each axiom against every clause and take the BEST match
         ax_emb = self.embedder.encode(axioms, convert_to_tensor=True)
         clause_embeddings = self.embedder.encode(clauses, convert_to_tensor=True)
         
         sims = []
         for i in range(len(axioms)):
-            # Max similarity for this axiom across all clauses
             axiom_sims = util.cos_sim(ax_emb[i], clause_embeddings)[0]
+            # Perfect alignment means the axiom is fully contained in at least ONE clause
             sims.append(axiom_sims.max().item())
             
         preservation = compute_preservation_score(sims)
@@ -68,8 +72,8 @@ class DQEReal:
             rag_scores.append(score)
             
             status = "Unsupported"
-            if score >= 0.75: status = "Supported"
-            elif score >= 0.45: status = "Weakly Supported"
+            if score >= 0.80: status = "Supported"
+            elif score >= 0.50: status = "Weakly Supported"
             
             rag_details.append({
                 "clause": c, 
@@ -84,7 +88,6 @@ class DQEReal:
         # 3. Entailment (Logical Consistency)
         entail_results = []
         for ax in axioms:
-            # We check the logical relationship between the axiom and the WHOLE response
             entail_results.append(self.entail.classify(ax, response))
 
         contradiction = compute_contradiction_score(entail_results)

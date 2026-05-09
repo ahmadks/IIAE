@@ -1,4 +1,5 @@
 import os
+import re
 from sentence_transformers import SentenceTransformer, util
 
 class MiniRAG:
@@ -6,18 +7,22 @@ class MiniRAG:
         # Lightweight model for Streamlit Cloud
         self.cache_dir = os.path.join(os.getcwd(), "models_cache")
         self.model = SentenceTransformer(model_name, cache_folder=self.cache_dir)
-        self.docs = []
+        self.docs = [] # Stores chunks/sentences
         self.embeddings = []
 
         if not os.path.exists(rag_folder):
             os.makedirs(rag_folder)
 
+        # Indexing: We split documents into sentences to allow high-fidelity matching
         for fname in os.listdir(rag_folder):
             if fname.endswith(".txt"):
                 path = os.path.join(rag_folder, fname)
                 with open(path, "r", encoding="utf-8") as f:
                     text = f.read().strip()
-                    self.docs.append({"id": fname, "text": text})
+                    # Split into sentences for better granular matching
+                    sentences = [s.strip() for s in re.split(r'\. |\n', text) if s.strip()]
+                    for s in sentences:
+                        self.docs.append({"id": fname, "text": s})
 
         if self.docs:
             self.embeddings = self.model.encode([d["text"] for d in self.docs], convert_to_tensor=True)
