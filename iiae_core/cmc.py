@@ -20,7 +20,7 @@ class CMC_Module:
         """
         if n_axioms <= 0:
             return 0.1
-        return 1.0 - (1.0 / (1.0 + math.log(1 + n_axioms)))
+        return 1.0 - (1.0 / (1.0 + math.log2(1 + n_axioms)))
 
     def build_manifold(self, property_graph: Dict[str, Any], v_hat: str) -> Dict[str, Any]:
         """
