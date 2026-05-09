@@ -57,10 +57,6 @@ print(f"Audit Receipt: {receipt}")
 ## 📁 Repository Structure
 
 ```text
-├── dse/             # Dynamic Schema Extraction (Axiom Extraction)
-├── dqe/             # Deviation Quantification Engine (Ds Metric)
-├── supervisor/      # Deterministic Supervisor (Manifold Enforcement)
-├── ctm/             # Custodial Trace Module (Merkle Ledger)
 ├── examples/        # Minimal usage and integration examples
 ├── tests/           # Test harness for integrity verification
 ├── README.md
