@@ -76,7 +76,7 @@ class IIAE_Pipeline:
 
         return {
             "task_id": task_id,
-            "status": "CERTIFIED" if ds_score <= self.epsilon else "QUARANTINED",
+            "status": "REGISTERED" if ds_score <= self.epsilon else "QUARANTINED",
             "is_valid": ds_score <= self.epsilon,
             "ds": ds_score,
             "epsilon": self.epsilon,

@@ -34,6 +34,10 @@ st.markdown("""
     .status-box {
         padding: 20px; border-radius: 12px; text-align: center; font-weight: bold;
     }
+    /* Info Icon style */
+    .info-icon {
+        color: #3b82f6; cursor: help; font-size: 0.9rem; margin-left: 8px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -45,7 +49,7 @@ if "last_result" not in st.session_state:
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
 
-# --- HUMAN-READY SCENARIOS (ENGLISH) ---
+# --- SCENARIOS (ENGLISH) ---
 SCENARIOS = {
     "🟩 Scenario 1: Perfect Alignment (Ds=0)": {
         "context": "A1: The system must always maintain the same behavior.\nA2: The system must not depend on hardware or platform.",
@@ -74,11 +78,21 @@ SCENARIOS = {
     }
 }
 
+# --- TOOLTIP CONTENT ---
+TOOLTIPS = {
+    1: "Capture & Signal Filter: In a real-world RAG system, this calculates the Signal-to-Noise Ratio (SNR) of retrieved documents. High noise (irrelevant data) triggers early rejection.",
+    2: "Axiom Extraction: DSE identifies 'Structural Invariants'. In production, an LLM extracts core atomic claims (ground truth) that MUST be preserved in the output.",
+    3: "Dissonance Quantification: We use Cosine Similarity between text vectors. In reality, this measures the Euclidean distance in a high-dimensional vector space (e.g., 1536D) between the canon and the response.",
+    4: "Deterministic Guard: Epsilon (ε) is the 'Strictness Threshold'. It's calculated based on axiom density ($N$). In production, this prevents 'Stochastic Drift' (hallucinations) from being accepted.",
+    5: "Merkle Seal: Creates a cryptographic commitment of the verification trace. This ensures the reasoning path is immutable and verifiable by third parties (zero-knowledge ready).",
+    6: "Final Verdict: The system deterministically labels the state. REGISTERED means the output manifold is aligned. QUARANTINED means structural invariants were lost."
+}
+
 # --- TOP BAR ---
 st.markdown("""
     <div class="top-bar">
         <div style="font-weight: 800; font-size: 1.1rem; color: #1e293b;">⚖️ IIAE Deterministic Standard</div>
-        <div style="font-size: 0.8rem; color: #64748b; font-weight: 500;">Integrity Console · Global Ready v1.3</div>
+        <div style="font-size: 0.8rem; color: #64748b; font-weight: 500;">Integrity Console · Audit Deep-Dive v1.4</div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -131,32 +145,32 @@ with col_content:
         res = st.session_state.last_result
         step = st.session_state.current_step
         
+        # --- TITLE WITH INFO POPOVER ---
+        t_col1, t_col2 = st.columns([5, 1])
+        t_col1.markdown(f"### Stage {step}: {steps[step-1][3:]}")
+        with t_col2:
+            st.popover("💡 Deep Dive").write(TOOLTIPS[step])
+
         if step == 1:
-            st.markdown("### Stage 1: Signal Ingestion")
             st.json(res["stages"]["I1_ingestion"])
         
         elif step == 2:
-            st.markdown("### Stage 2: DSE Extraction")
             st.table(pd.DataFrame([{"Axiom": ax} for ax in res["stages"]["D1_axioms"]]))
             
         elif step == 3:
-            st.markdown("### Stage 3: DQE Analysis")
             st.metric("Dissonance Score (Ds)", f"{res['ds']:.3f}")
             for exp in res["explanations"]: st.warning(exp)
             
         elif step == 4:
-            st.markdown("### Stage 4: Epsilon Guard Check")
             st.write(f"Deterministic Threshold (ε): `{res['epsilon']:.3f}`")
             if res["is_valid"]: st.success("WITHIN ADMISSIBLE MANIFOLD")
             else: st.error("OUTSIDE ADMISSIBLE MANIFOLD")
             
         elif step == 5:
-            st.markdown("### Stage 5: CTM Merkle Seal")
             st.code(json.dumps(res["stages"]["C2_post_receipt"], indent=2), language="json")
             
         elif step == 6:
-            st.markdown("### Stage 6: Deterministic Verdict")
-            status_val = res.get("status", "CERTIFIED" if res["is_valid"] else "QUARANTINED")
+            status_val = res.get("status", "REGISTERED" if res["is_valid"] else "QUARANTINED")
             color = "#10b981" if res["is_valid"] else "#ef4444"
             st.markdown(f"<div class='status-box' style='background:{color}22; border:2px solid {color}; color:{color};'><h1>{status_val}</h1></div>", unsafe_allow_html=True)
             
@@ -165,6 +179,6 @@ with col_content:
             c2.metric("Epsilon Limit", f"{res['epsilon']:.3f}")
             
             st.markdown("---")
-            st.markdown("**Verified Output:**")
+            st.markdown("**Verified Output (After Invariant Projection):**")
             if res["is_valid"]: st.success(res["stages"]["O1_canonical_output"]["verified"])
             else: st.error(res["stages"]["O1_canonical_output"]["verified"])
