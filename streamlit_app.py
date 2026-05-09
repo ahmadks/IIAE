@@ -68,7 +68,7 @@ if "current_step" not in st.session_state:
 SCENARIOS = {
     "🟩 Scenario 1: Perfect Alignment (Ds ≈ 0)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system maintains the same behavior and does not depend on hardware or platform.",
+        "ai_response": "The system maintains the same behavior. The system does not depend on hardware or platform.",
         "explanation": "The response perfectly preserves the axioms. No noise or deviation detected."
     },
     "🟦 Scenario 2: Partial Alignment (Ds ≈ 0.33)": {

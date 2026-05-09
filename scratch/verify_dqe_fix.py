@@ -9,7 +9,7 @@ def test_scenario_1():
         "The system maintains the same behavior.",
         "The system does not depend on hardware or platform."
     ]
-    response = "The system maintains the same behavior and does not depend on hardware or platform."
+    response = "The system maintains the same behavior. The system does not depend on hardware or platform."
     
     dqe = DQE_Module()
     ds, explanations = dqe.compute_ds(response, axioms)
