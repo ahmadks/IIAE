@@ -57,8 +57,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INITIALIZATION ---
-if "pipeline" not in st.session_state:
-    st.session_state.pipeline = IIAE_Pipeline()
+@st.cache_resource
+def get_pipeline():
+    return IIAE_Pipeline()
+
+pipeline = get_pipeline()
+
 if "last_result" not in st.session_state:
     st.session_state.last_result = None
 if "current_step" not in st.session_state:
@@ -168,11 +172,11 @@ with act_col:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 VERIFY", type="primary", use_container_width=True):
         n_axioms = len([l for l in context_input.split('\n') if l.strip()])
-        calc_epsilon = st.session_state.pipeline.cmc.calculate_deterministic_epsilon(n_axioms)
-        st.session_state.pipeline.epsilon = calc_epsilon
-        st.session_state.pipeline.dqe.epsilon = calc_epsilon
-        st.session_state.pipeline.cmc.epsilon = calc_epsilon
-        st.session_state.last_result = st.session_state.pipeline.execute("Task", context_input, ai_response_input)
+        calc_epsilon = pipeline.cmc.calculate_deterministic_epsilon(n_axioms)
+        pipeline.epsilon = calc_epsilon
+        pipeline.dqe.epsilon = calc_epsilon
+        pipeline.cmc.epsilon = calc_epsilon
+        st.session_state.last_result = pipeline.execute("Task", context_input, ai_response_input)
         st.session_state.current_step = 2
         st.rerun()
 
