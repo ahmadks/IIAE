@@ -76,11 +76,11 @@ class IIAE_Pipeline:
         # Stage 7: State‑transition proof (S1)
         proof = sha256(pre_receipt["merkle_root"] + post_receipt["merkle_root"])
 
-        is_registered = ds_score <= self.epsilon
+        is_registered = analysis["status"] in ["SUPPORTED", "SPECULATIVE"]
 
         return {
             "task_id": task_id,
-            "status": "REGISTERED" if is_registered else "QUARANTINED",
+            "status": analysis["status"],
             "is_registered": is_registered,
             "is_valid": is_registered,
             "ds": ds_score,

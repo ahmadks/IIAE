@@ -4,3 +4,5 @@ __pycache__/
 venv/
 .DS_Store
 IIAE_IDICOC-DSE.pdf
+models_cache/
+*.pyc

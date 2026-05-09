@@ -2,8 +2,8 @@ import os
 from sentence_transformers import SentenceTransformer, util
 
 class MiniRAG:
-    def __init__(self, rag_folder="rag_docs", model_name="sentence-transformers/all-mpnet-base-v2"):
-        # We use a local cache to avoid repeated downloads
+    def __init__(self, rag_folder="rag_docs", model_name="sentence-transformers/all-MiniLM-L6-v2"):
+        # Lightweight model for Streamlit Cloud
         self.cache_dir = os.path.join(os.getcwd(), "models_cache")
         self.model = SentenceTransformer(model_name, cache_folder=self.cache_dir)
         self.docs = []

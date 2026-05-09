@@ -16,7 +16,7 @@ class DQEReal:
     def __init__(self):
         import os
         self.cache_dir = os.path.join(os.getcwd(), "models_cache")
-        self.embedder = SentenceTransformer("sentence-transformers/all-mpnet-base-v2", cache_folder=self.cache_dir)
+        self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", cache_folder=self.cache_dir)
         self.rag = MiniRAG()
         self.entail = EntailmentModel()
 
@@ -26,6 +26,23 @@ class DQEReal:
         parts = [p.strip() for p in re.split(r' and |\. | but | although | however |\n', text) if p.strip()]
         return parts
 
+    def get_status(self, analysis):
+        """
+        Determines the Epistemic Status of the response based on the 4 scores.
+        """
+        p = analysis["preservation_score"]
+        h = analysis["hallucination_score"]
+        c = analysis["contradiction_score"]
+        
+        if c > 0.5:
+            return "CONTRADICTED", "#ef4444" # Red
+        if p > 0.85 and h < 0.15:
+            return "SUPPORTED", "#10b981" # Green
+        if p > 0.60 and h < 0.40:
+            return "SPECULATIVE", "#f59e0b" # Orange
+        
+        return "QUARANTINED", "#ef4444" # Red
+
     def evaluate(self, axioms, response):
         clauses = self.split_clauses(response)
         if not clauses:
@@ -33,7 +50,6 @@ class DQEReal:
 
         # 1. Preservation Score (Axiom Alignment)
         ax_emb = self.embedder.encode(axioms, convert_to_tensor=True)
-        # For preservation, we check if each axiom is represented in the BEST matching clause
         clause_embeddings = self.embedder.encode(clauses, convert_to_tensor=True)
         
         sims = []
@@ -46,11 +62,21 @@ class DQEReal:
 
         # 2. RAG support (Hallucination & Noise Detection)
         rag_scores = []
-        rag_matches = []
+        rag_details = []
         for c in clauses:
             doc, score = self.rag.query(c)
             rag_scores.append(score)
-            rag_matches.append({"clause": c, "match": doc["id"], "score": score})
+            
+            status = "Unsupported"
+            if score >= 0.75: status = "Supported"
+            elif score >= 0.45: status = "Weakly Supported"
+            
+            rag_details.append({
+                "clause": c, 
+                "match": doc["id"], 
+                "score": score,
+                "status": status
+            })
 
         noise = compute_noise_score(rag_scores)
         hallucination = compute_hallucination_score(rag_scores)
@@ -63,17 +89,18 @@ class DQEReal:
 
         contradiction = compute_contradiction_score(entail_results)
 
-        # Dissonance Score (Ds) as 1 - preservation for backward compatibility
-        ds = 1.0 - preservation
-
-        return {
-            "ds": ds,
+        analysis = {
             "preservation_score": preservation,
             "noise_score": noise,
             "hallucination_score": hallucination,
             "contradiction_score": contradiction,
-            "raw_similarities": sims,
-            "rag_support_scores": rag_scores,
-            "rag_details": rag_matches,
-            "entailment": entail_results
+            "rag_details": rag_details,
+            "entailment": entail_results,
+            "ds": 1.0 - preservation
         }
+        
+        status, color = self.get_status(analysis)
+        analysis["status"] = status
+        analysis["status_color"] = color
+        
+        return analysis

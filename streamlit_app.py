@@ -202,6 +202,18 @@ with col_content:
             with st.popover("💡 Deep Dive"):
                 show_deep_dive(step)
 
+        # Main Stage View
+        if res:
+            # Display high-level Epistemic Status
+            status = res["status"]
+            color = res["analysis"]["status_color"]
+            st.markdown(f"""
+                <div style="background-color:{color}22; border:2px solid {color}; padding:15px; border-radius:10px; margin-bottom:20px; text-align:center;">
+                    <h2 style="color:{color}; margin:0;">SYSTEM STATE: {status}</h2>
+                    <p style="color:{color}; margin:0; opacity:0.8;">Epistemic Judgement based on IIAE Professional Standard</p>
+                </div>
+            """, unsafe_allow_html=True)
+
         if step == 1:
             st.json(res["stages"]["I1_ingestion"])
         
@@ -240,7 +252,7 @@ with col_content:
             rag_df = pd.DataFrame(analysis["rag_details"])
             # Format score for display
             rag_df["score"] = rag_df["score"].map(lambda x: f"{x:.2f}")
-            st.table(rag_df[["clause", "match", "score"]])
+            st.table(rag_df[["clause", "status", "score", "match"]])
             
         elif step == 4:
             st.write(f"Deterministic Threshold (ε): `{res['epsilon']:.3f}`")
@@ -251,8 +263,8 @@ with col_content:
             st.code(json.dumps(res["stages"]["C2_post_receipt"], indent=2), language="json")
             
         elif step == 6:
-            status_val = res.get("status", "REGISTERED" if res["is_registered"] else "QUARANTINED")
-            color = "#10b981" if res["is_registered"] else "#ef4444"
+            status_val = res["status"]
+            color = res["analysis"]["status_color"]
             st.markdown(f"<div class='status-box' style='background:{color}22; border:2px solid {color}; color:{color};'><h1>{status_val}</h1><p style='font-size:0.8rem; margin:0;'>This result has been registered in the CTM.</p></div>", unsafe_allow_html=True)
             
             c1, c2, c3, c4 = st.columns(4)
