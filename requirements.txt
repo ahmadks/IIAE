@@ -3,3 +3,7 @@ pandas
 numpy
 PyPDF2
 python-dotenv
+sentence-transformers
+transformers
+torch
+scikit-learn

@@ -1,0 +1,2 @@
+The system maintains the same behavior in most cases, although minor variations may appear depending on execution conditions.
+This represents partial preservation with controlled noise but without explicit contradiction.

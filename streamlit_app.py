@@ -209,19 +209,38 @@ with col_content:
             st.table(pd.DataFrame([{"Axiom": ax} for ax in res["stages"]["D1_axioms"]]))
             
         elif step == 3:
-            m1, m2 = st.columns(2)
-            with m1:
-                st.metric("Dissonance Score (Ds)", f"{res['ds']:.3f}")
-            with m2:
-                st.metric("Hallucination Score", f"{res['hallucination_score']:.2f}")
+            st.markdown("#### Epistemic Auditing Dashboard")
+            analysis = res["analysis"]
             
-            for exp in res["explanations"]: st.warning(exp)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Preservation", f"{analysis['preservation_score']:.2f}")
+            c2.metric("Noise", f"{analysis['noise_score']:.2f}")
+            c3.metric("Hallucination", f"{analysis['hallucination_score']:.2f}")
+            c4.metric("Contradiction", f"{analysis['contradiction_score']:.2f}")
             
-            st.markdown("#### Content Support (Mini-RAG Analysis)")
-            rag_df = pd.DataFrame(res["rag_details"])
-            # Format similarity for display
-            rag_df["similarity"] = rag_df["similarity"].map(lambda x: f"{x:.2f}")
-            st.table(rag_df[["clause", "status", "similarity", "best_match"]])
+            st.markdown("---")
+            st.markdown("#### Logical Entailment (Axiom Verification)")
+            entail_data = []
+            for i, ax in enumerate(res["stages"]["D1_axioms"]):
+                e = analysis["entailment"][i]
+                # Determine label
+                if e["entailment"] > 0.7: label = "✅ ENTAILMENT"
+                elif e["contradiction"] > 0.7: label = "❌ CONTRADICTION"
+                else: label = "❓ NEUTRAL"
+                
+                entail_data.append({
+                    "Axiom": ax,
+                    "Status": label,
+                    "Entailment %": f"{e['entailment']*100:.1f}%",
+                    "Contradiction %": f"{e['contradiction']*100:.1f}%"
+                })
+            st.table(pd.DataFrame(entail_data))
+
+            st.markdown("#### RAG Support Trace")
+            rag_df = pd.DataFrame(analysis["rag_details"])
+            # Format score for display
+            rag_df["score"] = rag_df["score"].map(lambda x: f"{x:.2f}")
+            st.table(rag_df[["clause", "match", "score"]])
             
         elif step == 4:
             st.write(f"Deterministic Threshold (ε): `{res['epsilon']:.3f}`")
@@ -236,9 +255,11 @@ with col_content:
             color = "#10b981" if res["is_registered"] else "#ef4444"
             st.markdown(f"<div class='status-box' style='background:{color}22; border:2px solid {color}; color:{color};'><h1>{status_val}</h1><p style='font-size:0.8rem; margin:0;'>This result has been registered in the CTM.</p></div>", unsafe_allow_html=True)
             
-            c1, c2 = st.columns(2)
-            c1.metric("Final Ds", f"{res['ds']:.3f}")
-            c2.metric("Epsilon Limit", f"{res['epsilon']:.3f}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Preservation", f"{res['analysis']['preservation_score']:.2f}")
+            c2.metric("Noise", f"{res['analysis']['noise_score']:.2f}")
+            c3.metric("Hallucination", f"{res['analysis']['hallucination_score']:.2f}")
+            c4.metric("Contradiction", f"{res['analysis']['contradiction_score']:.2f}")
             
             st.markdown("---")
             st.markdown("**Verified Output (After Invariant Projection):**")

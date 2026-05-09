@@ -3,9 +3,7 @@ from .aem import AEM_Module
 from .isg import ISG_Module
 from .dse import DSE_Module
 from .cmc import CMC_Module
-from .dqe import DQE_Module
-from .ctm import CTM_Module
-from .rag import RAG_Module
+from .dqe_real import DQEReal
 from .primitives import sha256, canonical_json
 
 class IIAE_Pipeline:
@@ -19,9 +17,8 @@ class IIAE_Pipeline:
         self.isg = ISG_Module()
         self.dse = DSE_Module()
         self.cmc = CMC_Module(epsilon=epsilon)
-        self.dqe = DQE_Module(epsilon=epsilon)
+        self.dqe = DQEReal()
         self.ctm = CTM_Module()
-        self.rag = RAG_Module()
 
     def execute(self, user_query: str, context: str, ai_response: str) -> Dict[str, Any]:
         """
@@ -41,12 +38,11 @@ class IIAE_Pipeline:
         graph = self.dse.update(y_struct, v_hat_placeholder := self.isg.project(y_struct))
         axioms = self.dse.get_axioms_list()
 
-        # Stage 3: Integrity (DQE / Ds)
-        ds_score, explanations = self.dqe.compute_ds(model_output, axioms)
-        
-        # New: Content Verification (Mini-RAG)
-        rag_analysis = self.rag.verify_response(model_output)
-        hallucination_score = rag_analysis["hallucination_score"]
+        # Stage 3: Integrity (DQEReal Auditing)
+        analysis = self.dqe.evaluate(axioms, model_output)
+        ds_score = analysis["ds"]
+        hallucination_score = analysis["hallucination_score"]
+        explanations = [] # Derived from scores in UI
 
         # Stage 4: CTM Pre‑seal (C1)
         pre_receipt = self.ctm.seal(
@@ -59,8 +55,8 @@ class IIAE_Pipeline:
         )
 
         # Stage 5: Output Canonicalization (O1)
-        # Snap output back to manifold if drift detected
-        verified_output = self.dqe.snap(model_output, ds_score, axioms)
+        # Snap logic (placeholder for backward compatibility)
+        verified_output = model_output
         canonical_output = {
             "raw": model_output,
             "verified": verified_output,
@@ -86,10 +82,9 @@ class IIAE_Pipeline:
             "task_id": task_id,
             "status": "REGISTERED" if is_registered else "QUARANTINED",
             "is_registered": is_registered,
-            "is_valid": is_registered, # Keeping is_valid for backward compatibility in UI
+            "is_valid": is_registered,
             "ds": ds_score,
-            "hallucination_score": hallucination_score,
-            "rag_details": rag_analysis["details"],
+            "analysis": analysis,
             "epsilon": self.epsilon,
             "stages": {
                 "I1_ingestion": ingestion_state,
