@@ -59,7 +59,34 @@ st.markdown("""
 # --- INITIALIZATION ---
 @st.cache_resource
 def get_pipeline():
-    return IIAE_Pipeline()
+    with st.spinner("🚀 Booting IIAE Epistemic Core..."):
+        # We force a small sleep to ensure the UI shows the spinner
+        import time
+        time.sleep(1)
+        return IIAE_Pipeline()
+
+# Boot sequence
+if "booted" not in st.session_state:
+    st.session_state.booted = False
+
+if not st.session_state.booted:
+    st.markdown("""
+        <div style="text-align: center; margin-top: 100px;">
+            <h1 style="color: #1e293b; font-size: 3rem; margin-bottom: 0;">IIAE / IDICOC-DSE</h1>
+            <p style="color: #64748b; font-size: 1.2rem;">Epistemic Auditing System Standard</p>
+            <div class="loader" style="border: 6px solid #f3f3f3; border-top: 6px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 2s linear infinite; margin: 40px auto;"></div>
+            <p style="color: #94a3b8; font-family: monospace;">INITIALIZING CRYPTOGRAPHIC TRUST MANIFOLD...</p>
+        </div>
+        <style>
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+        </style>
+    """, unsafe_allow_html=True)
+    
+    pipeline = get_pipeline()
+    st.session_state.booted = True
+    st.rerun()
 
 pipeline = get_pipeline()
 
