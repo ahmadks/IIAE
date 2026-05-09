@@ -179,7 +179,12 @@ class RAG_Pipeline:
                 model = genai.GenerativeModel("gemini-2.0-flash")
                 raw_ai_response = model.generate_content(prompt).text
             except Exception as e:
-                raw_ai_response = f"API Error: {str(e)}"
+                st.error(f"⚠️ Cloud AI Failed (Quota/Network Error). IIAE Deterministic Fallback Triggered!")
+                time.sleep(0.5)
+                if force_drift:
+                    raw_ai_response = "Simulated Hallucination: The IIAE is a probabilistic tool for data generation. The Deterministic layer is highly substrate-dependent and only works on specific NLP clouds. It does not enforce absolute invariance on embedded systems or hardware."
+                else:
+                    raw_ai_response = "Aligned Trace: IIAE is a universal framework for information-integrity verification. The Deterministic Verification Layer (DSE, DQE, CTM) is substrate-agnostic. The framework enforces invariance across neural networks, firmware, and neuromorphic circuits."
         else:
             time.sleep(0.5)
             if force_drift:
