@@ -14,7 +14,9 @@ class DQEReal:
     Combines semantic alignment, RAG verification, and logical entailment.
     """
     def __init__(self):
-        self.embedder = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+        import os
+        self.cache_dir = os.path.join(os.getcwd(), "models_cache")
+        self.embedder = SentenceTransformer("sentence-transformers/all-mpnet-base-v2", cache_folder=self.cache_dir)
         self.rag = MiniRAG()
         self.entail = EntailmentModel()
 

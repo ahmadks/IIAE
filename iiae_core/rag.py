@@ -3,8 +3,9 @@ from sentence_transformers import SentenceTransformer, util
 
 class MiniRAG:
     def __init__(self, rag_folder="rag_docs", model_name="sentence-transformers/all-mpnet-base-v2"):
-        # We use a stronger model as requested for professional auditing
-        self.model = SentenceTransformer(model_name)
+        # We use a local cache to avoid repeated downloads
+        self.cache_dir = os.path.join(os.getcwd(), "models_cache")
+        self.model = SentenceTransformer(model_name, cache_folder=self.cache_dir)
         self.docs = []
         self.embeddings = []
 

@@ -22,17 +22,17 @@ load_dotenv()
 hf_token = os.getenv("HF_TOKEN")
 
 # Initialize the model using the auth token for stability and speed
-# all-MiniLM-L6-v2 is the standard for lightweight semantic verification
+# all-mpnet-base-v2 is the professional standard
+cache_dir = os.path.join(os.getcwd(), "models_cache")
 try:
-    # Using 'token' instead of 'use_auth_token' to avoid FutureWarning
     model = SentenceTransformer(
-        "sentence-transformers/all-MiniLM-L6-v2",
-        token=hf_token
+        "sentence-transformers/all-mpnet-base-v2",
+        token=hf_token,
+        cache_folder=cache_dir
     )
 except Exception as e:
-    # Fallback to anonymous if token fails
     print(f"Warning: Model load with token failed ({e}). Falling back to anonymous.")
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2", cache_folder=cache_dir)
 
 def embed(text: str) -> np.ndarray:
     """Generates a semantic embedding for the given text."""

@@ -2,10 +2,17 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
 class EntailmentModel:
-    def __init__(self, model_name="microsoft/deberta-v3-large-mnli"):
-        # This model is the standard for logical entailment (NLI)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    def __init__(self, model_name="MoritzLaurer/DeBERTa-v3-base-mnli-xnli"):
+        # Local cache and token support for authenticated HF requests
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        self.cache_dir = os.path.join(os.getcwd(), "models_cache")
+        token = os.getenv("HF_TOKEN")
+        
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=self.cache_dir, token=token)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=self.cache_dir, token=token)
 
     def classify(self, premise, hypothesis):
         inputs = self.tokenizer(premise, hypothesis, return_tensors="pt", truncation=True)
