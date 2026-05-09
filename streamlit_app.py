@@ -64,11 +64,11 @@ if "last_result" not in st.session_state:
 if "current_step" not in st.session_state:
     st.session_state.current_step = 1
 
-# --- SCENARIOS (REFINED FOR SEMANTIC DQE - ENGLISH ONLY) ---
+# --- SCENARIOS (DEFINITIVE - ENGLISH ONLY) ---
 SCENARIOS = {
-    "🟩 Scenario 1: Perfect Alignment (Ds ≈ 0.03)": {
+    "🟩 Scenario 1: Perfect Alignment (Ds ≈ 0)": {
         "context": "A1: The system maintains the same behavior.\nA2: The system does not depend on hardware or platform.",
-        "ai_response": "The system maintains the same behavior.\nThe system does not depend on hardware or platform.",
+        "ai_response": "The system maintains the same behavior and does not depend on hardware or platform.",
         "explanation": "The response perfectly preserves the axioms. No noise or deviation detected."
     },
     "🟦 Scenario 2: Partial Alignment (Ds ≈ 0.33)": {
