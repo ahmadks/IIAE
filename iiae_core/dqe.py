@@ -1,39 +1,18 @@
-import numpy as np
-import re
+import math
 from typing import List, Dict, Any, Tuple
+from .semantic import calculate_similarity
 
 class DQE_Module:
     """
-    Deviation Quantification Engine (DQE) - "Serious Mode" v2.0
-    Measures semantic distance per axiom and calculates global Drift (Ds).
-    Uses a deterministic character-vector approach for zero-dependency offline similarity.
+    Deviation Quantification Engine (DQE) - Semantic Mode v3.0
+    Measures true semantic distance per axiom using local embeddings.
     """
     def __init__(self, epsilon: float = 0.4):
         self.epsilon = epsilon
 
-    def _get_vector(self, text: str) -> np.ndarray:
-        """
-        Deterministic 'embedding' stub. 
-        Creates a character-frequency vector (3-grams) for semantic-structural proxy.
-        """
-        text = text.lower()
-        chars = "abcdefghijklmnopqrstuvwxyz0123456789 "
-        vector = np.zeros(len(chars))
-        for char in text:
-            if char in chars:
-                vector[chars.index(char)] += 1
-        
-        norm = np.linalg.norm(vector)
-        return vector / norm if norm > 0 else vector
-
-    def _cosine_similarity(self, v1: np.ndarray, v2: np.ndarray) -> float:
-        """Calculates cosine similarity between two vectors."""
-        dot = np.dot(v1, v2)
-        return float(dot)
-
     def compute_ds(self, response: str, axioms: List[str]) -> Tuple[float, List[str]]:
         """
-        Calculates Semantic Drift (Ds) using per-axiom similarity.
+        Calculates Semantic Drift (Ds) using NLP similarity.
         Returns: (Ds, explanations)
         """
         if not axioms:
@@ -41,26 +20,23 @@ class DQE_Module:
 
         scores = []
         explanations = []
-        
-        # Get vector for the response once
-        v_resp = self._get_vector(response)
 
         for ax in axioms:
-            v_ax = self._get_vector(ax)
-            similarity = self._cosine_similarity(v_ax, v_resp)
+            # TRUE Semantic Similarity
+            sim = calculate_similarity(ax, response)
+            scores.append(sim)
             
-            # Weighted scaling to make thresholds more intuitive for character-vectors
-            # In a real embedding model, 0.85 is high. For char-vectors, we adjust.
-            scores.append(similarity)
-            
-            if similarity >= 0.85:
-                # PRESERVED - No explanation needed
+            if sim >= 0.85:
+                # PRESERVED - Perfectly aligned
                 pass
-            elif similarity >= 0.60:
-                explanations.append(f"⚠️ Partial preservation of axiom: '{ax}' (Sim: {similarity:.2f})")
+            elif sim >= 0.60:
+                # PARTIAL - Moderate drift
+                explanations.append(f"⚠️ Partial preservation of axiom: '{ax}' (Sem-Sim: {sim:.2f})")
             else:
-                explanations.append(f"❌ Axiom violated: '{ax}' (Sim: {similarity:.2f})")
+                # VIOLATED - High drift or contradiction
+                explanations.append(f"❌ Axiom violated: '{ax}' (Sem-Sim: {sim:.2f})")
 
+        # Global Drift = 1 - Mean Similarity
         mean_similarity = sum(scores) / len(scores) if scores else 0.0
         ds = 1.0 - mean_similarity
         
@@ -69,18 +45,14 @@ class DQE_Module:
     def snap(self, response: str, ds: float, axioms: List[str]) -> str:
         """
         Invariant Projection (Manifold Snapping).
-        If drift exceeds epsilon, reinforces the missing axioms into the output.
+        Uses semantic thresholds to identify which axioms to re-inject.
         """
         if ds <= self.epsilon:
             return response
         
-        # Identify missing or violated axioms
-        v_resp = self._get_vector(response)
         missing_parts = []
-        
         for ax in axioms:
-            v_ax = self._get_vector(ax)
-            if self._cosine_similarity(v_ax, v_resp) < 0.85:
+            if calculate_similarity(ax, response) < 0.85:
                 missing_parts.append(ax)
         
         if not missing_parts:

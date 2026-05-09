@@ -1,0 +1,40 @@
+import os
+from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+# Load environment variables (HF_TOKEN)
+load_dotenv()
+hf_token = os.getenv("HF_TOKEN")
+
+# Initialize the model using the auth token for stability and speed
+# all-MiniLM-L6-v2 is the standard for lightweight semantic verification
+try:
+    # Using 'token' instead of 'use_auth_token' to avoid FutureWarning
+    model = SentenceTransformer(
+        "sentence-transformers/all-MiniLM-L6-v2",
+        token=hf_token
+    )
+except Exception as e:
+    # Fallback to anonymous if token fails
+    print(f"Warning: Model load with token failed ({e}). Falling back to anonymous.")
+    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def embed(text: str) -> np.ndarray:
+    """Generates a semantic embedding for the given text."""
+    return model.encode([text])[0]
+
+def calculate_similarity(text_a: str, text_b: str) -> float:
+    """
+    Calculates the semantic cosine similarity between two strings.
+    Returns a value between 0.0 and 1.0.
+    """
+    if not text_a.strip() or not text_b.strip():
+        return 0.0
+        
+    vec_a = embed(text_a)
+    vec_b = embed(text_b)
+    
+    sim = cosine_similarity([vec_a], [vec_b])[0][0]
+    return float(sim)

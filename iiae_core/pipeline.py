@@ -29,7 +29,7 @@ class IIAE_Pipeline:
         y_struct, eta = self.aem.filter(context)
         ingestion_state = {"prompt": user_query, "context_filtered": y_struct}
         
-        # In this version, we use the provided ai_response directly
+        # We use the provided ai_response directly
         model_output = ai_response
         
         # Task ID generation
@@ -74,10 +74,13 @@ class IIAE_Pipeline:
         # Stage 7: State‑transition proof (S1)
         proof = sha256(pre_receipt["merkle_root"] + post_receipt["merkle_root"])
 
+        is_registered = ds_score <= self.epsilon
+
         return {
             "task_id": task_id,
-            "status": "REGISTERED" if ds_score <= self.epsilon else "QUARANTINED",
-            "is_valid": ds_score <= self.epsilon,
+            "status": "REGISTERED" if is_registered else "QUARANTINED",
+            "is_registered": is_registered,
+            "is_valid": is_registered, # Keeping is_valid for backward compatibility in UI
             "ds": ds_score,
             "epsilon": self.epsilon,
             "stages": {
