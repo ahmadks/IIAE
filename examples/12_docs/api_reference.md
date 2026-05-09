@@ -1,3 +1,0 @@
-# Api Reference
-
-Documentation placeholder.

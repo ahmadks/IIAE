@@ -1,3 +1,0 @@
-# Auditor Manual
-
-Documentation placeholder.

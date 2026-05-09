@@ -1,3 +1,0 @@
-# Formal Definitions
-
-Documentation placeholder.
