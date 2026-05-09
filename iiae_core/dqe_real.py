@@ -35,15 +35,19 @@ class DQEReal:
         n = analysis["noise_score"]
         c = analysis["contradiction_score"]
         
+        # Priority 1: Contradiction (Hard Lock)
         if c > 0.4:
             return "QUARANTINED (CONTRADICTION)", "#ef4444"
-        if p < 0.65:
-            return "QUARANTINED (LOW PRESERVATION)", "#ef4444"
-        if h > 0.2:
-            return "SPECULATIVE (HALLUCINATION)", "#f59e0b"
-        if n > 0.3:
-            return "SPECULATIVE (NOISE)", "#f59e0b"
         
+        # Priority 2: Severe Hallucination
+        if h > 0.3:
+            return "QUARANTINED (HALLUCINATION)", "#ef4444"
+            
+        # Priority 3: Speculative / Noisy content
+        if n > 0.4 or p < 0.5:
+            return "SPECULATIVE", "#f59e0b"
+        
+        # Priority 4: Admissible (may have minor noise)
         return "REGISTERED", "#10b981"
 
     def evaluate(self, axioms, response):

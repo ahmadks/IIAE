@@ -6,20 +6,21 @@ def compute_preservation_score(similarities):
 def compute_noise_score(clause_support_scores):
     if not clause_support_scores:
         return 0.0
-    # Weakly supported content (0.45 <= score < 0.75) is considered noise
-    weak = [s for s in clause_support_scores if 0.45 <= s < 0.75]
-    return len(weak) / len(clause_support_scores)
+    # Noise = 1 - average support (Professional drift measurement)
+    # This captures subtle semantic additions that aren't quite hallucinations
+    avg_support = sum(clause_support_scores) / len(clause_support_scores)
+    return max(0.0, 1.0 - avg_support)
 
 def compute_hallucination_score(clause_support_scores):
     if not clause_support_scores:
         return 0.0
-    # Unsupported content (score < 0.45) is considered hallucination
-    unsupported = [s for s in clause_support_scores if s < 0.45]
+    # Hallucination = Ratio of clauses with severe lack of support (< 0.40)
+    unsupported = [s for s in clause_support_scores if s < 0.40]
     return len(unsupported) / len(clause_support_scores)
 
 def compute_contradiction_score(entailment_results):
     if not entailment_results:
         return 0.0
-    # We take the average probability of contradiction across all checks
+    # Average probability of contradiction across all axioms
     contradictions = [e["contradiction"] for e in entailment_results]
     return sum(contradictions) / len(contradictions)

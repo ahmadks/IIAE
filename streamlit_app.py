@@ -252,11 +252,23 @@ with col_content:
                 })
             st.table(pd.DataFrame(entail_data))
 
-            st.markdown("#### RAG Support Trace")
-            rag_df = pd.DataFrame(analysis["rag_details"])
-            # Format score for display
-            rag_df["score"] = rag_df["score"].map(lambda x: f"{x:.2f}")
-            st.table(rag_df[["clause", "status", "score", "match"]])
+            st.markdown("#### Content Support Map (RAG)")
+            for detail in analysis["rag_details"]:
+                c = detail["clause"]
+                status = detail["status"]
+                score = detail["score"]
+                
+                color = "#ef4444" # Red
+                if status == "Supported": color = "#10b981" # Green
+                elif status == "Weakly Supported": color = "#f59e0b" # Orange
+                
+                st.markdown(f"""
+                    <div style="border-left: 5px solid {color}; padding: 10px; margin-bottom: 10px; background-color: #f8fafc; border-radius: 5px;">
+                        <span style="color: {color}; font-weight: bold; font-size: 0.8rem;">[{status.upper()} - {score:.2f}]</span><br>
+                        <span style="color: #334155;">"{c}"</span><br>
+                        <span style="font-size: 0.7rem; color: #64748b;">Source: {detail['match']}</span>
+                    </div>
+                """, unsafe_allow_html=True)
             
         elif step == 4:
             st.write(f"Deterministic Threshold (ε): `{res['epsilon']:.3f}`")
@@ -271,11 +283,35 @@ with col_content:
             color = res["analysis"]["status_color"]
             st.markdown(f"<div class='status-box' style='background:{color}22; border:2px solid {color}; color:{color};'><h1>{status_val}</h1><p style='font-size:0.8rem; margin:0;'>This result has been registered in the CTM.</p></div>", unsafe_allow_html=True)
             
+            # Display 4-score grid with premium styling
+            st.markdown("""
+                <style>
+                .metric-card {
+                    background-color: #f1f5f9;
+                    padding: 15px;
+                    border-radius: 8px;
+                    text-align: center;
+                    border: 1px solid #e2e8f0;
+                }
+                .metric-value {
+                    font-size: 1.5rem;
+                    font-weight: bold;
+                    color: #1e293b;
+                }
+                .metric-label {
+                    font-size: 0.7rem;
+                    color: #64748b;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                }
+                </style>
+            """, unsafe_allow_html=True)
+
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Preservation", f"{res['analysis']['preservation_score']:.2f}")
-            c2.metric("Noise", f"{res['analysis']['noise_score']:.2f}")
-            c3.metric("Hallucination", f"{res['analysis']['hallucination_score']:.2f}")
-            c4.metric("Contradiction", f"{res['analysis']['contradiction_score']:.2f}")
+            with c1: st.markdown(f"<div class='metric-card'><div class='metric-label'>Preservation</div><div class='metric-value'>{res['analysis']['preservation_score']:.2f}</div></div>", unsafe_allow_html=True)
+            with c2: st.markdown(f"<div class='metric-card'><div class='metric-label'>Noise</div><div class='metric-value'>{res['analysis']['noise_score']:.2f}</div></div>", unsafe_allow_html=True)
+            with c3: st.markdown(f"<div class='metric-card'><div class='metric-label'>Hallucination</div><div class='metric-value'>{res['analysis']['hallucination_score']:.2f}</div></div>", unsafe_allow_html=True)
+            with c4: st.markdown(f"<div class='metric-card'><div class='metric-label'>Contradiction</div><div class='metric-value'>{res['analysis']['contradiction_score']:.2f}</div></div>", unsafe_allow_html=True)
             
             st.markdown("---")
             st.markdown("**Verified Output (After Invariant Projection):**")
