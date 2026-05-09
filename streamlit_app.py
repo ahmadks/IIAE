@@ -112,10 +112,10 @@ def show_deep_dive(step):
     elif step == 3:
         st.markdown(r"""
         **DQE (Drift Quantification)**
-        - **Simulation**: We calculate Ds based on semantic similarity.
-        - **Reality**: Production DQE measures **Residual Stochastic Noise**.
-        - **The Formula**: $Noise = Output - Deterministic Core$.
-        - **Key Difference**: We measure $Noise Energy$ vs $Signal Energy$. If noise exceeds the manifold, it's a 'Hallucination'.
+        - **Ds (Dissonance)**: Measures semantic distance from individual axioms.
+        - **Hallucination Score**: Measures content that exists in the response but has no support in the knowledge base (Mini-RAG).
+        - **The Formula**: $Noise = Output - (Deterministic Core + RAG Support)$.
+        - **Key Difference**: While Ds checks if the *canon is preserved*, the Hallucination Score checks if *new, unauthorized info was added*.
         """)
     elif step == 4:
         st.markdown(r"""
@@ -209,8 +209,19 @@ with col_content:
             st.table(pd.DataFrame([{"Axiom": ax} for ax in res["stages"]["D1_axioms"]]))
             
         elif step == 3:
-            st.metric("Dissonance Score (Ds)", f"{res['ds']:.3f}")
+            m1, m2 = st.columns(2)
+            with m1:
+                st.metric("Dissonance Score (Ds)", f"{res['ds']:.3f}")
+            with m2:
+                st.metric("Hallucination Score", f"{res['hallucination_score']:.2f}")
+            
             for exp in res["explanations"]: st.warning(exp)
+            
+            st.markdown("#### Content Support (Mini-RAG Analysis)")
+            rag_df = pd.DataFrame(res["rag_details"])
+            # Format similarity for display
+            rag_df["similarity"] = rag_df["similarity"].map(lambda x: f"{x:.2f}")
+            st.table(rag_df[["clause", "status", "similarity", "best_match"]])
             
         elif step == 4:
             st.write(f"Deterministic Threshold (ε): `{res['epsilon']:.3f}`")

@@ -5,6 +5,7 @@ from .dse import DSE_Module
 from .cmc import CMC_Module
 from .dqe import DQE_Module
 from .ctm import CTM_Module
+from .rag import RAG_Module
 from .primitives import sha256, canonical_json
 
 class IIAE_Pipeline:
@@ -20,6 +21,7 @@ class IIAE_Pipeline:
         self.cmc = CMC_Module(epsilon=epsilon)
         self.dqe = DQE_Module(epsilon=epsilon)
         self.ctm = CTM_Module()
+        self.rag = RAG_Module()
 
     def execute(self, user_query: str, context: str, ai_response: str) -> Dict[str, Any]:
         """
@@ -41,6 +43,10 @@ class IIAE_Pipeline:
 
         # Stage 3: Integrity (DQE / Ds)
         ds_score, explanations = self.dqe.compute_ds(model_output, axioms)
+        
+        # New: Content Verification (Mini-RAG)
+        rag_analysis = self.rag.verify_response(model_output)
+        hallucination_score = rag_analysis["hallucination_score"]
 
         # Stage 4: CTM Pre‑seal (C1)
         pre_receipt = self.ctm.seal(
@@ -82,6 +88,8 @@ class IIAE_Pipeline:
             "is_registered": is_registered,
             "is_valid": is_registered, # Keeping is_valid for backward compatibility in UI
             "ds": ds_score,
+            "hallucination_score": hallucination_score,
+            "rag_details": rag_analysis["details"],
             "epsilon": self.epsilon,
             "stages": {
                 "I1_ingestion": ingestion_state,
