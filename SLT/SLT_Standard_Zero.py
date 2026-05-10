@@ -31,7 +31,7 @@ class SettlementInput:
     eta_r: float = 0.0                    # Residual Entropy
     ds_score: float = 1.0                 # Dissonance Coefficient D_s ∈ [0, 1]
     margin_t: float = 0.0                 # Integrity premium T (e.g., 0.12 = 12%)
-    system_critical: bool = False         # True → cars, robots, spacecraft (System-Level)
+    system_complex: bool = False         # True → cars, robots, spacecraft (System-Level)
     tier_12_audit: bool = False           # True → continuous CTM logs + EPR reporting
     hardware_anchored: bool = False       # True → ePUF / HSS / Cloud-HSM with attestation
     trace_id: Optional[str] = None        # External transaction ID
@@ -90,19 +90,19 @@ class SLTStandardZeroEngine:
         Tier selection and royalty base according to Sec 2.1, 2.1.1, 2.1.2.
 
         Priority:
-          1. System-Level (critical systems) → Tier 1.1 SYSTEM-LEVEL, base = NSP
+          1. System-Level (complex systems) → Tier 1.1 SYSTEM-LEVEL, base = NSP
           2. Tier 1.2 (Infrastructure) → base = Integrity-Certified Revenue (with audit)
           3. Tier 1.1 Consumer → base = NSP or SSPPU (if allowed)
         """
         # --- System-Level: always NSP, SSPPU explicitly disallowed ---
-        if data.system_critical:
+        if data.system_complex:
             if data.nsp is None:
                 raise ValueError(
-                    "system_critical=True requires nsp (Sec 2.1.2 System-Level)."
+                    "system_complex=True requires nsp (Sec 2.1.2 System-Level)."
                 )
             if data.ssppu_cost is not None:
                 raise ValueError(
-                    "SSPPU is not allowed for system-critical implementations "
+                    "SSPPU is not allowed for system implementations "
                     "(Sec 2.1.2)."
                 )
             return "1.1 SYSTEM-LEVEL", float(data.nsp), "NSP-System"
@@ -286,7 +286,7 @@ class SLTStandardZeroEngine:
                 "audit_ref": "WO2026/XXXXX_SLT_ANNEX_A",
                 "logic": "FIXED_C_WITH_TIER_REVERSION_AND_ZIP",
                 "claims_ref": (
-                    "1,19,23,8.5.1" if data.system_critical else "1,19"
+                    "1,19,23,8.5.1" if data.system_complex else "1,19"
                 ),
                 "governance": "MAII/MAO-Protocol-Compliant",
             },
@@ -396,7 +396,7 @@ if __name__ == "__main__":
         eta_s=99.9,
         eta_r=0.1,            # EPR ≈ 0.999 (Standard-Zero)
         ds_score=0.0,         # Ds=0 required for ASIL-D / DO-178C
-        system_critical=True,
+        system_complex=True,
         trace_id="CAR-MODEL-SZ-001",
     )
     r2 = slt.calculate_settlement(d2)
@@ -421,14 +421,14 @@ if __name__ == "__main__":
 
     # ── DEMO 4: SPACEX STARSHIP (System-Level, Ds=0) ───────────
     print("\n" + "=" * 70)
-    print("DEMO 4: SPACEX STARSHIP - Critical System (System-Level)")
+    print("DEMO 4: SPACEX STARSHIP - Complex System (System-Level)")
     print("=" * 70)
     d4 = SettlementInput(
         nsp=100_000_000.0,   # $100M per vehicle
         eta_s=99.99,
         eta_r=0.01,          # EPR ≈ 0.9999 (Standard-Zero)
         ds_score=0.0,        # Ds=0 for mission-critical aerospace
-        system_critical=True,
+        system_complex=True,
         trace_id="STARSHIP-SN42",
     )
     r4 = slt.calculate_settlement(d4)
