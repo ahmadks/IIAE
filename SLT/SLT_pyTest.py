@@ -50,7 +50,7 @@ def test_electric_car_system_level():
         eta_s=99.9,
         eta_r=0.1,             # EPR ≈ 0.999
         ds_score=0.0,
-        system_complex=True,
+        system_critical=True,
         trace_id="CAR-MODELS-001",
     )
     r = slt.calculate_settlement(data)
@@ -239,8 +239,8 @@ def test_system_level_rejects_ssppu():
     """System-Level + SSPPU → ValueError al calcular settlement."""
     data = SettlementInput(
         nsp=50_000,
-        ssppu_cost=100,           # ❌ SSPPU not allowed for complex-system
-        system_complex=True,
+        ssppu_cost=100,           # ❌ SSPPU not allowed for critical-system
+        system_critical=True,
     )
     with pytest.raises(ValueError, match="SSPPU is not allowed"):
         slt.calculate_settlement(data)  # ← El error se lanza AQUÍ, no en el constructor
