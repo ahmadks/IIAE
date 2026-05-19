@@ -1,8 +1,8 @@
 import re
 from sentence_transformers import SentenceTransformer, util
-from iiae_core.rag import MiniRAG
-from iiae_core.entailment import EntailmentModel
-from iiae_core.scores import (
+from iiae_demo.rag import MiniRAG
+from iiae_demo.entailment import EntailmentModel
+from iiae_demo.scores import (
     compute_preservation_score,
     compute_noise_score,
     compute_hallucination_score,
@@ -106,7 +106,7 @@ class DQEReal:
             "contradiction_score": contradiction,
             "rag_details": rag_details,
             "entailment": entail_results,
-            "ds": 1.0 - preservation
+            "ds": max(1.0 - preservation, contradiction)
         }
         
         status, color = self.get_status(analysis)

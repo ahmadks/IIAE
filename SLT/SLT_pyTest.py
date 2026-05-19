@@ -1,5 +1,5 @@
 import pytest
-from SLT_Standard_Zero import SLTStandardZeroEngine, SettlementInput
+from SLT.SLT_Standard_Zero import SLTStandardZeroEngine, SettlementInput
 
 slt = SLTStandardZeroEngine(epsilon_threshold=0.4)
 

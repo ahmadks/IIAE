@@ -18,7 +18,8 @@ class DSE_Module:
         Axioms are normalized into a quintuple: (Subject, Predicate, Object, Scope, Signature).
         """
         # Simple extraction logic for the demo: split by lines/sentences
-        raw_lines = [line.strip() for line in context.split('.') if line.strip()]
+        from iiae.dse import extract_axioms
+        raw_lines = extract_axioms(context, min_len=0)
         
         new_axioms = []
         for line in raw_lines:

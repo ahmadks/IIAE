@@ -6,3 +6,4 @@ venv/
 IIAE_IDICOC-DSE.pdf
 models_cache/
 *.pyc
+scratch/

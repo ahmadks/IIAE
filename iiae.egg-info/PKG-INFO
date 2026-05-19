@@ -1,3 +1,21 @@
+Metadata-Version: 2.4
+Name: iiae
+Version: 0.1.0
+Summary: Intelligent Invariant Audit Engine SDK
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+License-File: LICENSE.md
+License-File: NOTICE
+Provides-Extra: core
+Requires-Dist: sentence-transformers; extra == "core"
+Requires-Dist: transformers; extra == "core"
+Requires-Dist: torch; extra == "core"
+Requires-Dist: networkx; extra == "core"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Dynamic: license-file
+
 # IIAE/IDICOC-DSE Framework: SDK vs Reference Core
 
 > **Intelligent Invariant Audit Engine (IIAE) & Invariant Data Integrity Chain-of-Custody (IDICOC)**

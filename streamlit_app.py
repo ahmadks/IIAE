@@ -17,7 +17,7 @@ except ImportError:
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-from iiae_core.pipeline import IIAE_Pipeline
+from iiae_demo.pipeline import IIAE_Pipeline
 
 # --- PAGE CONFIG ---
 st.set_page_config(
@@ -32,26 +32,27 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stApp { background-color: #f8fafc; color: #1e293b; }
+    .stApp { background-color: var(--background-color); color: var(--text-color); }
     .top-bar {
         display: flex; justify-content: space-between; align-items: center;
-        padding: 10px 20px; background-color: white; border-bottom: 1px solid #e2e8f0;
-        margin-bottom: 10px;
+        padding: 10px 20px; background-color: var(--secondary-background-color); border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+        margin-bottom: 10px; border-radius: 8px;
     }
     .audit-card {
-        background-color: white; padding: 20px; border-radius: 12px;
-        border: 1px solid #e2e8f0; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        background-color: var(--secondary-background-color); padding: 20px; border-radius: 12px;
+        border: 1px solid rgba(128, 128, 128, 0.15); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         margin-bottom: 15px;
     }
     .section-label { 
-        font-size: 0.7rem; font-weight: 700; color: #94a3b8; 
+        font-size: 0.7rem; font-weight: 700; color: var(--text-color); opacity: 0.6;
         text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px;
     }
     .status-box {
         padding: 20px; border-radius: 12px; text-align: center; font-weight: bold;
     }
     .deep-dive-box {
-        background-color: #f1f5f9; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;
+        background-color: var(--secondary-background-color); color: var(--text-color); padding: 15px; border-radius: 8px;
+        border: 1px solid rgba(128, 128, 128, 0.1); border-left: 4px solid var(--primary-color, #3b82f6);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -72,10 +73,10 @@ if "booted" not in st.session_state:
 if not st.session_state.booted:
     st.markdown("""
         <div style="text-align: center; margin-top: 100px;">
-            <h1 style="color: #1e293b; font-size: 3rem; margin-bottom: 0;">IIAE / IDICOC-DSE</h1>
-            <p style="color: #64748b; font-size: 1.2rem;">Epistemic Auditing System Standard</p>
-            <div class="loader" style="border: 6px solid #f3f3f3; border-top: 6px solid #3b82f6; border-radius: 50%; width: 50px; height: 50px; animation: spin 2s linear infinite; margin: 40px auto;"></div>
-            <p style="color: #94a3b8; font-family: monospace;">INITIALIZING CRYPTOGRAPHIC TRUST MANIFOLD...</p>
+            <h1 style="color: var(--text-color); font-size: 3rem; margin-bottom: 0;">IIAE / IDICOC-DSE</h1>
+            <p style="color: var(--text-color); opacity: 0.7; font-size: 1.2rem;">Epistemic Auditing System Standard</p>
+            <div class="loader" style="border: 6px solid rgba(128, 128, 128, 0.15); border-top: 6px solid var(--primary-color, #3b82f6); border-radius: 50%; width: 50px; height: 50px; animation: spin 2s linear infinite; margin: 40px auto;"></div>
+            <p style="color: var(--text-color); opacity: 0.5; font-family: monospace;">INITIALIZING CRYPTOGRAPHIC TRUST MANIFOLD...</p>
         </div>
         <style>
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -172,8 +173,8 @@ def show_deep_dive(step):
 # --- TOP BAR ---
 st.markdown("""
     <div class="top-bar">
-        <div style="font-weight: 800; font-size: 1.1rem; color: #1e293b;">⚖️ IIAE Deterministic Standard</div>
-        <div style="font-size: 0.8rem; color: #64748b; font-weight: 500;">Integrity Console · Founder Vision v1.6</div>
+        <div style="font-weight: 800; font-size: 1.1rem; color: var(--text-color);">⚖️ IIAE Deterministic Standard</div>
+        <div style="font-size: 0.8rem; color: var(--text-color); opacity: 0.6; font-weight: 500;">Integrity Console · Founder Vision v1.6</div>
     </div>
 """, unsafe_allow_html=True)
 
@@ -290,10 +291,10 @@ with col_content:
                 elif status == "Weakly Supported": color = "#f59e0b" # Orange
                 
                 st.markdown(f"""
-                    <div style="border-left: 5px solid {color}; padding: 10px; margin-bottom: 10px; background-color: #f8fafc; border-radius: 5px;">
+                    <div style="border-left: 5px solid {color}; padding: 10px; margin-bottom: 10px; background-color: var(--secondary-background-color); border: 1px solid rgba(128, 128, 128, 0.1); border-left: 5px solid {color}; border-radius: 5px;">
                         <span style="color: {color}; font-weight: bold; font-size: 0.8rem;">[{status.upper()} - {score:.2f}]</span><br>
-                        <span style="color: #334155;">"{c}"</span><br>
-                        <span style="font-size: 0.7rem; color: #64748b;">Source: {detail['match']}</span>
+                        <span style="color: var(--text-color);">"{c}"</span><br>
+                        <span style="font-size: 0.7rem; color: var(--text-color); opacity: 0.6;">Source: {detail['match']}</span>
                     </div>
                 """, unsafe_allow_html=True)
             
@@ -314,20 +315,27 @@ with col_content:
             st.markdown("""
                 <style>
                 .metric-card {
-                    background-color: #f1f5f9;
+                    background-color: var(--secondary-background-color);
                     padding: 15px;
                     border-radius: 8px;
                     text-align: center;
-                    border: 1px solid #e2e8f0;
+                    border: 1px solid rgba(128, 128, 128, 0.15);
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+                    transition: transform 0.2s ease, box-shadow 0.2s ease;
+                }
+                .metric-card:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.05);
                 }
                 .metric-value {
                     font-size: 1.5rem;
                     font-weight: bold;
-                    color: #1e293b;
+                    color: var(--text-color);
                 }
                 .metric-label {
                     font-size: 0.7rem;
-                    color: #64748b;
+                    color: var(--text-color);
+                    opacity: 0.6;
                     text-transform: uppercase;
                     letter-spacing: 0.05em;
                 }
