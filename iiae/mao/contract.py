@@ -21,3 +21,4 @@ class MAOReport(TypedDict, total=False):
     material_causality: Dict[str, Any]
     axiomatic_invariance: Dict[str, Any]
     probability_filter: Dict[str, Any]
+    metadata: Dict[str, Any]
