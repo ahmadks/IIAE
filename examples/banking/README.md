@@ -72,7 +72,7 @@ Advisor Decision:
 
 ```bash
 # View audit trail (created automatically)
-cat audit_development.jsonl
+cat output/audit_development.jsonl
 
 # Expected output:
 {"query_id": "Q000001", "advisor_id": "ADV001", "verified": true, "ds": 0.0, ...}
@@ -327,7 +327,7 @@ Reason: "Policy violation detected. Deviation: 95.00%. Contact compliance..."
 
 ## Audit Logs
 
-Every query is logged to `audit_development.jsonl`:
+Every query is logged to `output/audit_development.jsonl`:
 
 ```json
 {

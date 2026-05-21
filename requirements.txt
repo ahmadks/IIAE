@@ -4,6 +4,7 @@ pandas
 python-dotenv
 
 # Demo & UI Dependencies
+# Add Token https://huggingface.co/ HF_TOKEN in .env file to download testing models if required for Demo, Tests or Examples
 streamlit
 PyPDF2
 

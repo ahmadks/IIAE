@@ -520,7 +520,7 @@ def run_examples():
     print("AUDIT TRAIL (for compliance)")
     print(f"{'='*70}")
 
-    audit_file = Path("audit_development.jsonl")
+    audit_file = Path("output/audit_development.jsonl")
     if audit_file.exists():
         print(f"\nAudit log file: {audit_file}")
         with open(audit_file, "r") as f:
