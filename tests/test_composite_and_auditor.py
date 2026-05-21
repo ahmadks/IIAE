@@ -11,7 +11,10 @@ class DummyEngine(IMAOEngine):
     def axiomatic_invariance(self, axioms: list, response: str) -> dict:
         return {"passed": True, "score": 1.0, "reason": None}
 
-    def probability_entropy(self, response: str) -> dict:
+    def probability_entropy(self, response: str, rag_context=None, axioms=None) -> dict:
+        return {"passed": True, "score": 0.0, "reason": None, "metadata": {}}
+
+    def geoclimatic_synchrony(self, response: str, rag_context: str) -> dict:
         return {"passed": True, "score": 1.0, "reason": None}
 
 

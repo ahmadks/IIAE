@@ -95,19 +95,29 @@ class IIAEConfig:
         # The string identifiers ("lexical" | "semantic" | custom) are resolved in the
         # same precedence order as other settings.
         self.mao_engine_name: str = str(
-            resolve("IIAE_MAO_ENGINE", "IIAE_MAO_ENGINE", "lexical")
+            resolve("mao_engine_name", "IIAE_MAO_ENGINE", "lexical")
         )
         self.dqe_engine_name: str = str(
-            resolve("IIAE_DQE_ENGINE", "IIAE_DQE_ENGINE", "lexical")
+            resolve("dqe_engine_name", "IIAE_DQE_ENGINE", "lexical")
         )
 
-        # Engine‑specific configuration dictionaries – they are optional and may be
-        # empty.  They are passed verbatim to the concrete engine implementation.
-        self.mao_engine_params: Dict[str, Any] = json_cfg.get(
-            "mao_engine_params", {}
+        # Engine‑specific configuration dictionaries – passed to concrete engines.
+        self.mao_engine_params: Dict[str, Any] = (
+            kwargs.get("mao_engine_params")
+            or json_cfg.get("mao_engine_params")
+            or {}
         )
-        self.dqe_engine_params: Dict[str, Any] = json_cfg.get(
-            "dqe_engine_params", {}
+        self.dqe_engine_params: Dict[str, Any] = (
+            kwargs.get("dqe_engine_params")
+            or json_cfg.get("dqe_engine_params")
+            or {}
+        )
+
+        # -----------------------------------------------------------------
+        #   Audit log redirection (logging layer only — CTM unaffected)
+        # -----------------------------------------------------------------
+        self.log_destination: str = str(
+            resolve("log_destination", "IIAE_LOG_DESTINATION", "stdout")
         )
 
         # -----------------------------------------------------------------
@@ -117,6 +127,10 @@ class IIAEConfig:
             str(resolve("enable_mao_filters", "IIAE_ENABLE_MAO", "false")).lower()
             == "true"
         )
+
+        from .logger import configure_logging
+
+        configure_logging(self.log_destination)
 
     # ---------------------------------------------------------------------
     #   Helper properties for the supervisor (read‑only view)

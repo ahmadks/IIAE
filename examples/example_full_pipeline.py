@@ -7,7 +7,14 @@
 # 1) The advanced 7-stage neural verification loop (IIAE_Pipeline from iiae_demo)
 # 2) The lightweight, certified supervision facade (IIAESupervisor from iiae)
 
+from pathlib import Path
+import sys
 from typing import List, Dict, Any
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from iiae_demo.pipeline import IIAE_Pipeline
 from iiae import IIAESupervisor, IIAEConfig, IntegrityError
 

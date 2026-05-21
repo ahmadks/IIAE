@@ -22,10 +22,13 @@ class DummyMAOEngine(IMAOEngine):
     def material_causality(self, response: str, rag_context: str) -> dict:
         return {}
 
+    def probability_entropy(self, response: str, rag_context=None, axioms=None) -> dict:
+        return {}
+
     def axiomatic_invariance(self, axioms: list, response: str) -> dict:
         return {}
 
-    def probability_entropy(self, response: str) -> dict:
+    def geoclimatic_synchrony(self, response: str, rag_context: str) -> dict:
         return {}
 
 

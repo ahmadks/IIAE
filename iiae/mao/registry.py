@@ -7,14 +7,33 @@ from .contract import IMAOEngine
 _ENGINE_REGISTRY: Dict[str, Type[IMAOEngine]] = {}
 _REGISTRY_LOCK = threading.RLock()
 
+_REQUIRED_METHODS = (
+    "material_causality",
+    "axiomatic_invariance",
+    "probability_entropy",
+    "geoclimatic_synchrony",
+)
+
+
+def _implements_mao(engine_cls: Type[IMAOEngine]) -> bool:
+    return all(
+        hasattr(engine_cls, m) and callable(getattr(engine_cls, m))
+        for m in _REQUIRED_METHODS
+    )
+
+
 def register_engine(name: str, engine_cls: Type[IMAOEngine]) -> None:
     """Register a custom MAO engine under a unique name.
 
     If ``name`` is already present, a ``RuntimeError`` is raised to avoid accidental
     overwriting of engines supplied by third‑party libraries.
     """
-    if not issubclass(engine_cls, IMAOEngine):
-        raise TypeError("engine_cls must implement IMAOEngine")
+    if not _implements_mao(engine_cls):
+        raise TypeError(
+            "engine_cls must implement all Annex V filters: "
+            "material_causality, axiomatic_invariance, "
+            "probability_entropy, geoclimatic_synchrony"
+        )
     with _REGISTRY_LOCK:
         if name in _ENGINE_REGISTRY:
             raise RuntimeError(f"MAO engine '{name}' is already registered")

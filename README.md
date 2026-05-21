@@ -152,12 +152,49 @@ class ProprietaryNeuralEvaluator(IntegrityEvaluator):
 
 ---
 
-## 📋 Compliance & Mathematical Mappings
+## 📋 Documentation
 
-The deterministic standards implemented inside `iiae/` align directly with global high-risk AI regulatory directives:
-* ⚖️ **[COMPLIANCE.md](./COMPLIANCE.md)**: Details direct alignment with the **EU AI Act Articles 12 & 15** and the formal **Failure Lattice** ($\mathcal{F}$) specifications.
-* 🏗️ **[ARCHITECTURE.md](./ARCHITECTURE.md)**: Thorough specifications of the 5+1 operational layers (AEM, ISG, DSE, CMC, DQE, CTM).
-* 🛡️ **[SECURITY.md](./SECURITY.md)**: Security hardening guides, execution boundaries, and defense-in-depth configurations.
+### 🚀 Getting Started (Read in This Order)
+
+1. **[docs/integration/ENTERPRISE_INTEGRATION_GUIDE.md](./docs/integration/ENTERPRISE_INTEGRATION_GUIDE.md)** — **START HERE FOR PRODUCTION**
+   - Complete step-by-step guide for junior developers
+   - Banking example with full architectural walkthrough
+   - Production deployment checklist
+   - Troubleshooting guide with solutions
+
+2. **[examples/banking/README.md](./examples/banking/README.md)** — **PRACTICAL WORKING EXAMPLE**
+   - Complete, runnable banking assistant code
+   - Three real scenarios (pass/fail/violation)
+   - How to adapt to your bank
+   - Audit trail interpretation guide
+
+### 📚 Core Documentation
+
+* 📊 **[docs/analysis/COHERENCE_ANALYSIS.md](./docs/analysis/COHERENCE_ANALYSIS.md)** — Code vs. IDICOC-DSE handbook comparison (for architects/reviewers)
+
+* 🏗️ **[docs/architecture/ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md)** — System design overview:
+  - Four-layer Invariant Stack (MAII-ISG, DQE, CTM, IDICOC Pipeline)
+  - Safe Harbor tier definitions
+  - Common integration patterns
+
+* 🧮 **[docs/architecture/MATHEMATICS.md](./docs/architecture/MATHEMATICS.md)** — Mathematical foundation:
+  - Formal $D_s$ definition
+  - Roadmap to formal compliance
+
+* 📚 **[docs/API_REFERENCE.md](./docs/API_REFERENCE.md)** — Complete SDK API reference with examples
+
+* 🔐 **[examples/mao/COPILOT_INTEGRATION.md](./examples/mao/COPILOT_INTEGRATION.md)** — Enterprise Copilot integration (OEM-ready semantic engines)
+
+### ⚙️ Configuration & Operations
+
+* 📝 **[docs/auditing/audit_logging.md](./docs/auditing/audit_logging.md)** — Audit log configuration and SIEM integration
+
+* 🔍 **[docs/auditing/self_auditing_mao_engines.md](./docs/auditing/self_auditing_mao_engines.md)** — Custom semantic filters
+
+### ⚖️ Compliance & Security
+
+* **[COMPLIANCE.md](./COMPLIANCE.md)** — EU AI Act alignment
+* **[SECURITY.md](./SECURITY.md)** — Security hardening guides
 
 ---
 

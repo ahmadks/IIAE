@@ -5,13 +5,20 @@ from iiae.mao.contract import IMAOEngine
 class DummyEngine(IMAOEngine):
     def __init__(self, **kwargs):
         self.params = kwargs
-    def reset(self):
-        pass
-    def execute(self, data):
-        return data
+
+    def material_causality(self, response: str, rag_context: str) -> dict:
+        return {"passed": True, "score": 1.0, "reason": None}
+
+    def probability_entropy(self, response: str, rag_context=None, axioms=None) -> dict:
+        return {"passed": True, "score": 0.0, "reason": None, "metadata": {"origin_engine": "dummy"}}
+
+    def axiomatic_invariance(self, axioms: list, response: str) -> dict:
+        return {"passed": True, "score": 1.0, "reason": None}
+
+    def geoclimatic_synchrony(self, response: str, rag_context: str) -> dict:
+        return {"passed": True, "score": None, "reason": None}
 
 def test_register_and_retrieval():
-    # Ensure dummy engine can be registered and retrieved
     register_engine('dummy', DummyEngine)
     engine = get_engine('dummy', foo='bar')
     assert isinstance(engine, DummyEngine)

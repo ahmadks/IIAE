@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 from .contract import IMAOEngine, MAOReport
 
 logger = logging.getLogger("IIAE.MAO")
@@ -65,5 +65,15 @@ class CompositeMAOEngine(IMAOEngine):
     def axiomatic_invariance(self, axioms: list, response: str) -> Dict[str, Any]:
         return self._call("axiomatic_invariance", axioms, response)
 
-    def probability_entropy(self, response: str) -> Dict[str, Any]:
-        return self._call("probability_entropy", response)
+    def probability_entropy(
+        self,
+        response: str,
+        rag_context: Optional[str] = None,
+        axioms: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return self._call(
+            "probability_entropy", response, rag_context or "", axioms or []
+        )
+
+    def geoclimatic_synchrony(self, response: str, rag_context: str) -> Dict[str, Any]:
+        return self._call("geoclimatic_synchrony", response, rag_context)

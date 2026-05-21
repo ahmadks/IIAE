@@ -1,10 +1,16 @@
-streamlit
-pandas
+# Core IIAE Dependencies
 numpy
-PyPDF2
+pandas
 python-dotenv
+
+# Demo & UI Dependencies
+streamlit
+PyPDF2
+
+# Integration Examples & Tests (Optional Semantic/MAO Features)
 sentence-transformers
 transformers
 torch
 scikit-learn
 sentencepiece
+pytest

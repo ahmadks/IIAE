@@ -155,22 +155,33 @@ class IIAESupervisor:
                 "material_causality": self.mao_engine.material_causality(
                     response, rag_context
                 ),
+                "probability_entropy": self.mao_engine.probability_entropy(
+                    response, rag_context, axioms
+                ),
                 "axiomatic_invariance": self.mao_engine.axiomatic_invariance(
                     axioms, response
                 ),
-                "probability_filter": self.mao_engine.probability_entropy(response),
+                "geoclimatic_synchrony": self.mao_engine.geoclimatic_synchrony(
+                    response, rag_context
+                ),
             }
             log_data["mao"] = mao_report
             # Optional self‑auditing using provided MAOAuditor
             if getattr(self, "_mao_auditor", None):
                 try:
                     audit_caus = self._mao_auditor.audit_material_causality(response, rag_context)
+                    audit_prob = self._mao_auditor.audit_probability_entropy(
+                        response, rag_context, axioms
+                    )
                     audit_axi = self._mao_auditor.audit_axiomatic_invariance(axioms, response)
-                    audit_prob = self._mao_auditor.audit_probability_entropy(response)
+                    audit_geo = self._mao_auditor.audit_geoclimatic_synchrony(
+                        response, rag_context
+                    )
                     log_data["mao_audit"] = {
                         "material_causality": audit_caus,
-                        "axiomatic_invariance": audit_axi,
                         "probability_entropy": audit_prob,
+                        "axiomatic_invariance": audit_axi,
+                        "geoclimatic_synchrony": audit_geo,
                     }
                 except Exception as exc:  # pragma: no cover – auditor optional
                     logger.warning("MAO auditor failed: %s", exc)
