@@ -41,7 +41,7 @@ Key capabilities:
 Practical integration examples:
 - `examples/banking/` — banking assistant example
 - `examples/mao/` — Copilot / OEM integration examples
-- `examples/rag/` — RAG-based pipeline examples
+- `examples/bank_rag/` — RAG pipeline example
 - `examples/onboarding/` — onboarding pipeline sample
 
 ### `docs/`
@@ -51,6 +51,7 @@ Comprehensive documentation and architecture guidance:
 - `docs/architecture/MATHEMATICS.md`
 - `docs/architecture/SDK_ARCHITECTURE.md`
 - `docs/API_REFERENCE.md`
+- `docs/auditing/COMPLIANCE.md`
 - `docs/auditing/audit_logging.md`
 - `docs/auditing/self_auditing_mao_engines.md`
 - `docs/integration/ENTERPRISE_INTEGRATION_GUIDE.md`
@@ -59,9 +60,12 @@ Comprehensive documentation and architecture guidance:
 - `docs/integration/UNIVERSAL_AI_PATTERN.md`
 
 ### Top-level supporting files
-- `COMPLIANCE.md`
 - `SECURITY.md`
-- `IIAE_IDICOC-DSE.pdf`
+- `LICENSE`
+- `LICENSE.md`
+- `NOTICE`
+- `pyproject.toml`
+- `requirements.txt`
 - `run_all_tests.py`
 - `streamlit_app.py`
 
