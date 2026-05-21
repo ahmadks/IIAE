@@ -11,8 +11,4 @@ scratch/
 iiae_idicoc-dse
 hand.txt
 iiae_idicoc-dse.egg-info
-
-# Analysis & generated documentation
-COHERENCE_ANALYSIS.md
-REVIEW_SUMMARY.md
-DOCUMENTATION_INDEX.md
+output/
