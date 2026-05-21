@@ -4,6 +4,7 @@ import json
 import warnings
 import logging
 import os
+from iiae_demo.pipeline import IIAE_Pipeline
 
 # --- SUPPRESS TECHNICAL NOISE ---
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -17,7 +18,7 @@ except ImportError:
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-from iiae_demo.pipeline import IIAE_Pipeline
+
 
 # --- PAGE CONFIG ---
 st.set_page_config(
@@ -57,14 +58,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- INITIALIZATION ---
 @st.cache_resource
 def get_pipeline():
-    with st.spinner("🚀 Booting IIAE Epistemic Core..."):
-        # We force a small sleep to ensure the UI shows the spinner
-        import time
-        time.sleep(1)
-        return IIAE_Pipeline()
+    from iiae_demo.pipeline import IIAE_Pipeline
+    return IIAE_Pipeline()
 
 # Boot sequence
 if "booted" not in st.session_state:

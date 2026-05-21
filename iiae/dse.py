@@ -1,3 +1,5 @@
+import re
+
 def extract_axioms(context: str, min_len: int = 20, hard_invariants: list = None):
     """
     Minimal SDK extraction of axioms based on string splitting and heuristics.
@@ -6,7 +8,21 @@ def extract_axioms(context: str, min_len: int = 20, hard_invariants: list = None
     if not context:
         return []
     
-    raw_axioms = [line.strip() for line in context.split('.') if line.strip() and len(line.strip()) >= min_len]
+    # Split by multiple delimiters: '.', ';', ':', and newlines
+    raw_splits = re.split(r'[.;:\n]+', context)
+    
+    seen = set()
+    raw_axioms = []
+    
+    for line in raw_splits:
+        # Normalize whitespace
+        cleaned_line = " ".join(line.strip().split())
+        
+        if cleaned_line and len(cleaned_line) >= min_len:
+            # Deduplicate
+            if cleaned_line.lower() not in seen:
+                seen.add(cleaned_line.lower())
+                raw_axioms.append(cleaned_line)
     
     if hard_invariants:
         # Minimal heuristics: if an axiom explicitly says something opposite to hard invariants

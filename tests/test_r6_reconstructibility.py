@@ -16,7 +16,7 @@ def test_r6_reconstructibility_standard_zero():
 
     assert state.is_standard_zero is True
     assert state.ds == 0.0
-    assert "operate safely" in state.receipt["data"]["axioms"][0]
+    assert "operate safely" in state.receipt["axioms"][0]
 
 def test_r6_reconstructibility_violation():
     """

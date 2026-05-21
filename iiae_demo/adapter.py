@@ -1,22 +1,23 @@
-from .pipeline import IIAE_Pipeline
+from iiae.supervisor import IIAESupervisor
 from iiae.epistemic import EpistemicState
 
 class CoreIIAEAdapter:
-    def __init__(self, epsilon=0.4):
-        self.pipeline = IIAE_Pipeline(epsilon=epsilon)
+    def __init__(self, **config_kwargs):
+        """Initialize with optional IIAEConfig parameters.
 
-    def verify(self, user_query, context, ai_response):
-        result = self.pipeline.execute(user_query, context, ai_response)
-        analysis = result["analysis"]
-        ds = result["ds"]
-        from iiae.dqe import classify_ds
-        base_type = classify_ds(ds)
-        axioms = result["stages"].get("D1_axioms", [])
-        
-        c2_stage = result["stages"].get("C2_post_receipt", {})
-        receipt = {
-            "merkle_root": c2_stage.get("merkle_root", ""),
-            "Ds": ds,
-            "status": analysis.get("status", "UNKNOWN")
-        }
-        return EpistemicState(ds, base_type, axioms, receipt)
+        Any keyword arguments are forwarded to ``IIAESupervisor`` allowing
+        callers to customise the engine selection, thresholds, etc.
+        """
+        self.supervisor = IIAESupervisor(**config_kwargs)
+
+    def verify(self, user_query: str, context: str, ai_response: str) -> EpistemicState:
+        """Delegate verification to the SDK's ``verify`` method.
+
+        Parameters
+        ----------
+        user_query: The original prompt from the user.
+        context:    The RAG context supplied to the model.
+        ai_response: The model's generated response.
+        """
+        return self.supervisor.verify(user_query, ai_response, context)
+

@@ -26,4 +26,4 @@ def test_r5_replay_resistance():
 
     # Seals must be different
     assert receipt1["ctm_seal"] != receipt2["ctm_seal"]
-    assert receipt1["data"]["timestamp"] != receipt2["data"]["timestamp"]
+    assert receipt1["payload"]["timestamp"] != receipt2["payload"]["timestamp"]

@@ -58,14 +58,18 @@ def deviation_score(response: str, axioms: list) -> float:
     return min(1.0, max(0.0, ds))
 
 def classify_ds(ds: float) -> str:
-    """
-    Classify the deviation score into base types.
+    """Classify deviation scores into human‑readable categories.
+    Mapping (aligned with test expectations):
+        0.0               -> "Standard-Zero"
+        0.0 < ds ≤ 0.4   -> "Tolerable"
+        0.4 < ds ≤ 0.7   -> "Violation"
+        ds > 0.7          -> "Critical"
     """
     if ds == 0.0:
         return "Standard-Zero"
-    elif ds <= 0.4:
+    if ds <= 0.4:
         return "Tolerable"
-    elif ds <= 0.8:
+    if ds <= 0.7:
         return "Violation"
-    else:
-        return "Critical"
+    return "Critical"
+
