@@ -46,3 +46,7 @@ def list_registered_engines() -> Dict[str, Dict[str, Any]]:
     """Return a shallow copy of the registry with engine class and docstring for introspection/debugging."""
     with _REGISTRY_LOCK:
         return {name: {"class": cls, "doc": cls.__doc__} for name, cls in _ENGINE_REGISTRY.items()}
+
+# Backward compatibility: expose built‑in exception types
+RuntimeError = RuntimeError
+ValueError = ValueError
