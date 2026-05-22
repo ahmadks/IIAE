@@ -60,6 +60,21 @@ class ExampleSemanticMAOEngine(IMAOEngine):
             filter=filter_name,
         )
 
+    def evaluate_boundaries(self, response: str, graph: any) -> Dict[str, Any]:
+        results = {
+            "material_causality": self.material_causality(response, graph.source_text),
+            "probability_entropy": self.probability_entropy(
+                response, graph.source_text, graph.axioms
+            ),
+            "axiomatic_invariance": self.axiomatic_invariance(graph.axioms, response),
+            "geoclimatic_synchrony": self.geoclimatic_synchrony(response, graph.source_text),
+        }
+        passed = all(r.get("passed", False) for r in results.values())
+        results["passed"] = passed
+        if not passed:
+            results["reason"] = "manifold boundary violation"
+        return results
+
     def _embed(self, text: str):
         return self.embedder.encode(text, convert_to_numpy=True)
 

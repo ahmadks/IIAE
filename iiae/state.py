@@ -5,8 +5,29 @@ class StateTransitionModel:
         self.model_id = model_id
         self.ctm_salt = ctm_salt
 
-    def seal(self, prompt: str, response: str, ds: float, axioms: list):
-        return create_receipt(prompt, response, ds, axioms, self.model_id, salt=self.ctm_salt)
+    def seal(
+        self,
+        prompt: str,
+        original_response: str,
+        ds: float,
+        axioms: list,
+        canonical_state: "CanonicalState" = None,
+        corrected_response: str = None,
+        epsilon: float = None,
+        lambda_weights: list | None = None,
+    ):
+        return create_receipt(
+            prompt,
+            original_response,
+            ds,
+            axioms,
+            self.model_id,
+            salt=self.ctm_salt,
+            canonical_data=canonical_state.data if canonical_state is not None else None,
+            y_star=corrected_response,
+            epsilon=epsilon,
+            lambda_weights=lambda_weights,
+        )
 
     def verify(self, receipt: dict, salt: str = None) -> bool:
         # Default to instance salt if none provided during verification

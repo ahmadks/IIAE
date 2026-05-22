@@ -2,6 +2,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 from .contract import IMAOEngine, MAOReport
+from iiae.core.dse import PropertyGraph
 
 logger = logging.getLogger("IIAE.MAO")
 
@@ -74,6 +75,9 @@ class CompositeMAOEngine(IMAOEngine):
         return self._call(
             "probability_entropy", response, rag_context or "", axioms or []
         )
+
+    def evaluate_boundaries(self, response: str, graph: PropertyGraph) -> Dict[str, Any]:
+        return self._call("evaluate_boundaries", response, graph)
 
     def geoclimatic_synchrony(self, response: str, rag_context: str) -> Dict[str, Any]:
         return self._call("geoclimatic_synchrony", response, rag_context)

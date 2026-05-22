@@ -45,15 +45,24 @@ def _hash_payload(payload: dict) -> str:
 
 
 def create_receipt(
-    prompt: str, response: str, ds: float, axioms: list, model_id: str, salt: str = None
+    prompt: str,
+    response: str,
+    ds: float,
+    axioms: list,
+    model_id: str,
+    salt: str = None,
+    canonical_data: str = None,
+    y_star: str = None,
+    epsilon: float = None,
+    lambda_weights: list | None = None,
 ) -> dict:
     """
     Seals the sub-symbolic state transition matrix within a cryptographic CTM ledger block.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
     merkle_root = generate_merkle_root(axioms, salt=salt)
+    lambda_weights = lambda_weights or []
 
-    # Structural Payload Binding
     payload = {
         "version": CTM_VERSION,
         "model_id": model_id,
@@ -63,6 +72,10 @@ def create_receipt(
         "merkle_root": merkle_root,
         "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "response_hash": hashlib.sha256(response.encode("utf-8")).hexdigest(),
+        "canonical_hash": hashlib.sha256(canonical_data.encode("utf-8")).hexdigest() if canonical_data else None,
+        "y_star_hash": hashlib.sha256(y_star.encode("utf-8")).hexdigest() if y_star else None,
+        "epsilon": float(epsilon) if epsilon is not None else None,
+        "lambda_weights": lambda_weights,
     }
 
     ctm_seal = _hash_payload(payload)

@@ -9,6 +9,7 @@ from .filters import (
     material_causality_filter,
 )
 from .report import enrich_report
+from iiae.core.dse import PropertyGraph
 
 ORIGIN_ENGINE = "lexical"
 
@@ -34,6 +35,21 @@ class LexicalMAOEngine(IMAOEngine):
             origin_engine=self._origin,
             filter=filter_name,
         )
+
+    def evaluate_boundaries(self, response: str, graph: PropertyGraph) -> dict:
+        results = {
+            "material_causality": self.material_causality(response, graph.source_text),
+            "probability_entropy": self.probability_entropy(
+                response, graph.source_text, graph.axioms
+            ),
+            "axiomatic_invariance": self.axiomatic_invariance(graph.axioms, response),
+            "geoclimatic_synchrony": self.geoclimatic_synchrony(response, graph.source_text),
+        }
+        passed = all(r.get("passed", False) for r in results.values())
+        results["passed"] = passed
+        if not passed:
+            results["reason"] = "manifold boundary violation"
+        return results
 
     def material_causality(self, response: str, rag_context: str) -> dict:
         return self._trace(

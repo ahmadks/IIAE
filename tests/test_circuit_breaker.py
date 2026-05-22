@@ -14,22 +14,25 @@ class DummyDQEEngine(IDQEEngine):
     def __init__(self, ds_value: float = 1.0):
         self.ds_value = ds_value
 
-    def compute_ds(self, response: str, axioms: list) -> tuple[float, str]:
-        return self.ds_value, "dummy"
+    def compute_ds(self, candidate_state: str, canonical_state: any, epsilon: float) -> tuple[float, str, str]:
+        return self.ds_value, "dummy", candidate_state
 
 
 class DummyMAOEngine(IMAOEngine):
+    def evaluate_boundaries(self, response: str, graph: any) -> dict:
+        return {"passed": True}
+
     def material_causality(self, response: str, rag_context: str) -> dict:
-        return {}
+        return {"passed": True}
 
     def probability_entropy(self, response: str, rag_context=None, axioms=None) -> dict:
-        return {}
+        return {"passed": True}
 
     def axiomatic_invariance(self, axioms: list, response: str) -> dict:
-        return {}
+        return {"passed": True}
 
     def geoclimatic_synchrony(self, response: str, rag_context: str) -> dict:
-        return {}
+        return {"passed": True}
 
 
 @pytest.fixture

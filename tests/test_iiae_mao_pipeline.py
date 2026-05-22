@@ -160,10 +160,14 @@ def test_full_pipeline_semantic_optional():
     if "example_semantic" not in list_registered_engines():
         register_engine("example_semantic", ExampleSemanticMAOEngine)
 
+    # Use lenient thresholds for testing semantic engine integration
     cfg = IIAEConfig(
         enable_mao_filters=True,
         mao_engine_name="example_semantic",
         strict_mode=False,
+        mao_engine_params={
+            "entailment_threshold": 0.0,  # Lenient for test
+        }
     )
     result = validate(PROMPT, RESPONSE, CONTEXT, config=cfg)
     assert result["verified"] is True

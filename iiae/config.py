@@ -55,8 +55,18 @@ class IIAEConfig:
         # -----------------------------------------------------------------
         #   Core threshold and model parameters
         # -----------------------------------------------------------------
-        self.ds_threshold: float = float(
-            resolve("ds_threshold", "IIAE_DS_THRESHOLD", 0.4)
+        initial_epsilon = float(
+            resolve("epsilon_initial", "IIAE_EPSILON_INITIAL", resolve("ds_threshold", "IIAE_DS_THRESHOLD", 0.4))
+        )
+        self.epsilon_initial: float = min(1.0, max(0.0, initial_epsilon))
+        self.epsilon_current: float = self.epsilon_initial
+        self.epsilon_update_alpha: float = float(
+            resolve("epsilon_update_alpha", "IIAE_EPSILON_UPDATE_ALPHA", 0.1)
+        )
+        self.lambda_weights = (
+            kwargs.get("lambda_weights")
+            or json_cfg.get("lambda_weights")
+            or [1.0]
         )
         self.min_len: int = int(resolve("min_len", "IIAE_MIN_LEN", 20))
         self.model_id: str = str(resolve("model_id", "IIAE_MODEL_ID", "llm-v1"))
@@ -153,3 +163,7 @@ class IIAEConfig:
         self._circuit_open = False
         self._circuit_half_open = False
         self._circuit_last_open_ts = None
+
+    @property
+    def ds_threshold(self) -> float:
+        return self.epsilon_current

@@ -8,6 +8,7 @@ all four. Lexical and ML-based engines are interchangeable plug-ins.
 """
 
 from typing import Any, Dict, List, Optional, Protocol, TypedDict, runtime_checkable
+from iiae.core.dse import PropertyGraph
 
 
 @runtime_checkable
@@ -19,6 +20,8 @@ class IMAOEngine(Protocol):
     V.3 Axiomatic Invariance — data must remain literal and operational.
     V.4 Geoclimatic Synchrony — software footprint vs hardware footprint.
     """
+
+    def evaluate_boundaries(self, response: str, graph: PropertyGraph) -> Dict[str, Any]: ...
 
     def material_causality(self, response: str, rag_context: str) -> Dict[str, Any]: ...
 

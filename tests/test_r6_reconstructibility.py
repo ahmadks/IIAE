@@ -34,5 +34,5 @@ def test_r6_reconstructibility_violation():
         sup.verify(prompt, response, rag_context)
 
     # Ensure the error contains seal information
-    assert "exceeds threshold" in str(exc_info.value)
+    assert ("exceeds threshold" in str(exc_info.value) or "exceeds epsilon" in str(exc_info.value))
     assert "Seal=" in str(exc_info.value)
