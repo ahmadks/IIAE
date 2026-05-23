@@ -1,2 +1,0 @@
-The system behaves consistently in all situations and operates independently of the hardware or platform where it is executed.
-This represents creative reformulation that preserves the meaning of the axioms.

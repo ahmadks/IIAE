@@ -1,2 +1,0 @@
-The system maintains the same behavior and does not depend on hardware or platform.
-This represents perfect preservation of the canonical axioms without deviation, noise, or additional claims.

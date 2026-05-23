@@ -1,2 +1,0 @@
-The system does not maintain the same behavior and depends heavily on the hardware where it runs.
-This represents explicit contradiction of the canonical axioms.

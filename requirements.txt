@@ -1,5 +1,6 @@
 # Core IIAE Dependencies
 numpy
+scipy>=1.8.0
 pandas
 python-dotenv
 
@@ -15,3 +16,6 @@ torch
 scikit-learn
 sentencepiece
 pytest
+
+# IIAE-Specific
+# (Optimal Transport for Kantorovich distance already included in scipy)

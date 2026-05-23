@@ -1,0 +1,2 @@
+# Dependencias mínimas del wrapper IDICOC.
+# El wrapper consume el núcleo local `idicoc_core` y no implementa RAG.

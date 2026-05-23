@@ -1,9 +1,0 @@
-
-[core]
-sentence-transformers
-transformers
-torch
-networkx
-
-[dev]
-pytest
