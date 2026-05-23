@@ -30,29 +30,20 @@ class IIAEEnterpriseSDKWrapper:
 
         if self.config.audit_mode == "semantic":
             self.dissonance_strategy = SemanticDissonanceStrategy(
-                embedding_model_name=self.config.semantic_embedding_model,
-                nli_model_name=self.config.semantic_nli_model,
-                delta_fp=self.config.delta_fp,
+                config=self.config,
             )
         else:
-            embedder = None
-            if self.config.mathematical_embedding_model:
-                from sentence_transformers import SentenceTransformer
-
-                embedder = SentenceTransformer(self.config.mathematical_embedding_model)
             self.dissonance_strategy = MathematicalDissonanceStrategy(
-                weights=self.config.mathematical_weights,
-                delta_fp=self.config.mathematical_delta_fp,
-                embedding_model=embedder,
+                config=self.config,
             )
 
         self.runtime_config = RuntimeConfig(
             constant_k=self.config.constant_k,
             entropy_analyzer=self.entropy_analyzer,
             property_graph=self.graph,
-            mode="factual",
+            mode=self.config.mode,
             rigidity_epsilon=self.config.rigidity_epsilon,
-            delta_fp=self.config.delta_fp,
+            delta_fp=self.config.isg_delta_fp,
             enable_hard_halt=self.config.enable_hard_halt,
         )
         self.kernel_client = KernelCustodyClient(ctm=self.runtime_config.ctm)
@@ -101,91 +92,147 @@ class IIAEEnterpriseSDKWrapper:
         source_input: str,
         context_input: Optional[List[str]] = None,
         context_axioms: Optional[List[str]] = None,
-        mode: str = "factual",
+        mode: Optional[str] = None,
         epsilon_override: float | None = None,
     ) -> Dict[str, Any]:
-        admission_metrics: dict[str, Any] = {}
-        admitted_input, admission_metrics = self.admit(source_input)
-
-        if admitted_input is None or not isinstance(admitted_input, str):
-            admitted_input = ""
-
         epsilon_used = epsilon_override if epsilon_override is not None else self.config.rigidity_epsilon
-        self.runtime_config.mode = mode
-        self.runtime_config.epsilon = epsilon_used
+        mode_used = mode or self.config.mode
 
-        policy_axioms = self.axiom_engine.render_axioms(self.graph)
-        all_axioms = list(policy_axioms)
-        if context_axioms:
-            all_axioms.extend(context_axioms)
-        context_chunks = context_input or []
+        try:
+            admission_metrics: dict[str, Any] = {}
+            admitted_input, admission_metrics = self.admit(source_input)
 
-        D_s, D_f, final_output, correction_flag, extra_metrics = self.dissonance_strategy.compute(
-            source_input=source_input,
-            context_input=context_chunks,
-            context_axioms=all_axioms,
-            epsilon=epsilon_used,
-            validate_conflicts=self.config.validate_context_against_axioms,
-        )
+            if admitted_input is None or not isinstance(admitted_input, str):
+                admitted_input = ""
 
-        timestamp = datetime.utcnow().isoformat()
-        invariant_hash = sha256_hex(canonical_json(final_output))
-        graph_hash = sha256_hex(canonical_json(self.graph.nodes))
+            self.runtime_config.mode = mode_used
+            self.runtime_config.epsilon = epsilon_used
 
-        metadata = {
-            "timestamp": timestamp,
-            "d_s": D_s,
-            "d_f": D_f,
-            "audit_mode": self.config.audit_mode,
-            "mode": mode,
-            "epsilon_used": epsilon_used,
-            "epsilon": epsilon_used,
-            "delta_fp": self.config.delta_fp,
-            "correction_flag": correction_flag,
-            "admission_metrics": admission_metrics,
-            "audit_metrics": extra_metrics,
-            "admission_breach": None,
-            "service_instance_name": self.config.service_instance_name,
-            "invariant_state_hash": invariant_hash,
-            "property_graph_hash": graph_hash,
-        }
+            policy_axioms = self.axiom_engine.render_axioms(self.graph)
+            all_axioms = list(policy_axioms)
+            if context_axioms:
+                all_axioms.extend(context_axioms)
+            context_chunks = context_input or []
 
-        canonical_state = CanonicalStateDTO(
-            data=final_output,
-            metadata=metadata,
-            source_axioms=all_axioms,
-        )
+            D_s, D_f, final_output, correction_flag, extra_metrics = self.dissonance_strategy.compute(
+                source_input=source_input,
+                context_input=context_chunks,
+                context_axioms=all_axioms,
+                epsilon=epsilon_used,
+                validate_conflicts=self.config.validate_context_against_axioms,
+            )
 
-        kernel_factory = self.runtime_config.kernel_factory()
-        kernel = kernel_factory()
-        kernel_result = kernel.process(
-            canonical_state=canonical_state.data,
-            dissonance=D_s,
-            epsilon=epsilon_used,
-            property_graph=self.graph,
-            timestamp=metadata["timestamp"],
-        )
-        if kernel_result is None:
-            kernel_result = {
-                "status": "committed",
-                "root_hash": self.runtime_config.ctm.root_hash,
+            timestamp = datetime.utcnow().isoformat()
+            invariant_hash = sha256_hex(canonical_json(final_output))
+            graph_hash = sha256_hex(canonical_json(self.graph.nodes))
+
+            # Extraer d_logic de las métricas del modo activo (siempre presente tras la refactorización).
+            d_logic = float(extra_metrics.get("d_logic", D_s))
+
+            metadata = {
+                "timestamp": timestamp,
+                "d_s": D_s,
+                "d_f": D_f,
+                "audit_mode": self.config.audit_mode,
+                "mode": mode_used,
+                "epsilon_used": epsilon_used,
+                "epsilon": epsilon_used,
+                "delta_fp": self.config.isg_delta_fp,
+                "correction_flag": correction_flag,
+                "admission_metrics": admission_metrics,
+                "audit_metrics": extra_metrics,
+                "admission_breach": None,
+                "source_name": self.config.source_name,
+                "invariant_state_hash": invariant_hash,
+                "property_graph_hash": graph_hash,
+                # Componentes coalgebraicos (Anexo J): D_s = λ_inv·d_inv + λ_logic·d_logic + λ_temporal·d_temporal
+                "algebraic_components": {
+                    "lambda_weights": [0.0, 1.0, 0.0],  # [λ_inv, λ_logic, λ_temporal]
+                    "d_inv": 0.0,        # Sin acceso al estado latente V̂
+                    "d_logic": d_logic,  # sup(max_geom_dist, max_nli_contradiction)
+                    "d_temporal": 0.0,   # Reservado para extensión futura
+                },
             }
 
-        receipt = self.kernel_client.commit(
-            canonical_state=canonical_state.data,
-            dissonance=D_s,
-            fact_dissonance=D_f,
-            epsilon=epsilon_used,
-            delta_fp=self.config.delta_fp,
-            correction_flag=correction_flag,
-            source=self.config.service_instance_name,
-            metadata=canonical_state.metadata,
-        )
+            canonical_state = CanonicalStateDTO(
+                data=final_output,
+                metadata=metadata,
+                source_axioms=all_axioms,
+            )
 
-        return {
-            "canonical_state": canonical_state,
-            "output": final_output,
-            "kernel_result": kernel_result,
-            "audit_receipt": receipt,
-            "context_chunks": context_chunks,
-        }
+            kernel_factory = self.runtime_config.kernel_factory()
+            kernel = kernel_factory()
+            kernel_result = kernel.process(
+                canonical_state=canonical_state.data,
+                dissonance=D_s,
+                epsilon=epsilon_used,
+                property_graph=self.graph,
+                timestamp=metadata["timestamp"],
+            )
+            if kernel_result is None:
+                kernel_result = {
+                    "status": "committed",
+                    "root_hash": self.runtime_config.ctm.root_hash,
+                }
+
+            receipt = self.kernel_client.commit(
+                canonical_state=canonical_state.data,
+                dissonance=D_s,
+                fact_dissonance=D_f,
+                epsilon=epsilon_used,
+                delta_fp=self.config.isg_delta_fp,
+                correction_flag=correction_flag,
+                source=self.config.source_name,
+                metadata=canonical_state.metadata,
+            )
+
+            return {
+                "canonical_state": canonical_state,
+                "output": final_output,
+                "kernel_result": kernel_result,
+                "audit_receipt": receipt,
+                "context_chunks": context_chunks,
+            }
+        except Exception as exc:
+            timestamp = datetime.utcnow().isoformat()
+            snapshot = {
+                "event": "execute_pipeline_failure",
+                "error": str(exc),
+            }
+            self.runtime_config.ctm.seal_failure(snapshot, timestamp=timestamp)
+            
+            fallback_metadata = {
+                "timestamp": timestamp,
+                "d_s": 1.0,
+                "d_f": 1.0,
+                "audit_mode": self.config.audit_mode,
+                "mode": mode_used,
+                "epsilon_used": epsilon_used,
+                "epsilon": epsilon_used,
+                "delta_fp": self.config.isg_delta_fp,
+                "correction_flag": True,
+                "admission_metrics": {},
+                "audit_metrics": {"error": str(exc)},
+                "admission_breach": None,
+                "source_name": self.config.source_name,
+                "invariant_state_hash": "",
+                "property_graph_hash": "",
+                "algebraic_components": {
+                    "lambda_weights": [0.0, 1.0, 0.0],
+                    "d_inv": 0.0,
+                    "d_logic": 1.0,
+                    "d_temporal": 0.0,
+                },
+            }
+            fallback_state = CanonicalStateDTO(
+                data=f"[CRITICAL WRAPPER ERROR] {str(exc)}",
+                metadata=fallback_metadata,
+                source_axioms=context_axioms or [],
+            )
+            return {
+                "canonical_state": fallback_state,
+                "output": f"[CRITICAL WRAPPER ERROR] {str(exc)}",
+                "kernel_result": {"status": "failed", "error": str(exc)},
+                "audit_receipt": {"status": "uncommitted", "error": str(exc)},
+                "context_chunks": context_input or [],
+            }

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -8,18 +8,19 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from .base import DissonanceStrategy
 
+if TYPE_CHECKING:
+    from idicoc_audit_flow.config import AuditConfig
+
 
 class SemanticDissonanceStrategy(DissonanceStrategy):
     def __init__(
         self,
-        embedding_model_name: str,
-        nli_model_name: str,
-        delta_fp: float = 0.15,
+        config: AuditConfig,
     ) -> None:
-        self.encoder = SentenceTransformer(embedding_model_name)
-        self.nli_tokenizer = AutoTokenizer.from_pretrained(nli_model_name)
-        self.nli_model = AutoModelForSequenceClassification.from_pretrained(nli_model_name)
-        self.delta_fp = delta_fp
+        self.config = config
+        self.encoder = SentenceTransformer(config.semantic_embedding_model)
+        self.nli_tokenizer = AutoTokenizer.from_pretrained(config.semantic_nli_model)
+        self.nli_model = AutoModelForSequenceClassification.from_pretrained(config.semantic_nli_model)
 
     def _cosine_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         dot_product = np.dot(a, b)
@@ -84,40 +85,45 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
             *( (chunk, False) for chunk in context_input ),
         ]
 
-        penalties: list[float] = []
+        max_axiom_cosine = 0.0
         max_cosine = 0.0
         max_axiom_contradiction = 0.0
         max_context_contradiction = 0.0
         violated_axioms: list[str] = []
         contradictory_contexts: list[str] = []
         support_found = False
+        has_axioms = False
 
         for reference, is_axiom in references:
             ref_embedding = self.encoder.encode(reference, normalize_embeddings=True)
             cosine_distance = self._cosine_distance(source_embedding, ref_embedding)
             contradiction_score = self._nli_contradiction(premise=reference, hypothesis=source_input)
 
-            weight = 1.5 if is_axiom else 1.0
-            if is_axiom and 'hard' in reference.lower():
-                weight = 2.0
-
-            penalty = max(cosine_distance, contradiction_score) * weight
-            penalties.append(min(penalty, 1.0))
             max_cosine = max(max_cosine, cosine_distance)
 
             if is_axiom:
+                has_axioms = True
+                max_axiom_cosine = max(max_axiom_cosine, cosine_distance)
                 max_axiom_contradiction = max(max_axiom_contradiction, contradiction_score)
-                if contradiction_score > 0.5:
+                if contradiction_score > self.config.context_axiom_conflict_threshold:
                     violated_axioms.append(reference)
             else:
                 max_context_contradiction = max(max_context_contradiction, contradiction_score)
-                if contradiction_score > 0.5:
+                if contradiction_score > self.config.semantic_contradiction_snapping_threshold:
                     contradictory_contexts.append(reference)
 
-            if not is_axiom and cosine_distance <= self.delta_fp:
+            if not is_axiom and cosine_distance <= self.config.correction_base_tolerance:
                 support_found = True
 
-        D_s = 1.0 if not penalties else min(1.0, sum(penalties) / len(penalties))
+        # Fórmula coalgebraica (Anexo J): D_s = λ2 · d_logic
+        # d_logic = sup(max_axiom_cosine, max_axiom_contradiction) sobre el espacio de axiomas.
+        # λ_inv=0 (sin acceso al estado latente), λ_logic=1, λ_temporal=0 (reservado).
+        # El supremo garantiza que una sola violación axiomática crítica no sea diluida por promedios.
+        if has_axioms:
+            d_logic = max(max_axiom_cosine, max_axiom_contradiction)
+        else:
+            d_logic = max_cosine  # fallback: desviación geométrica pura sin axiomas explícitos
+        D_s = min(1.0, d_logic)
 
         D_f = 1.0
         if context_input:
@@ -131,21 +137,32 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
             ]
             D_f = max(min(factual_cosines) if factual_cosines else 1.0, max(factual_contradictions) if factual_contradictions else 0.0)
 
-        allowable_threshold = self.delta_fp + epsilon
-        correction_flag = D_s > allowable_threshold
+        allowable_threshold = self.config.correction_base_tolerance + epsilon
+        snapping_flag = not support_found and max_context_contradiction > self.config.semantic_contradiction_snapping_threshold
+        correction_flag = (D_s > allowable_threshold) or snapping_flag
         corrected_output = source_input
 
         if correction_flag:
-            corrected_output = (
-                '[CRITICAL REJECTION] La salida incurre en disonancia con el grafo de referencia y los axiomas.'
-            )
+            if snapping_flag:
+                corrected_output = (
+                    f"[SNAPPING ACTIVE] La respuesta generada por el modelo comercial incurrió en una "
+                    f"disonancia factual insostenible (D_f = {D_f:.4f}). Estado revertido al contexto RAG canónico primario: "
+                    f"'{context_input[0] if context_input else 'Sin soporte factual disponible'}'"
+                )
+            else:
+                corrected_output = (
+                    '[CRITICAL REJECTION] La salida incurre en disonancia con el grafo de referencia y los axiomas.'
+                )
 
         metrics = {
             'reference_count': len(references),
-            'average_penalty': D_s,
+            'd_s': D_s,
+            'd_logic': d_logic,
             'max_cosine_distance': max_cosine,
+            'max_axiom_cosine': max_axiom_cosine,
             'max_axiom_contradiction': max_axiom_contradiction,
             'max_context_contradiction': max_context_contradiction,
+            'context_contradiction': max_context_contradiction,
             'violated_axioms': violated_axioms,
             'contradictory_contexts': contradictory_contexts,
             'support_found': support_found,
@@ -158,7 +175,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
             metrics['context_axiom_conflicts'] = self._check_context_axiom_conflicts(
                 context_input,
                 context_axioms,
-                threshold=self.delta_fp,
+                threshold=self.config.context_axiom_conflict_threshold,
             )
         else:
             metrics['context_axiom_conflicts'] = []

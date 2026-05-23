@@ -1,28 +1,30 @@
 from __future__ import annotations
-from __future__ import annotations
-
 import json
 import re
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from idicoc_utils.hashing import sha256_hex
 
 from .base import DissonanceStrategy
 
+if TYPE_CHECKING:
+    from idicoc_audit_flow.config import AuditConfig
+
 
 class MathematicalDissonanceStrategy(DissonanceStrategy):
     def __init__(
         self,
-        weights: tuple[float, ...],
-        delta_fp: float = 0.15,
-        embedding_model: Optional[Any] = None,
+        config: AuditConfig,
         expected_hash: Optional[str] = None,
     ) -> None:
-        self.weights = weights
-        self.delta_fp = delta_fp
-        self.embedder = embedding_model
+        self.config = config
+        self.weights = config.mathematical_weights
         self.expected_hash = expected_hash
+        self.embedder = None
+        if config.mathematical_embedding_model:
+            from sentence_transformers import SentenceTransformer
+            self.embedder = SentenceTransformer(config.mathematical_embedding_model)
 
     @staticmethod
     def _similarity_ratio(a: str, b: str) -> float:
@@ -135,10 +137,13 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
         else:
             d4 = 0.0
 
+        violated_axioms = []
         if context_axioms:
             normalized_axioms = [self._normalize_text(ax) for ax in context_axioms]
-            contradictions = [ax not in normalized_source for ax in normalized_axioms]
-            d5 = 1.0 if any(contradictions) else 0.0
+            for ax, norm_ax in zip(context_axioms, normalized_axioms):
+                if norm_ax not in normalized_source:
+                    violated_axioms.append(ax)
+            d5 = 1.0 if violated_axioms else 0.0
         else:
             d5 = 0.0
 
@@ -161,21 +166,49 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
             + self.weights[5] * d6
         ) / denominator
 
-        correction_flag = D_s > (self.delta_fp + epsilon)
+        allowable_threshold = self.config.correction_base_tolerance + epsilon
+        correction_flag = D_s > allowable_threshold
         corrected_output = source_input
         if correction_flag:
             corrected_output = "[MATHEMATICAL DISSONANCE] Desviación estructural detectada."
 
+        contradictory_contexts = []
+        context_contradiction = 0.0
+        if context_input:
+            if self.embedder:
+                source_emb = self.embedder.encode([source_input])[0]
+                ref_embs = self.embedder.encode(context_input)
+                distances = [self._cosine_distance(source_emb, ref_emb) for ref_emb in ref_embs]
+                context_contradiction = max(distances) if distances else 0.0
+                for ctx, dist in zip(context_input, distances):
+                    if dist > self.config.semantic_contradiction_snapping_threshold:
+                        contradictory_contexts.append(ctx)
+            else:
+                for ctx in context_input:
+                    dist = 1.0 - self._similarity_ratio(source_input, ctx)
+                    if dist > context_contradiction:
+                        context_contradiction = dist
+                    if dist > self.config.semantic_contradiction_snapping_threshold:
+                        contradictory_contexts.append(ctx)
+
         metrics = {
             "stage_metrics": {f"d{i+1}": value for i, value in enumerate(stages)},
             "weighted_sum": D_s,
+            # d_logic mirrors D_s in the mathematical mode: the weighted sum already acts as the
+            # coalgebraic frontier measure over structural deviations (axiom violations, hash
+            # distance, embedding distance). Exposed here so the pipeline can always find d_logic.
+            "d_logic": D_s,
             "factual_dissonance": D_f,
+            "context_contradiction": context_contradiction,
+            "violated_axioms": violated_axioms,
+            "contradictory_contexts": contradictory_contexts,
         }
 
         if validate_conflicts:
             metrics["context_axiom_conflicts"] = self._check_context_axiom_conflicts(
                 context_input,
                 context_axioms,
+                threshold=self.config.context_axiom_conflict_threshold,
             )
         else:
             metrics["context_axiom_conflicts"] = []

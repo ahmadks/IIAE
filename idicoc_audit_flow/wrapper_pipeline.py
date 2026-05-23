@@ -38,7 +38,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
             self.config.input_field_source: str(source_input).strip(),
             self.config.input_field_context: context_input or [],
             self.config.input_field_axioms: context_axioms or [],
-            "service_instance_name": self.config.service_instance_name,
+            "source_name": self.config.source_name,
         }
 
     def admit(self, source_input: Any) -> Any:
@@ -64,7 +64,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
         source_input: str,
         context_input: list[str] | None = None,
         context_axioms: list[str] | None = None,
-        mode: str = "factual",
+        mode: str | None = None,
         epsilon_override: float | None = None,
     ) -> CanonicalStateDTO:
         if not self._initialized or self.pipeline is None:
@@ -86,7 +86,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
         source_input = data.get(self.config.input_field_source, data.get("text", ""))
         context_input = data.get(self.config.input_field_context, data.get("context_input", []))
         context_axioms = data.get(self.config.input_field_axioms, data.get("context_axioms", []))
-        mode = data.get("mode", "factual")
+        mode = data.get("mode", None)
         epsilon_override = data.get("epsilon_override", None)
 
         return self.process_interaction(
@@ -129,7 +129,60 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 )
             return False
 
+        # ---------------------------------------------------------------
+        # Verificación coalgebraica (Anexo J): los pesos λ deben ser
+        # [0.0, 1.0, 0.0] y d_s debe coincidir con λ_logic · d_logic.
+        # Rol de notario: solo mide y registra, nunca bloquea.
+        # ---------------------------------------------------------------
+        algebraic = canonical_state.metadata.get("algebraic_components")
+        if algebraic is None:
+            snapshot = {
+                "event": "verify_compliance_algebraic",
+                "warning": "algebraic_components ausente en el estado canónico",
+                "canonical_state": canonical_state.to_dict(),
+            }
+            if self.pipeline is not None:
+                self.pipeline.runtime_config.ctm.seal_failure(
+                    snapshot,
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+            return False
+
+        expected_weights = [0.0, 1.0, 0.0]
+        actual_weights = algebraic.get("lambda_weights", [])
+        if actual_weights != expected_weights:
+            snapshot = {
+                "event": "verify_compliance_algebraic",
+                "error": "Pesos coalgebraicos inválidos",
+                "expected": expected_weights,
+                "actual": actual_weights,
+            }
+            if self.pipeline is not None:
+                self.pipeline.runtime_config.ctm.seal_failure(
+                    snapshot,
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+            return False
+
+        d_logic = float(algebraic.get("d_logic", -1.0))
+        lambda_logic = float(expected_weights[1])
+        expected_d_s = lambda_logic * d_logic
+        if abs(dissonance - expected_d_s) > 1e-6:
+            snapshot = {
+                "event": "verify_compliance_algebraic",
+                "error": "D_s no coincide con λ_logic · d_logic",
+                "d_s_recorded": dissonance,
+                "lambda_logic_times_d_logic": expected_d_s,
+            }
+            if self.pipeline is not None:
+                self.pipeline.runtime_config.ctm.seal_failure(
+                    snapshot,
+                    timestamp=datetime.utcnow().isoformat(),
+                )
+            return False
+
         return True
+
 
     def integrate_with_kernel(self, canonical_state: CanonicalStateDTO, kernel: Any) -> Any:
         if hasattr(kernel, "process"):

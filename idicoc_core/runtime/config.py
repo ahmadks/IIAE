@@ -62,7 +62,8 @@ class RuntimeConfig:
         self.registry = ProjectionRegistry()
         self.isg = InvariantStateGenerator(
             anchor=self.anchor,
-            registry=self.registry
+            registry=self.registry,
+            delta_fp=self.delta_fp
         )
 
         # 4. Verifier

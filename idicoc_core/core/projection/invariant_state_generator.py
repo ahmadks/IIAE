@@ -30,9 +30,10 @@ class InvariantStateGenerator:
     - Si no puede proyectar, lanza InvariantStateBreach.
     """
 
-    def __init__(self, anchor: SourceAnchor, registry: ProjectionRegistry):
+    def __init__(self, anchor: SourceAnchor, registry: ProjectionRegistry, delta_fp: float = 0.15):
         self._anchor = anchor          # k (coálgebra terminal)
         self._registry = registry      # registro de proyecciones previas (no axiomas)
+        self.delta_fp = delta_fp
 
     def generate(self, admitted_input: Any) -> CanonicalState:
         """
@@ -71,13 +72,13 @@ class InvariantStateGenerator:
 
         if isinstance(data, str):
             normalized = self._normalize_text(data)
-            if self._approx_distance(normalized, str(self._anchor.identity)) < 0.15:
+            if self._approx_distance(normalized, str(self._anchor.identity)) < self.delta_fp:
                 return self._anchor.identity
             return self._canonical_text(normalized)
 
         if isinstance(data, dict) or isinstance(data, list):
             serialized = self._canonical_json(data)
-            if self._approx_distance(serialized, str(self._anchor.identity)) < 0.15:
+            if self._approx_distance(serialized, str(self._anchor.identity)) < self.delta_fp:
                 return self._anchor.identity
             return serialized
 

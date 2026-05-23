@@ -69,8 +69,13 @@ class DQEEngineFormal:
                 nli_score = self._evaluate_nli_contradiction(premise=act_axiom, hypothesis=raw_response)
                 contradiction_with_axioms = max(contradiction_with_axioms, nli_score)
             max_ds_dist = float(np.max(ds_distances)) if ds_distances else 0.0
-            D_s = max(max_ds_dist, contradiction_with_axioms)
+            # Fórmula coalgebraica (Anexo J): D_s = λ2 · d_logic
+            # d_logic = sup(max_geometric_dist, max_logical_contradiction) sobre los axiomas.
+            # λ_inv=0 (sin V̂), λ_logic=1.0, λ_temporal=0 (reservado).
+            d_logic = max(max_ds_dist, contradiction_with_axioms)
+            D_s = d_logic
         else:
+            d_logic = 0.0
             D_s = 0.0
 
         df_distances: list[float] = []
