@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from idicoc_core.util.hashing import canonical_json, sha256_hex
+from idicoc_utils.hashing import canonical_json, sha256_hex
 
 
 @dataclass

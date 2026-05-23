@@ -27,3 +27,9 @@ def sha256_dict(data: dict) -> str:
     """Compute SHA-256 hash of dict (canonical JSON)."""
 
     return sha256_hex(canonical_json(data))
+
+
+def hmac_sha256_hex(key: str, data: str) -> str:
+    """Compute an HMAC-SHA256 signature over a string, return as hex."""
+
+    return hashlib.new("sha256", data.encode("utf-8"), key.encode("utf-8")).hexdigest()

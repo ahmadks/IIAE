@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional
 from idicoc_core.core.graph.property_graph import PropertyGraph
 
 
-class PolicyEngine:
-    """Motor de políticas corporativas que inyecta axiomas en el PropertyGraph."""
+class AxiomEngine:
+    """Motor de gestión de axiomas que inyecta invariantes en el PropertyGraph."""
 
     def __init__(self, axioms: Optional[List[Dict[str, Any]]] = None) -> None:
         self.axioms = axioms or []

@@ -1,5 +1,6 @@
 # idicoc_core/runtime/guardian.py
 from __future__ import annotations
+import multiprocessing as mp
 import time
 from typing import Callable, Any
 
@@ -7,7 +8,18 @@ from idicoc_core.core.pipeline.kernel import CustodialKernel
 from idicoc_core.core.custody.merkle_dag import CustodialTraceManager
 from idicoc_core.exceptions.integrity_breach import HardHaltException
 from idicoc_core.runtime.loader import recover_input_from_snapshot
-from idicoc_core.util.logger import get_logger
+from idicoc_utils.logger import get_logger
+
+
+def _run_kernel(kernel_factory: Callable[[], CustodialKernel], raw_input: Any, result_queue: mp.Queue) -> None:
+    try:
+        kernel = kernel_factory()
+        kernel.process(raw_input)
+        result_queue.put(("SUCCESS", None))
+    except HardHaltException as e:
+        result_queue.put(("HARD_HALT", e))
+    except Exception as e:
+        result_queue.put(("ERROR", e))
 
 
 class CustodialGuardian:
@@ -41,21 +53,36 @@ class CustodialGuardian:
             try:
                 self._verify_system_integrity()
 
-                kernel = self.kernel_factory()
-                kernel.process(raw_input)
+                ctx = mp.get_context("fork")
+                result_queue: mp.Queue = ctx.Queue()
+                process = ctx.Process(
+                    target=_run_kernel,
+                    args=(self.kernel_factory, raw_input, result_queue),
+                )
+                process.start()
+                process.join()
 
-                # Éxito → reset
-                self._retry_count = 0
-                return
+                if result_queue.empty():
+                    if process.exitcode != 0:
+                        raise RuntimeError("Kernel child process failed without a queue result.")
+                    self._retry_count = 0
+                    return
 
-            except (SystemExit, HardHaltException):
-                # Hard Halt detectado
+                status, data = result_queue.get()
+                if status == "SUCCESS":
+                    self._retry_count = 0
+                    return
+                if status == "HARD_HALT":
+                    raw_input = self._handle_hard_halt(raw_input)
+                    continue
+                raise data
+
+            except HardHaltException:
                 raw_input = self._handle_hard_halt(raw_input)
 
             except Exception as e:
                 self._handle_unexpected_failure(e)
 
-        # Circuit breaker abierto
         self.logger.critical("CIRCUIT_BREAKER_OPEN: Entrada segregada permanentemente.")
         raise RuntimeError("CustodialGuardian: Circuit Breaker abierto.")
 

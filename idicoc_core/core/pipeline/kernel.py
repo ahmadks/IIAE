@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any
 from datetime import datetime
-from idicoc_core.util.hashing import sha256_hex
+from idicoc_utils.hashing import sha256_hex
 
 from idicoc_core.core.admission.aem import AdmissionBreach
 from idicoc_core.exceptions.integrity_breach import HardHaltException, InvariantStateBreach
@@ -26,6 +26,7 @@ class CustodialKernel:
         dqe,
         mode: str = "factual",
         epsilon: float = 0.0,
+        enable_hard_halt: bool = False,
     ):
         self.aem = aem
         self.isg = isg
@@ -36,6 +37,8 @@ class CustodialKernel:
         self.dqe = dqe
         self.mode = mode
         self.epsilon = epsilon
+        self.enable_hard_halt = enable_hard_halt
+        self._dissonance_history: list[float] = []
 
         # Estado coálgebraico S
         self.state_s = {
@@ -51,6 +54,10 @@ class CustodialKernel:
         property_graph: Any = None,
         timestamp: str | None = None,
     ) -> dict[str, Any] | None:
+        # Ajustar epsilon según la sesión entrante
+        if epsilon is not None:
+            self.epsilon = epsilon
+
         # El Kernel fija el tiempo lógico de la operación
         operation_time = timestamp or datetime.utcnow().isoformat()
 
@@ -74,6 +81,7 @@ class CustodialKernel:
             # Stage 5 — Deviation quantification
             dissonance = self.dqe.compute_dissonance(admitted, canonical_state_obj, updated_graph)
             self.state_s["buffers"][4] = dissonance
+            self._dissonance_history.append(dissonance)
 
             # Actualizar epsilon dinámicamente
             self.epsilon = self.cmc.update_epsilon(
@@ -90,7 +98,12 @@ class CustodialKernel:
             self.state_s["buffers"][5] = corrected_state
 
             # Stage 6 — Verification con tolerancia
-            self.verifier.verify_alignment(canonical_state_obj, tolerance=self.epsilon)
+            self.verifier.verify_alignment(
+                canonical_state_obj,
+                tolerance=self.epsilon,
+                dqe=self.dqe,
+                graph=updated_graph,
+            )
             self.state_s["buffers"][6] = "VERIFIED"
 
             invariant_state_hash = sha256_hex(repr(canonical_state_obj.data) + canonical_state_obj.metadata.get("timestamp", ""))
@@ -136,12 +149,27 @@ class CustodialKernel:
 
             self.ctm.seal_failure(snapshot, timestamp=operation_time)
             self.state_s["registers"][0] = "BREACH_RECORDED"
-            self._halt()
+            if self.enable_hard_halt:
+                self._halt()
+            else:
+                self.state_s["registers"][0] = "HALT_SKIPPED"
+                return {
+                    "status": "breach_recorded",
+                    "root_hash": self.ctm.root_hash,
+                    "snapshot": snapshot,
+                }
 
         return None
 
     def _compute_recent_variance(self) -> float:
-        return 0.0
+        if len(self._dissonance_history) < 2:
+            return 0.0
+        window = self._dissonance_history[-10:]
+        mean = sum(window) / len(window)
+        variance = sum((x - mean) ** 2 for x in window) / len(window)
+        return variance
 
     def _halt(self) -> None:
-        raise HardHaltException()
+        if self.enable_hard_halt:
+            raise HardHaltException()
+        self.state_s["registers"][0] = "HALT_SKIPPED"

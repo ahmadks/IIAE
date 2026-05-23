@@ -1,9 +1,12 @@
-import hashlib
+from __future__ import annotations
+
 import json
 import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Literal
 from datetime import datetime, timezone
+
+from idicoc_utils.hashing import sha256_hex
 
 # ---------------------------------------------------------------------------
 # TYPE DEFINITIONS
@@ -232,9 +235,7 @@ class SLTStandardZeroEngine:
 
         # 7. ── CTM SEAL (immutable audit block) ────────────────────
         timestamp = time.time()
-        trace = data.trace_id or hashlib.sha256(
-            str(timestamp).encode()
-        ).hexdigest()[:12]
+        trace = data.trace_id or sha256_hex(str(timestamp))[:12]
 
         seal_block = {
             "trace_id": trace,
@@ -251,7 +252,7 @@ class SLTStandardZeroEngine:
             "timestamp": timestamp,
         }
         seal_payload = json.dumps(seal_block, sort_keys=True)
-        ctm_seal = hashlib.sha256(seal_payload.encode()).hexdigest()
+        ctm_seal = sha256_hex(seal_payload)
 
         # 8. ── RESPONSE ────────────────────────────────────────────
         return {

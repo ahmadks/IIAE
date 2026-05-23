@@ -64,9 +64,47 @@ class InvariantStateGenerator:
         En la ontología monaxiomática:
             f_ISG(data) → V^t
 
-        No asume tipo de señal: texto, embedding, señal analógica, estado de firmware, etc.
-        La implementación concreta puede especializarse por sustrato, pero la interfaz es única.
+        Se aplica una normalización básica y un colapso por tolerancia δ_fp.
         """
-        # Aquí iría la lógica matemática real (Annex J).
-        # Versión mínima: identidad (asumiendo que el AEM ya filtró lo inadmisible).
+        if hasattr(data, "data"):
+            return self._project_to_invariant(data.data)
+
+        if isinstance(data, str):
+            normalized = self._normalize_text(data)
+            if self._approx_distance(normalized, str(self._anchor.identity)) < 0.15:
+                return self._anchor.identity
+            return self._canonical_text(normalized)
+
+        if isinstance(data, dict) or isinstance(data, list):
+            serialized = self._canonical_json(data)
+            if self._approx_distance(serialized, str(self._anchor.identity)) < 0.15:
+                return self._anchor.identity
+            return serialized
+
         return data
+
+    def _normalize_text(self, text: str) -> str:
+        return " ".join(text.lower().strip().split())
+
+    def _canonical_text(self, text: str) -> str:
+        if not text:
+            return text
+        tokens = text.split()
+        return " ".join(tokens)
+
+    def _canonical_json(self, value: Any) -> str:
+        try:
+            from idicoc_utils.hashing import canonical_json
+            return canonical_json(value)
+        except Exception:
+            return repr(value)
+
+    def _approx_distance(self, a: str, b: str) -> float:
+        a_tokens = set(a.split())
+        b_tokens = set(b.split())
+        if not a_tokens or not b_tokens:
+            return 1.0
+        intersection = len(a_tokens & b_tokens)
+        union = len(a_tokens | b_tokens)
+        similarity = intersection / union
+        return 1.0 - similarity

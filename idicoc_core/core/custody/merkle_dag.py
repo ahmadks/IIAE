@@ -1,10 +1,12 @@
 # idicoc_core/core/custody/merkle_dag.py
 from __future__ import annotations
+import os
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Protocol
 
-from idicoc_core.util.hashing import (
+from idicoc_utils.hashing import (
     canonical_json,
+    hmac_sha256_hex,
     sha256_dict,
 )
 
@@ -17,6 +19,23 @@ class HardwareSealer(Protocol):
 class NoOpHardwareSealer:
     def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return payload
+
+
+class EnvHardwareSealer:
+    def __init__(self, key_env: str = "IIAE_HARDWARE_KEY"):
+        self.key = os.environ.get(key_env)
+
+    def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.key:
+            return payload
+        payload_copy = dict(payload)
+        serialized = canonical_json(payload)
+        signature = hmac_sha256_hex(self.key, serialized)
+        payload_copy["hardware_evidence"] = {
+            "type": "HMAC_ENV_SEAL",
+            "signature": signature,
+        }
+        return payload_copy
 
 
 @dataclass
@@ -189,6 +208,34 @@ class CustodialTraceManager:
 
     def export_dag(self) -> Dict[str, Any]:
         return self._dag.to_dict()
+
+    def export_receipt(self, node_hash: str) -> Dict[str, Any]:
+        node = self.get_node(node_hash)
+        if node is None:
+            raise RuntimeError(f"Nodo {node_hash} no encontrado en el DAG.")
+
+        return {
+            "node_hash": node.node_hash,
+            "parent_hashes": node.parent_hashes,
+            "timestamp": node.timestamp,
+            "canonical_state": node.payload.get("payload", {}).get("canonical_state"),
+            "axiom_hashes": self._extract_axiom_hashes(node.payload),
+            "dissonance": node.payload.get("payload", {}).get("dissonance"),
+            "epsilon": node.payload.get("payload", {}).get("epsilon"),
+            "invariant_state_hash": node.invariant_state_hash,
+            "property_graph_hash": node.property_graph_hash,
+            "hardware_evidence": node.hardware_evidence,
+        }
+
+    @staticmethod
+    def _extract_axiom_hashes(payload: Dict[str, Any]) -> list[str]:
+        payload_body = payload.get("payload", {})
+        if not isinstance(payload_body, dict):
+            return []
+        graph = payload_body.get("property_graph")
+        if isinstance(graph, dict):
+            return list(graph.keys())
+        return []
 
     @staticmethod
     def _safe_serialize(obj: Any) -> Any:

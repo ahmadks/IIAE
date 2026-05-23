@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from idicoc_core.core.custody.merkle_dag import CustodialTraceManager
-from idicoc_core.util.hashing import canonical_json, sha256_hex
+from idicoc_utils.hashing import canonical_json, sha256_hex
 
 
 class KernelCustodyClient:
@@ -22,16 +22,19 @@ class KernelCustodyClient:
         source: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        timestamp = metadata.get("timestamp") if metadata and metadata.get("timestamp") else None
+        metadata = metadata or {}
+        metadata["mode"] = metadata.get("mode", "factual")
+        metadata["epsilon_used"] = metadata.get("epsilon_used", epsilon)
+
+        timestamp = metadata.get("timestamp") if metadata.get("timestamp") else None
         timestamp = timestamp or ""
 
         invariant_hash = "0" * 64
         property_graph_hash = "0" * 64
-        if metadata:
-            if metadata.get("invariant_state_hash"):
-                invariant_hash = metadata["invariant_state_hash"]
-            if metadata.get("property_graph_hash"):
-                property_graph_hash = metadata["property_graph_hash"]
+        if metadata.get("invariant_state_hash"):
+            invariant_hash = metadata["invariant_state_hash"]
+        if metadata.get("property_graph_hash"):
+            property_graph_hash = metadata["property_graph_hash"]
 
         payload = {
             "type": "WRAPPER_COMMIT",

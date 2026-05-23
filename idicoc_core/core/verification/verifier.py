@@ -14,14 +14,20 @@ class InvariantVerifier:
         Verificar que el estado canónico V^t es bisimilar a la
         coálgebra terminal k (SourceAnchor.identity).
 
-    No usa métricas, no usa distancias, no usa tolerancias.
-    La ontología monaxiomática exige igualdad estructural estricta.
+    En modo tolerante, utiliza una métrica de disonancia para comprobar
+    si la desviación estructural está dentro de epsilon.
     """
 
     def __init__(self, anchor: SourceAnchor):
         self._anchor = anchor  # La constante universal k
 
-    def verify_alignment(self, canonical_state: CanonicalState, tolerance: float | None = None) -> None:
+    def verify_alignment(
+        self,
+        canonical_state: CanonicalState,
+        tolerance: float | None = None,
+        dqe: Any | None = None,
+        graph: Any | None = None,
+    ) -> None:
         """
         Ejecuta la prueba de bisimulación:
             V^t ≡ k
@@ -29,26 +35,34 @@ class InvariantVerifier:
         Si la igualdad estructural falla y no está dentro del umbral aceptable → AlignmentBreach.
         """
         if tolerance is None or tolerance == 0.0:
-            requires_alignment = True
-        else:
-            requires_alignment = False
+            if not self._is_bisimilar(canonical_state.data, self._anchor.identity):
+                raise AlignmentBreach(
+                    message="Fallo de bisimulación: V^t no coincide con k.",
+                    invalid_state=canonical_state.data,
+                    context={
+                        "expected_k": repr(self._anchor.identity),
+                        "received_Vt": repr(canonical_state.data),
+                    },
+                    origin="InvariantVerifier.verify_alignment",
+                )
+            return
 
-        if requires_alignment and not self._is_bisimilar(canonical_state.data, self._anchor.identity):
+        if dqe is None or graph is None:
+            raise RuntimeError("Se requiere DQE y grafo para verificación con tolerancia.")
+
+        distance = dqe.compute_dissonance(canonical_state.data, self._anchor.identity, graph)
+        if distance > tolerance:
             raise AlignmentBreach(
-                message="Fallo de bisimulación: V^t no coincide con k.",
+                message="Fallo de alineación tolerante: la disonancia excede epsilon.",
                 invalid_state=canonical_state.data,
                 context={
                     "expected_k": repr(self._anchor.identity),
-                    "received_Vt": repr(canonical_state.data)
+                    "received_Vt": repr(canonical_state.data),
+                    "distance": distance,
+                    "tolerance": tolerance,
                 },
-                origin="InvariantVerifier.verify_alignment"
+                origin="InvariantVerifier.verify_alignment",
             )
 
     def _is_bisimilar(self, state_data: Any, k_identity: Any) -> bool:
-        """
-        En la ontología monaxiomática:
-            Bisimulación ≡ Igualdad estructural estricta.
-
-        No hay métricas, no hay distancias, no hay epsilon.
-        """
         return state_data == k_identity

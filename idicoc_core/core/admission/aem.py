@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Protocol
 import datetime
-from idicoc_core.util.logger import get_logger
+from idicoc_utils.logger import get_logger
 
 class EntropyAnalyzer(Protocol):
     """
@@ -55,9 +55,9 @@ class AnomalousEventManager:
         """
         structural_component, noise_component = self._analyzer.decompose(raw_input)
         entropy_score = self._analyzer.measure_entropy(noise_component if noise_component is not None else raw_input)
-        axiom_density = self._graph.compute_axiom_density() if hasattr(self._graph, "compute_axiom_density") else 0.0
+        structural_complexity = self._compute_structural_complexity(structural_component)
         is_meaningful = self._is_structurally_meaningful(structural_component)
-        within_barrier = self.entropy_barrier(entropy_score, axiom_density)
+        within_barrier = self.entropy_barrier(entropy_score, structural_complexity)
 
         if not is_meaningful or not within_barrier:
             noise_to_log = noise_component if noise_component is not None else raw_input
@@ -91,12 +91,51 @@ class AnomalousEventManager:
 
     def entropy_barrier(self, entropy_score: float, structural_complexity: float = 0.0) -> bool:
         """
-        Controla la barrera de entropía en función del umbral y la complejidad estructural.
+        Controla la barrera de entropía en función de la complejidad estructural.
         Simulación de delta_eta(S_c) del Anexo B.1.4.
         """
-        complexity_penalty = min(0.2, structural_complexity * 0.05)
-        effective_threshold = self._threshold + complexity_penalty
-        return entropy_score <= effective_threshold
+        delta_eta = min(0.5, 0.1 * structural_complexity)
+        return entropy_score <= delta_eta
+
+    def _compute_structural_complexity(self, structural_component: Any) -> float:
+        graph_size = len(getattr(self._graph, "nodes", {}))
+        rank = self._compute_rank(structural_component)
+        depth = self._compute_graph_depth()
+        alpha = 0.1
+        beta = 0.2
+        gamma = 0.6
+        return alpha * graph_size + beta * rank + gamma * depth
+
+    def _compute_rank(self, structural_component: Any) -> float:
+        if isinstance(structural_component, str):
+            return float(len(structural_component.split()))
+        if isinstance(structural_component, dict):
+            return float(len(structural_component))
+        if isinstance(structural_component, (list, tuple, set)):
+            return float(len(structural_component))
+        return 1.0
+
+    def _compute_graph_depth(self) -> float:
+        if not hasattr(self._graph, "edges") or not self._graph.edges:
+            return 1.0
+        adjacency: dict[str, list[str]] = {}
+        for edge in self._graph.edges:
+            src = edge.get("source")
+            tgt = edge.get("target")
+            if src and tgt:
+                adjacency.setdefault(src, []).append(tgt)
+        visited: dict[str, int] = {}
+
+        def dfs(node: str) -> int:
+            if node in visited:
+                return visited[node]
+            max_depth = 1
+            for child in adjacency.get(node, []):
+                max_depth = max(max_depth, 1 + dfs(child))
+            visited[node] = max_depth
+            return max_depth
+
+        return float(max(dfs(node) for node in adjacency) if adjacency else 1)
 
     def _is_structurally_meaningful(self, structural_component: Any) -> bool:
         """Verificación de coherencia con el Property Graph (G_t)."""

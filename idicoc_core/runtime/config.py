@@ -8,14 +8,14 @@ from idicoc_core.core.admission.aem import AnomalousEventManager
 from idicoc_core.core.projection.invariant_state_generator import InvariantStateGenerator
 from idicoc_core.core.verification.verifier import InvariantVerifier
 from idicoc_core.core.verification.registry import ProjectionRegistry
-from idicoc_core.core.custody.merkle_dag import CustodialTraceManager
+from idicoc_core.core.custody.merkle_dag import CustodialTraceManager, MerkleDAG, EnvHardwareSealer
 from idicoc_core.core.pipeline.kernel import CustodialKernel
 from idicoc_core.core.graph.property_graph import PropertyGraph
 from idicoc_core.core.dse.dse import DynamicSchemaExtractor
 from idicoc_core.core.manifold.cmc import ManifoldConstructor
 from idicoc_core.core.deviation.dqe import DeviationQuantifier
 
-from idicoc_core.util.logger import configure_logging
+from idicoc_utils.logger import configure_logging
 
 
 class RuntimeConfig:
@@ -36,6 +36,7 @@ class RuntimeConfig:
         mode: str = "factual",
         rigidity_epsilon: float = 0.0,
         delta_fp: float = 0.15,
+        enable_hard_halt: bool = False,
         log_destination: str = "stdout",
     ):
         # Logging global
@@ -45,6 +46,7 @@ class RuntimeConfig:
         self.mode = mode
         self.epsilon = rigidity_epsilon
         self.delta_fp = delta_fp
+        self.enable_hard_halt = enable_hard_halt
 
         # 1. Anchor (k)
         self.anchor = SourceAnchor(constant_k)
@@ -76,7 +78,8 @@ class RuntimeConfig:
         self.cmc = ManifoldConstructor(dqe=self.dqe)
 
         # 8. CTM
-        self.ctm = CustodialTraceManager()
+        self.hardware_sealer = EnvHardwareSealer()
+        self.ctm = CustodialTraceManager(dag=MerkleDAG(sealer=self.hardware_sealer))
 
         genesis_metadata = {
             "delta_fp": self.delta_fp,
@@ -107,5 +110,6 @@ class RuntimeConfig:
                 dqe=self.dqe,
                 mode=self.mode,
                 epsilon=self.epsilon,
+                enable_hard_halt=self.enable_hard_halt,
             )
         return _factory

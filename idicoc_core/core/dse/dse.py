@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from idicoc_core.core.graph.property_graph import PropertyGraph
-from idicoc_core.util.hashing import sha256_hex
+from idicoc_utils.hashing import sha256_hex
 
 
 class DynamicSchemaExtractor:
@@ -14,14 +14,66 @@ class DynamicSchemaExtractor:
 
     def extract_axioms(self, raw_input: Any, canonical_state: Any) -> PropertyGraph:
         """Extrae axiomas del input y estado canónico, los añade al grafo."""
-        axiom_quintuple = self._build_axiom_quintuple(raw_input, canonical_state)
-        self.property_graph.add_axiom(axiom_quintuple["axiom_id"], axiom_quintuple)
+        axioms = self._infer_axioms(raw_input, canonical_state)
+        for axiom in axioms:
+            self.property_graph.add_axiom(axiom["axiom_id"], axiom)
         self.property_graph.detect_conflicts()
         return self.property_graph
 
     def update_graph(self, raw_input: Any, canonical_state: Any) -> PropertyGraph:
         """Actualiza el grafo con axiomas derivados de la transformación input->canonical."""
         return self.extract_axioms(raw_input, canonical_state)
+
+    def _infer_axioms(self, raw_input: Any, canonical_state: Any) -> list[dict[str, Any]]:
+        raw_text = str(raw_input) if raw_input is not None else ""
+        canonical_text = str(getattr(canonical_state, "data", canonical_state))
+        axioms: list[dict[str, Any]] = []
+
+        if raw_text and canonical_text:
+            subjects = self._extract_subjects(raw_text)
+            objects = self._extract_subjects(canonical_text)
+            predicate = "transforms_to"
+            scope = "session"
+            timestamp = datetime.utcnow().isoformat()
+
+            for subject in subjects or [type(raw_input).__name__]:
+                for obj in objects or [type(canonical_state).__name__]:
+                    structural_repr = f"{subject}|{predicate}|{obj}|{scope}|{timestamp}"
+                    signature = sha256_hex(structural_repr)
+                    axiom_id = sha256_hex(signature + "||" + timestamp)
+                    axioms.append(
+                        {
+                            "axiom_id": axiom_id,
+                            "subject": subject,
+                            "predicate": predicate,
+                            "object": obj,
+                            "scope": scope,
+                            "priority": 1,
+                            "polarity": "affirmative",
+                            "timestamp": timestamp,
+                            "structural_signature": signature,
+                            "axiom_version": axiom_id,
+                        }
+                    )
+
+        if not axioms:
+            axioms.append(self._build_axiom_quintuple(raw_input, canonical_state))
+
+        return axioms
+
+    def _extract_subjects(self, text: str) -> list[str]:
+        normalized = " ".join(text.lower().strip().split())
+        tokens = normalized.replace(".", "").replace(",", "").split()
+        if " is " in normalized:
+            parts = normalized.split(" is ")
+            return [parts[0].strip()]
+        if " are " in normalized:
+            parts = normalized.split(" are ")
+            return [parts[0].strip()]
+        if " has " in normalized:
+            parts = normalized.split(" has ")
+            return [parts[0].strip()]
+        return tokens[:1]
 
     def _build_axiom_quintuple(self, raw_input: Any, canonical_state: Any) -> dict[str, Any]:
         """
@@ -38,11 +90,8 @@ class DynamicSchemaExtractor:
         scope = "session"
         timestamp = datetime.utcnow().isoformat()
         
-        # Firma estructural: hash del axioma normalizado
         structural_repr = f"{subject}|{predicate}|{obj}|{scope}|{timestamp}"
         structural_signature = sha256_hex(structural_repr)
-        
-        # Versión criptográfica: v(α) = H(σ ∥ t)
         axiom_version = sha256_hex(structural_signature + "||" + timestamp)
         
         return {

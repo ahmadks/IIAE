@@ -5,7 +5,7 @@ from typing import Callable, Iterable, Any
 
 from idicoc_core.runtime.guardian import CustodialGuardian
 from idicoc_core.core.custody.merkle_dag import CustodialTraceManager
-from idicoc_core.util.logger import get_logger
+from idicoc_utils.logger import get_logger
 
 class ProcessLoop:
     """

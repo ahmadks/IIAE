@@ -19,8 +19,8 @@ class DQEEngineFormal:
 
     def __init__(
         self,
-        embedding_model_name: str = "BAAI/bge-small-en-v1.5",
-        nli_model_name: str = "facebook/bart-large-mnli",
+        embedding_model_name: str,
+        nli_model_name: str,
         delta_fp: float = 0.15,
     ):
         self.encoder = SentenceTransformer(embedding_model_name)
