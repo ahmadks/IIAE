@@ -35,3 +35,11 @@ class ComplianceBreach(RuntimeError):
         if self.dissonance is not None and self.threshold is not None:
             texto += f" | D_s={self.dissonance:.4f} > ε={self.threshold:.4f}"
         return texto
+
+    def serialize(self) -> dict[str, float | str | None]:
+        return {
+            "type": self.breach_type,
+            "message": self.message,
+            "dissonance": self.dissonance,
+            "threshold": self.threshold,
+        }

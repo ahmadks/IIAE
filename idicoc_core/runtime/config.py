@@ -1,5 +1,6 @@
 # idicoc_core/runtime/config.py
 from __future__ import annotations
+from datetime import datetime
 from typing import Callable, Optional
 
 from idicoc_core.core.source.anchor import SourceAnchor
@@ -33,6 +34,8 @@ class RuntimeConfig:
         entropy_analyzer,
         property_graph: Optional[PropertyGraph] = None,
         mode: str = "factual",
+        rigidity_epsilon: float = 0.0,
+        delta_fp: float = 0.15,
         log_destination: str = "stdout",
     ):
         # Logging global
@@ -40,6 +43,8 @@ class RuntimeConfig:
 
         self.property_graph = property_graph or PropertyGraph()
         self.mode = mode
+        self.epsilon = rigidity_epsilon
+        self.delta_fp = delta_fp
 
         # 1. Anchor (k)
         self.anchor = SourceAnchor(constant_k)
@@ -64,19 +69,27 @@ class RuntimeConfig:
         # 5. DSE
         self.dse = DynamicSchemaExtractor(self.property_graph)
 
-        # 6. CMC
-        self.cmc = ManifoldConstructor()
-        self.epsilon = self.cmc.compute_epsilon(
-            self.mode,
-            self.property_graph.compute_axiom_density(),
-            state_stability=1.0,
-        )
+        # 6. Deviation quantifier
+        self.dqe = DeviationQuantifier(delta_fp=delta_fp)
 
-        # 7. DQE
-        self.dqe = DeviationQuantifier()
+        # 7. Manifold constructor
+        self.cmc = ManifoldConstructor(dqe=self.dqe)
 
         # 8. CTM
         self.ctm = CustodialTraceManager()
+
+        genesis_metadata = {
+            "delta_fp": self.delta_fp,
+            "lambda_weights": (
+                self.dqe.lambda_inv,
+                self.dqe.lambda_logic,
+                self.dqe.lambda_temporal,
+            ),
+            "epsilon_0": self.epsilon,
+            "mode": self.mode,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self.ctm.initialize_genesis(genesis_metadata, timestamp=genesis_metadata["timestamp"])
 
     def kernel_factory(self) -> Callable[[], CustodialKernel]:
         """
@@ -92,6 +105,7 @@ class RuntimeConfig:
                 dse=self.dse,
                 cmc=self.cmc,
                 dqe=self.dqe,
+                mode=self.mode,
                 epsilon=self.epsilon,
             )
         return _factory

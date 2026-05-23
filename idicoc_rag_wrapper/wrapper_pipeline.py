@@ -1,16 +1,12 @@
 """
 Adaptador IDICOC entre la IA comercial y el núcleo determinista.
 
-Este módulo solo contiene lógica de adaptación del input, validación ligera
-y medición de disonancia D_s. No implementa modelos de lenguaje ni RAG.
+Este módulo ahora delega la orquestación completa al pipeline principal.
 """
 
 from __future__ import annotations
-from datetime import datetime
 from typing import Any
 
-from idicoc_core.runtime.config import RuntimeConfig
-from idicoc_core.core.pipeline.kernel import CustodialKernel
 from idicoc_rag_wrapper.base import (
     CanonicalStateDTO,
     EntropyAnalyzer,
@@ -18,31 +14,23 @@ from idicoc_rag_wrapper.base import (
 )
 from idicoc_rag_wrapper.config import WrapperConfig
 from idicoc_rag_wrapper.exceptions import ComplianceBreach, WrapperInitializationError
+from idicoc_rag_wrapper.pipeline import IIAEEnterpriseSDKWrapper
 
 
 class IDICOCWrapper(IDICOCWrapperContract):
-    """Wrapper ligero que adapta la IA comercial al núcleo idicoc_core."""
+    """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
     def __init__(self, config: WrapperConfig, entropy_analyzer: EntropyAnalyzer) -> None:
         self.config = config
         self.entropy_analyzer = entropy_analyzer
-        self.kernel: CustodialKernel | None = None
+        self.pipeline: IIAEEnterpriseSDKWrapper | None = None
         self._initialized = False
         self.initialize(config)
 
     def initialize(self, config: WrapperConfig) -> None:
         self.config = config
-        self.kernel = self._create_kernel()
+        self.pipeline = IIAEEnterpriseSDKWrapper(config, self.entropy_analyzer)
         self._initialized = True
-
-    def _create_kernel(self) -> CustodialKernel:
-        runtime_config = RuntimeConfig(
-            constant_k=self.config.constant_k,
-            entropy_analyzer=self.entropy_analyzer,
-            mode=self.config.mode,
-        )
-        kernel_factory = runtime_config.kernel_factory()
-        return kernel_factory()
 
     def adapt_input(self, ai_output: str, rag_context: dict[str, Any] | None = None) -> dict[str, Any]:
         texto = str(ai_output).strip()
@@ -53,86 +41,54 @@ class IDICOCWrapper(IDICOCWrapperContract):
         }
 
     def admit(self, raw_input: Any) -> Any:
-        if not self._initialized:
+        if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
-
-        if raw_input is None:
-            raise ComplianceBreach("Entrada nula", breach_type="input_admission")
-
-        if isinstance(raw_input, str) and not raw_input.strip():
-            raise ComplianceBreach("Entrada vacía", breach_type="input_admission")
-
-        if self.entropy_analyzer is None:
-            raise WrapperInitializationError("No hay analizador de entropía configurado.")
-
-        estructura, ruido = self.entropy_analyzer.decompose(raw_input)
-        entropia = self.entropy_analyzer.measure_entropy(ruido if ruido is not None else raw_input)
-
-        if entropia > self.config.epsilon_threshold:
-            if self.entropy_analyzer.is_recoverable(ruido):
-                raise ComplianceBreach(
-                    "Ruido recuperable detectado",
-                    breach_type="entropy_recoverable",
-                    dissonance=entropia,
-                    threshold=self.config.epsilon_threshold,
-                )
-            raise ComplianceBreach(
-                "Ruido excesivo no recuperable",
-                breach_type="entropy_rejection",
-                dissonance=entropia,
-                threshold=self.config.epsilon_threshold,
-            )
-
-        return estructura
+        return self.pipeline.admit(raw_input)
 
     def process(self, admitted_input: Any) -> CanonicalStateDTO:
-        rag_context = None
-        raw_value = admitted_input
+        if not self._initialized or self.pipeline is None:
+            raise WrapperInitializationError("El wrapper no está inicializado.")
 
+        raw_value = admitted_input
+        rag_context = None
         if isinstance(admitted_input, dict):
             raw_value = admitted_input.get("text", admitted_input)
             rag_context = admitted_input.get("rag_context")
 
-        admitted = self.admit(raw_value)
-        adapted = self.adapt_input(admitted, rag_context)
-
-        if self.kernel is None:
-            self.kernel = self._create_kernel()
-
-        self.kernel.process(adapted)
-
-        dissonance = float(self.kernel.state_s["buffers"][4] or 0.0)
-        epsilon = float(self.kernel.epsilon)
-        root_hash = getattr(self.kernel.ctm, "root_hash", None)
-
-        metadata = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "dissonance": dissonance,
-            "epsilon": epsilon,
-            "root_hash": root_hash,
-            "config_mode": self.config.mode,
-            "source": self.config.commercial_ai_name,
-            **self.config.extra_metadata,
-        }
-
-        canonical_state = CanonicalStateDTO(
-            data=adapted,
-            metadata=metadata,
-            source_axioms=[],
+        result = self.pipeline.execute(
+            raw_input=raw_value,
+            raw_output=raw_value,
+            rag_context=rag_context if isinstance(rag_context, list) else None,
         )
 
-        return canonical_state
+        return result["canonical_state"]
+
+    def process_interaction(
+        self,
+        user_prompt: str,
+        ai_response: str,
+        rag_context: list[str] | None = None,
+    ) -> CanonicalStateDTO:
+        if not self._initialized or self.pipeline is None:
+            raise WrapperInitializationError("El wrapper no está inicializado.")
+
+        result = self.pipeline.execute(
+            raw_input=user_prompt,
+            raw_output=ai_response,
+            rag_context=rag_context,
+        )
+        return result["canonical_state"]
 
     def verify_compliance(self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0) -> bool:
         if not canonical_state.verify_integrity():
             raise ComplianceBreach("Hash de integridad inválido", breach_type="integrity")
 
-        umbral = tolerance if tolerance > 0.0 else self.config.epsilon_threshold
-        dissonance = float(canonical_state.metadata.get("dissonance", 0.0))
+        umbral = tolerance if tolerance > 0.0 else self.config.rigidity_epsilon
+        dissonance = float(canonical_state.metadata.get("d_s", 0.0))
 
         if dissonance > umbral:
             raise ComplianceBreach(
-                "D_s excede el umbral",
+                "D_s excede el umbral de manifold",
                 breach_type="dissonance",
                 dissonance=dissonance,
                 threshold=umbral,
@@ -153,7 +109,6 @@ class IDICOCWrapper(IDICOCWrapperContract):
         return {
             "error": str(error),
             "context": context,
-            "timestamp": datetime.utcnow().isoformat(),
         }
 
     def get_entropy_analyzer(self) -> EntropyAnalyzer:

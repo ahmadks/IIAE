@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from idicoc_core.core.graph.property_graph import PropertyGraph
+from idicoc_core.util.hashing import canonical_json, sha256_hex
 
 
 @dataclass
@@ -10,35 +10,54 @@ class Manifold:
     canonical_state_hash: str
     epsilon: float
     active_axioms: list[dict[str, Any]]
-    metadata: dict[str, Any]
+    canonical_state: Any
+    graph: Any
+
+    def contains(self, point: Any) -> bool:
+        if hasattr(point, "data"):
+            candidate = point.data
+        else:
+            candidate = point
+
+        if hasattr(self, "dqe") and self.dqe is not None:
+            dissonance = self.dqe.compute_dissonance(candidate, self.canonical_state, self.graph)
+            return dissonance <= self.epsilon
+
+        return True
 
 
 class ManifoldConstructor:
-    """Construye un manifold admisible a partir del estado canónico y el grafo de propiedades."""
+    """Constructor de manifold simplificado con actualización dinámica de epsilon."""
 
-    def build(self, canonical_state: Any, property_graph: PropertyGraph, epsilon: float) -> Manifold:
-        metadata = {
-            "axiom_density": property_graph.compute_axiom_density(),
-            "generated_at": canonical_state.metadata.get("timestamp", ""),
-        }
-        canonical_state_hash = str(hash(repr(canonical_state.data) + canonical_state.metadata.get("timestamp", "")))
-        return Manifold(
-            canonical_state_hash=canonical_state_hash,
+    def __init__(self, dqe: Any | None = None):
+        self.dqe = dqe
+
+    def compute_epsilon(self, mode: str, axiom_density: float, stability_factor: float) -> float:
+        base = 0.05 + 0.5 * axiom_density * stability_factor
+        if mode == "strict":
+            return min(1.0, max(0.0, base * 0.5))
+        return min(1.0, max(0.0, base))
+
+    def update_epsilon(
+        self,
+        current_eps: float,
+        mode: str,
+        axiom_density: float,
+        dissonance_variance: float = 0.0,
+        alpha: float = 0.1,
+    ) -> float:
+        target = self.compute_epsilon(mode, axiom_density, 1.0 - dissonance_variance)
+        return (1.0 - alpha) * current_eps + alpha * target
+
+    def build(self, canonical_state: Any, graph: Any, epsilon: float) -> Manifold:
+        canonical_hash = sha256_hex(canonical_json(getattr(canonical_state, "data", canonical_state)))
+        active_axioms = graph.get_active_axioms() if hasattr(graph, "get_active_axioms") else []
+        manifold = Manifold(
+            canonical_state_hash=canonical_hash,
             epsilon=epsilon,
-            active_axioms=property_graph.get_active_axioms(),
-            metadata=metadata,
+            active_axioms=active_axioms,
+            canonical_state=getattr(canonical_state, "data", canonical_state),
+            graph=graph,
         )
-
-    def compute_epsilon(self, mode: str, axiom_density: float, state_stability: float) -> float:
-        if mode == "creative":
-            base = 0.7
-        elif mode == "hybrid":
-            base = 0.35
-        else:
-            base = 0.0
-
-        stability_penalty = max(0.0, min(0.3, 1.0 - state_stability))
-        return min(1.0, base + stability_penalty * 0.2)
-
-    def is_within_manifold(self, dissonance_score: float, manifold: Manifold) -> bool:
-        return dissonance_score <= manifold.epsilon
+        manifold.dqe = self.dqe
+        return manifold

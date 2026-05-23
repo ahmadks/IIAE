@@ -38,13 +38,14 @@ class AnomalousEventManager:
         # Mapa de Entropía para análisis forense (Sección 6.3)
         self.entropy_map: Dict[str, List[Dict[str, Any]]] = {
             "DISCARDED_NOISE": [],
-            "RECOVERABLE_NOISE": []
+            "RECOVERABLE_NOISE": [],
+            "ADMITTED": [],
         }
         
         # Integración con el logger del framework
         self.logger = get_logger("admission.aem")
 
-    def admit(self, raw_input: Any) -> Any:
+    def admit(self, raw_input: Any, hard_halt_on_breach: bool = False) -> tuple[Any, dict]:
         """
         Gatekeeper del pipeline:
         1. Descompone la entrada en componente estructural y ruido.
@@ -55,17 +56,38 @@ class AnomalousEventManager:
         structural_component, noise_component = self._analyzer.decompose(raw_input)
         entropy_score = self._analyzer.measure_entropy(noise_component if noise_component is not None else raw_input)
         axiom_density = self._graph.compute_axiom_density() if hasattr(self._graph, "compute_axiom_density") else 0.0
+        is_meaningful = self._is_structurally_meaningful(structural_component)
+        within_barrier = self.entropy_barrier(entropy_score, axiom_density)
 
-        if self._is_structurally_meaningful(structural_component) and self.entropy_barrier(entropy_score, axiom_density):
-            return structural_component
+        if not is_meaningful or not within_barrier:
+            noise_to_log = noise_component if noise_component is not None else raw_input
+            if self._analyzer.is_recoverable(noise_to_log):
+                category = "RECOVERABLE_NOISE"
+            else:
+                category = "DISCARDED_NOISE"
+            self._log_noise(raw_input, category, entropy_score, structural_component, noise_to_log)
+            metrics = {
+                "entropy": entropy_score,
+                "category": category,
+                "admitted": False,
+                "axiom_density": axiom_density,
+                "structural": structural_component,
+                "noise": noise_component,
+            }
+            if hard_halt_on_breach:
+                raise AdmissionBreach(f"Entrada segregada: {category}")
+            return structural_component, metrics
 
-        noise_to_log = noise_component if noise_component is not None else raw_input
-        if self._analyzer.is_recoverable(noise_to_log):
-            self._log_noise(raw_input, "RECOVERABLE_NOISE", entropy_score, structural_component, noise_to_log)
-            raise AdmissionBreach("Entrada segregada: Ruido recuperable (ηᵣ).")
-        else:
-            self._log_noise(raw_input, "DISCARDED_NOISE", entropy_score, structural_component, noise_to_log)
-            raise AdmissionBreach("Entrada segregada: Ruido estructural descartado (ηₛ).")
+        metrics = {
+            "entropy": entropy_score,
+            "category": "ADMITTED",
+            "admitted": True,
+            "axiom_density": axiom_density,
+            "structural": structural_component,
+            "noise": noise_component,
+        }
+        self.entropy_map["ADMITTED"].append(metrics)
+        return structural_component, metrics
 
     def entropy_barrier(self, entropy_score: float, structural_complexity: float = 0.0) -> bool:
         """

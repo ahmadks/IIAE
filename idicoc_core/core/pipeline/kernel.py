@@ -4,6 +4,7 @@ from typing import Any
 from datetime import datetime
 from idicoc_core.util.hashing import sha256_hex
 
+from idicoc_core.core.admission.aem import AdmissionBreach
 from idicoc_core.exceptions.integrity_breach import HardHaltException, InvariantStateBreach
 from idicoc_core.exceptions.alignment_breach import AlignmentBreach
 
@@ -23,6 +24,7 @@ class CustodialKernel:
         dse,
         cmc,
         dqe,
+        mode: str = "factual",
         epsilon: float = 0.0,
     ):
         self.aem = aem
@@ -32,6 +34,7 @@ class CustodialKernel:
         self.dse = dse
         self.cmc = cmc
         self.dqe = dqe
+        self.mode = mode
         self.epsilon = epsilon
 
         # Estado coálgebraico S
@@ -40,52 +43,61 @@ class CustodialKernel:
             "registers": [None] * 7
         }
 
-    def process(self, raw_input: Any) -> None:
+    def process(
+        self,
+        canonical_state: Any,
+        dissonance: float = 0.0,
+        epsilon: float = 0.0,
+        property_graph: Any = None,
+        timestamp: str | None = None,
+    ) -> dict[str, Any] | None:
         # El Kernel fija el tiempo lógico de la operación
-        operation_time = datetime.utcnow().isoformat()
+        operation_time = timestamp or datetime.utcnow().isoformat()
 
         try:
-            # Stage 1 — Admission
-            admitted = self.aem.admit(raw_input)
+            # Stage 1 — Admission (notarial, asume estado ya admitido)
+            admitted = canonical_state
             self.state_s["buffers"][0] = admitted
 
             # Stage 2 — Projection
-            canonical_state = self.isg.generate(admitted)
-            self.state_s["buffers"][1] = canonical_state
+            canonical_state_obj = self.isg.generate(admitted)
+            self.state_s["buffers"][1] = canonical_state_obj
 
             # Stage 3 — Schema extraction / graph update
-            updated_graph = self.dse.update_graph(admitted, canonical_state)
+            updated_graph = self.dse.update_graph(admitted, canonical_state_obj)
             self.state_s["buffers"][2] = updated_graph
 
             # Stage 4 — Manifold construction
-            manifold = self.cmc.build(canonical_state, updated_graph, self.epsilon)
+            manifold = self.cmc.build(canonical_state_obj, updated_graph, self.epsilon)
             self.state_s["buffers"][3] = manifold
 
             # Stage 5 — Deviation quantification
-            dissonance = self.dqe.compute_dissonance(admitted, canonical_state, updated_graph)
+            dissonance = self.dqe.compute_dissonance(admitted, canonical_state_obj, updated_graph)
             self.state_s["buffers"][4] = dissonance
 
+            # Actualizar epsilon dinámicamente
+            self.epsilon = self.cmc.update_epsilon(
+                current_eps=self.epsilon,
+                mode=self.mode,
+                axiom_density=updated_graph.compute_axiom_density(),
+                dissonance_variance=self._compute_recent_variance(),
+            )
+
             if dissonance > self.epsilon:
-                corrected_state = self.dqe.project_to_manifold(
-                    admitted,
-                    manifold,
-                    canonical_state,
-                    updated_graph,
-                )
+                corrected_state = self.dqe.project_to_manifold(admitted, manifold, canonical_state_obj, updated_graph)
             else:
                 corrected_state = admitted
             self.state_s["buffers"][5] = corrected_state
 
-            # Stage 6 — Verification
-            self.verifier.verify_alignment(canonical_state, tolerance=self.epsilon)
+            # Stage 6 — Verification con tolerancia
+            self.verifier.verify_alignment(canonical_state_obj, tolerance=self.epsilon)
             self.state_s["buffers"][6] = "VERIFIED"
 
-            # Stage 7 — Custody (determinista) con metadatos del Anexo K
-            invariant_state_hash = sha256_hex(repr(canonical_state.data) + canonical_state.metadata.get("timestamp", ""))
+            invariant_state_hash = sha256_hex(repr(canonical_state_obj.data) + canonical_state_obj.metadata.get("timestamp", ""))
             property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
-            
+
             self.ctm.commit(
-                corrected_state,
+                canonical_state_obj.data if hasattr(canonical_state_obj, 'data') else canonical_state_obj,
                 dissonance=dissonance,
                 epsilon=self.epsilon,
                 property_graph=updated_graph,
@@ -94,18 +106,42 @@ class CustodialKernel:
                 property_graph_hash=property_graph_hash,
             )
             self.state_s["registers"][0] = "COMMITTED"
+            return {
+                "status": "committed",
+                "root_hash": self.ctm.root_hash,
+            }
+
+        except AdmissionBreach as breach:
+            snapshot = {
+                "kernel_state": self.state_s,
+                "breach": {
+                    "type": "AdmissionBreach",
+                    "message": str(breach),
+                    "entropy_map": getattr(self.aem, "entropy_map", {}),
+                },
+            }
+
+            self.ctm.seal_failure(snapshot, timestamp=operation_time)
+            self.state_s["registers"][0] = "ADMISSION_BREACH"
+            return {
+                "status": "admission_breach",
+                "snapshot": snapshot,
+            }
 
         except (InvariantStateBreach, AlignmentBreach) as breach:
             snapshot = {
                 "kernel_state": self.state_s,
-                "breach": breach.serialize_forensic_data()
+                "breach": breach.serialize_forensic_data(),
             }
 
-            # Sellado en el CTM con el mismo tiempo lógico
             self.ctm.seal_failure(snapshot, timestamp=operation_time)
-
-            # Hard Halt
+            self.state_s["registers"][0] = "BREACH_RECORDED"
             self._halt()
+
+        return None
+
+    def _compute_recent_variance(self) -> float:
+        return 0.0
 
     def _halt(self) -> None:
         raise HardHaltException()
