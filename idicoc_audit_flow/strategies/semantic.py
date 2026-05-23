@@ -109,7 +109,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
                     violated_axioms.append(reference)
             else:
                 max_context_contradiction = max(max_context_contradiction, contradiction_score)
-                if contradiction_score > self.config.semantic_contradiction_snapping_threshold:
+                if contradiction_score > self.config.contradiction_snapping_threshold:
                     contradictory_contexts.append(reference)
 
             if not is_axiom and cosine_distance <= self.config.correction_base_tolerance:
@@ -138,7 +138,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
             D_f = max(min(factual_cosines) if factual_cosines else 1.0, max(factual_contradictions) if factual_contradictions else 0.0)
 
         allowable_threshold = self.config.correction_base_tolerance + epsilon
-        snapping_flag = not support_found and max_context_contradiction > self.config.semantic_contradiction_snapping_threshold
+        snapping_flag = not support_found and max_context_contradiction > self.config.contradiction_snapping_threshold
         correction_flag = (D_s > allowable_threshold) or snapping_flag
         corrected_output = source_input
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from idicoc_core.core.graph.property_graph import PropertyGraph
@@ -34,7 +34,7 @@ class DynamicSchemaExtractor:
             objects = self._extract_subjects(canonical_text)
             predicate = "transforms_to"
             scope = "session"
-            timestamp = datetime.utcnow().isoformat()
+            timestamp = datetime.now(timezone.utc).isoformat()
 
             for subject in subjects or [type(raw_input).__name__]:
                 for obj in objects or [type(canonical_state).__name__]:
@@ -88,7 +88,7 @@ class DynamicSchemaExtractor:
         predicate = "transforms_to"
         obj = type(canonical_state.data).__name__ if hasattr(canonical_state, 'data') else repr(canonical_state)
         scope = "session"
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         structural_repr = f"{subject}|{predicate}|{obj}|{scope}|{timestamp}"
         structural_signature = sha256_hex(structural_repr)

@@ -1,10 +1,11 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from idicoc_core.core.graph.property_graph import PropertyGraph
 from idicoc_core.runtime.config import RuntimeConfig
 from idicoc_utils.hashing import canonical_json, sha256_hex
+from idicoc_utils.logger import get_logger
 from .base import CanonicalStateDTO, EntropyAnalyzer
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
@@ -22,11 +23,14 @@ class IIAEEnterpriseSDKWrapper:
         config: AuditConfig,
         entropy_analyzer: EntropyAnalyzer,
         axioms: Optional[List[Dict[str, Any]]] = None,
+        aem_storage: Optional[Any] = None,
+        ctm_storage: Optional[Any] = None,
     ) -> None:
         self.config = config
         self.entropy_analyzer = entropy_analyzer
         self.graph = PropertyGraph()
         self.axiom_engine = AxiomEngine(axioms)
+        self.logger = get_logger("audit_flow.pipeline")
 
         if self.config.audit_mode == "semantic":
             self.dissonance_strategy = SemanticDissonanceStrategy(
@@ -41,12 +45,14 @@ class IIAEEnterpriseSDKWrapper:
             constant_k=self.config.constant_k,
             entropy_analyzer=self.entropy_analyzer,
             property_graph=self.graph,
-            mode=self.config.mode,
             rigidity_epsilon=self.config.rigidity_epsilon,
             delta_fp=self.config.isg_delta_fp,
             enable_hard_halt=self.config.enable_hard_halt,
+            instance_name=self.config.source_name,
+            aem_storage=aem_storage,
+            ctm_storage=ctm_storage,
         )
-        self.kernel_client = KernelCustodyClient(ctm=self.runtime_config.ctm)
+        self.kernel_client = KernelCustodyClient(ctm=self.runtime_config.ctm) if self.config.ctm_mode == "full" else None
         self._initialized = False
         self.initialize()
 
@@ -92,11 +98,9 @@ class IIAEEnterpriseSDKWrapper:
         source_input: str,
         context_input: Optional[List[str]] = None,
         context_axioms: Optional[List[str]] = None,
-        mode: Optional[str] = None,
         epsilon_override: float | None = None,
     ) -> Dict[str, Any]:
         epsilon_used = epsilon_override if epsilon_override is not None else self.config.rigidity_epsilon
-        mode_used = mode or self.config.mode
 
         try:
             admission_metrics: dict[str, Any] = {}
@@ -105,7 +109,6 @@ class IIAEEnterpriseSDKWrapper:
             if admitted_input is None or not isinstance(admitted_input, str):
                 admitted_input = ""
 
-            self.runtime_config.mode = mode_used
             self.runtime_config.epsilon = epsilon_used
 
             policy_axioms = self.axiom_engine.render_axioms(self.graph)
@@ -122,7 +125,7 @@ class IIAEEnterpriseSDKWrapper:
                 validate_conflicts=self.config.validate_context_against_axioms,
             )
 
-            timestamp = datetime.utcnow().isoformat()
+            timestamp = datetime.now(timezone.utc).isoformat()
             invariant_hash = sha256_hex(canonical_json(final_output))
             graph_hash = sha256_hex(canonical_json(self.graph.nodes))
 
@@ -134,7 +137,6 @@ class IIAEEnterpriseSDKWrapper:
                 "d_s": D_s,
                 "d_f": D_f,
                 "audit_mode": self.config.audit_mode,
-                "mode": mode_used,
                 "epsilon_used": epsilon_used,
                 "epsilon": epsilon_used,
                 "delta_fp": self.config.isg_delta_fp,
@@ -160,31 +162,53 @@ class IIAEEnterpriseSDKWrapper:
                 source_axioms=all_axioms,
             )
 
-            kernel_factory = self.runtime_config.kernel_factory()
-            kernel = kernel_factory()
-            kernel_result = kernel.process(
-                canonical_state=canonical_state.data,
-                dissonance=D_s,
-                epsilon=epsilon_used,
-                property_graph=self.graph,
-                timestamp=metadata["timestamp"],
-            )
-            if kernel_result is None:
-                kernel_result = {
-                    "status": "committed",
-                    "root_hash": self.runtime_config.ctm.root_hash,
-                }
+            if self.config.ctm_mode == "full":
+                kernel_factory = self.runtime_config.kernel_factory()
+                kernel = kernel_factory()
+                kernel_result = kernel.process(
+                    canonical_state=canonical_state.data,
+                    dissonance=D_s,
+                    epsilon=epsilon_used,
+                    property_graph=self.graph,
+                    timestamp=metadata["timestamp"],
+                )
+                if kernel_result is None:
+                    kernel_result = {
+                        "status": "committed",
+                        "root_hash": self.runtime_config.ctm.root_hash,
+                    }
 
-            receipt = self.kernel_client.commit(
-                canonical_state=canonical_state.data,
-                dissonance=D_s,
-                fact_dissonance=D_f,
-                epsilon=epsilon_used,
-                delta_fp=self.config.isg_delta_fp,
-                correction_flag=correction_flag,
-                source=self.config.source_name,
-                metadata=canonical_state.metadata,
-            )
+                receipt = self.kernel_client.commit(
+                    canonical_state=canonical_state.data,
+                    dissonance=D_s,
+                    fact_dissonance=D_f,
+                    epsilon=epsilon_used,
+                    delta_fp=self.config.isg_delta_fp,
+                    correction_flag=correction_flag,
+                    source=self.config.source_name,
+                    metadata=canonical_state.metadata,
+                )
+            elif self.config.ctm_mode == "log_only":
+                self.logger.info(
+                    "CTM Commit Log Only",
+                    extra={
+                        "iiae_data": {
+                            "event": "commit",
+                            "canonical_state": canonical_state.data,
+                            "dissonance": D_s,
+                            "fact_dissonance": D_f,
+                            "epsilon": epsilon_used,
+                            "correction_flag": correction_flag,
+                            "source": self.config.source_name,
+                            "metadata": canonical_state.metadata,
+                        }
+                    }
+                )
+                kernel_result = {"status": "log_only"}
+                receipt = {"status": "log_only"}
+            else:
+                kernel_result = {"status": "disabled"}
+                receipt = {"status": "disabled"}
 
             return {
                 "canonical_state": canonical_state,
@@ -194,19 +218,24 @@ class IIAEEnterpriseSDKWrapper:
                 "context_chunks": context_chunks,
             }
         except Exception as exc:
-            timestamp = datetime.utcnow().isoformat()
+            timestamp = datetime.now(timezone.utc).isoformat()
             snapshot = {
                 "event": "execute_pipeline_failure",
                 "error": str(exc),
             }
-            self.runtime_config.ctm.seal_failure(snapshot, timestamp=timestamp)
+            if self.config.ctm_mode == "full":
+                self.runtime_config.ctm.seal_failure(snapshot, timestamp=timestamp)
+            elif self.config.ctm_mode == "log_only":
+                self.logger.error(
+                    f"CTM Failure Log Only: {str(exc)}",
+                    extra={"iiae_data": snapshot}
+                )
             
             fallback_metadata = {
                 "timestamp": timestamp,
                 "d_s": 1.0,
                 "d_f": 1.0,
                 "audit_mode": self.config.audit_mode,
-                "mode": mode_used,
                 "epsilon_used": epsilon_used,
                 "epsilon": epsilon_used,
                 "delta_fp": self.config.isg_delta_fp,

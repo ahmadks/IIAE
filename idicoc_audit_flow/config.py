@@ -26,10 +26,17 @@ class AuditConfig:
     correction_base_tolerance: float = 0.15
     # context_axiom_conflict_threshold: umbral para detectar conflictos entre contexto y axiomas
     context_axiom_conflict_threshold: float = 0.5
-    # semantic_contradiction_snapping_threshold: umbral de contradicción para snapping fáctico en modo semántico
-    semantic_contradiction_snapping_threshold: float = 0.5
+    # contradiction_snapping_threshold: umbral de contradicción para snapping fáctico en modo semántico
+    contradiction_snapping_threshold: float = 0.5
 
     rigidity_epsilon: float = 0.0
+    """
+    Controla el tamaño del manifold admisible (creatividad).
+    - Valores cercanos a 0 (ej. 0.0): modo factual, solo respuestas muy cercanas al invariante.
+    - Valores intermedios (ej. 0.35): modo híbrido, permite cierta desviación.
+    - Valores altos (ej. 0.7): modo creativo, gran libertad (pero sin violar axiomas duros).
+    El usuario debe ajustar este valor según la sesión; el notario no lo modifica.
+    """
     constant_k: Any = "k"
 
     # source_name: identificador de la instancia de servicio (antes: service_instance_name)
@@ -48,8 +55,10 @@ class AuditConfig:
     # Configuración de validación y notario
     validate_context_against_axioms: bool = False
 
-    # Modo de operación del kernel (factual, hybrid, creative)
-    mode: Literal["factual", "hybrid", "creative"] = "factual"
+    ctm_mode: Literal["full", "log_only", "disabled"] = "full"
+
+    # Nota: El parámetro 'mode' (factual/hybrid/creative) ha sido eliminado.
+    # La creatividad se controla exclusivamente mediante rigidity_epsilon.
 
     # El wrapper notario nunca debe bloquear, pero mantenemos el parámetro por compatibilidad.
     enable_hard_halt: bool = False

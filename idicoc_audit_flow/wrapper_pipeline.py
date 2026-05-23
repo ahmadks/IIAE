@@ -5,8 +5,8 @@ Este módulo ahora delega la orquestación completa al pipeline principal.
 """
 
 from __future__ import annotations
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from .base import (
     CanonicalStateDTO,
@@ -21,16 +21,29 @@ from .pipeline import IIAEEnterpriseSDKWrapper
 class IDICOCWrapper(IDICOCWrapperContract):
     """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
-    def __init__(self, config: AuditConfig, entropy_analyzer: EntropyAnalyzer) -> None:
+    def __init__(
+        self,
+        config: AuditConfig,
+        entropy_analyzer: EntropyAnalyzer,
+        aem_storage: Optional[Any] = None,
+        ctm_storage: Optional[Any] = None,
+    ) -> None:
         self.config = config
         self.entropy_analyzer = entropy_analyzer
+        self.aem_storage = aem_storage
+        self.ctm_storage = ctm_storage
         self.pipeline: IIAEEnterpriseSDKWrapper | None = None
         self._initialized = False
         self.initialize(config)
 
     def initialize(self, config: AuditConfig) -> None:
         self.config = config
-        self.pipeline = IIAEEnterpriseSDKWrapper(config, self.entropy_analyzer)
+        self.pipeline = IIAEEnterpriseSDKWrapper(
+            config,
+            self.entropy_analyzer,
+            aem_storage=getattr(self, "aem_storage", None),
+            ctm_storage=getattr(self, "ctm_storage", None),
+        )
         self._initialized = True
 
     def adapt_input(self, source_input: str, context_input: list[str] | None = None, context_axioms: list[str] | None = None) -> dict[str, Any]:
@@ -64,7 +77,6 @@ class IDICOCWrapper(IDICOCWrapperContract):
         source_input: str,
         context_input: list[str] | None = None,
         context_axioms: list[str] | None = None,
-        mode: str | None = None,
         epsilon_override: float | None = None,
     ) -> CanonicalStateDTO:
         if not self._initialized or self.pipeline is None:
@@ -74,7 +86,6 @@ class IDICOCWrapper(IDICOCWrapperContract):
             source_input=source_input,
             context_input=context_input,
             context_axioms=context_axioms,
-            mode=mode,
             epsilon_override=epsilon_override,
         )
         return result["canonical_state"]
@@ -86,16 +97,28 @@ class IDICOCWrapper(IDICOCWrapperContract):
         source_input = data.get(self.config.input_field_source, data.get("text", ""))
         context_input = data.get(self.config.input_field_context, data.get("context_input", []))
         context_axioms = data.get(self.config.input_field_axioms, data.get("context_axioms", []))
-        mode = data.get("mode", None)
         epsilon_override = data.get("epsilon_override", None)
 
         return self.process_interaction(
             source_input=str(source_input),
             context_input=context_input if isinstance(context_input, list) else [],
             context_axioms=context_axioms if isinstance(context_axioms, list) else [],
-            mode=mode,
             epsilon_override=epsilon_override,
         )
+
+    def _log_or_seal_failure(self, snapshot: dict[str, Any]) -> None:
+        if self.pipeline is None:
+            return
+        if self.config.ctm_mode == "full":
+            self.pipeline.runtime_config.ctm.seal_failure(
+                snapshot,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+        elif self.config.ctm_mode == "log_only":
+            self.pipeline.logger.error(
+                f"Compliance/Kernel Failure Log Only: {snapshot.get('error') or snapshot.get('warning') or 'unknown error'}",
+                extra={"iiae_data": snapshot}
+            )
 
     def verify_compliance(self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0) -> bool:
         if not canonical_state.verify_integrity():
@@ -104,11 +127,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 "error": "Hash de integridad inválido",
                 "canonical_state": canonical_state.to_dict(),
             }
-            if self.pipeline is not None:
-                self.pipeline.runtime_config.ctm.seal_failure(
-                    snapshot,
-                    timestamp=datetime.utcnow().isoformat(),
-                )
+            self._log_or_seal_failure(snapshot)
             return False
 
         umbral = tolerance if tolerance > 0.0 else self.config.rigidity_epsilon
@@ -122,11 +141,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 "threshold": umbral,
                 "canonical_state": canonical_state.to_dict(),
             }
-            if self.pipeline is not None:
-                self.pipeline.runtime_config.ctm.seal_failure(
-                    snapshot,
-                    timestamp=datetime.utcnow().isoformat(),
-                )
+            self._log_or_seal_failure(snapshot)
             return False
 
         # ---------------------------------------------------------------
@@ -141,11 +156,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 "warning": "algebraic_components ausente en el estado canónico",
                 "canonical_state": canonical_state.to_dict(),
             }
-            if self.pipeline is not None:
-                self.pipeline.runtime_config.ctm.seal_failure(
-                    snapshot,
-                    timestamp=datetime.utcnow().isoformat(),
-                )
+            self._log_or_seal_failure(snapshot)
             return False
 
         expected_weights = [0.0, 1.0, 0.0]
@@ -157,11 +168,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 "expected": expected_weights,
                 "actual": actual_weights,
             }
-            if self.pipeline is not None:
-                self.pipeline.runtime_config.ctm.seal_failure(
-                    snapshot,
-                    timestamp=datetime.utcnow().isoformat(),
-                )
+            self._log_or_seal_failure(snapshot)
             return False
 
         d_logic = float(algebraic.get("d_logic", -1.0))
@@ -174,15 +181,10 @@ class IDICOCWrapper(IDICOCWrapperContract):
                 "d_s_recorded": dissonance,
                 "lambda_logic_times_d_logic": expected_d_s,
             }
-            if self.pipeline is not None:
-                self.pipeline.runtime_config.ctm.seal_failure(
-                    snapshot,
-                    timestamp=datetime.utcnow().isoformat(),
-                )
+            self._log_or_seal_failure(snapshot)
             return False
 
         return True
-
 
     def integrate_with_kernel(self, canonical_state: CanonicalStateDTO, kernel: Any) -> Any:
         if hasattr(kernel, "process"):
@@ -197,11 +199,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
             "error": "El kernel no es compatible",
             "canonical_state": canonical_state.to_dict(),
         }
-        if self.pipeline is not None:
-            self.pipeline.runtime_config.ctm.seal_failure(
-                failure_response,
-                timestamp=datetime.utcnow().isoformat(),
-            )
+        self._log_or_seal_failure(failure_response)
         return failure_response
 
     def handle_compliance_breach(self, error: Exception, context: dict[str, Any]) -> Any:

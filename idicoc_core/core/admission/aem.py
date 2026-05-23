@@ -24,23 +24,38 @@ class AdmissionBreach(Exception):
     """Excepción lanzada cuando el AEM segrega una entrada."""
     pass
 
+class AEMStorageBackend(Protocol):
+    def save_entropy_event(self, event: Dict[str, Any]) -> None:
+        ...
+    def load_all_events(self) -> Dict[str, List[Dict[str, Any]]]:
+        ...
+    def clear(self) -> None:
+        ...
+
 class AnomalousEventManager:
     """
     AEM: Dominio de Aislamiento (Lead Shield).
     Implementación del filtro upstream que segrega ruido antes de la proyección canónica.
     """
 
-    def __init__(self, property_graph: Any, analyzer: EntropyAnalyzer, threshold: float = 0.85):
+    def __init__(self, property_graph: Any, analyzer: EntropyAnalyzer, threshold: float = 0.85, instance_name: str = "default_instance", storage_backend: Optional[AEMStorageBackend] = None):
         self._graph = property_graph
         self._analyzer = analyzer
         self._threshold = threshold
+        self._instance_name = instance_name
+        self._storage = storage_backend
         
-        # Mapa de Entropía para análisis forense (Sección 6.3)
-        self.entropy_map: Dict[str, List[Dict[str, Any]]] = {
-            "DISCARDED_NOISE": [],
-            "RECOVERABLE_NOISE": [],
-            "ADMITTED": [],
-        }
+        if self._storage is not None:
+            self.entropy_map = self._storage.load_all_events()
+            for key in ["DISCARDED_NOISE", "RECOVERABLE_NOISE", "ADMITTED"]:
+                self.entropy_map.setdefault(key, [])
+        else:
+            # Mapa de Entropía para análisis forense (Sección 6.3)
+            self.entropy_map = {
+                "DISCARDED_NOISE": [],
+                "RECOVERABLE_NOISE": [],
+                "ADMITTED": [],
+            }
         
         # Integración con el logger del framework
         self.logger = get_logger("admission.aem")
@@ -58,6 +73,13 @@ class AnomalousEventManager:
         structural_complexity = self._compute_structural_complexity(structural_component)
         is_meaningful = self._is_structurally_meaningful(structural_component)
         within_barrier = self.entropy_barrier(entropy_score, structural_complexity)
+
+        axiom_density = 0.0
+        if hasattr(self._graph, "compute_axiom_density"):
+            try:
+                axiom_density = self._graph.compute_axiom_density()
+            except Exception:
+                pass
 
         if not is_meaningful or not within_barrier:
             noise_to_log = noise_component if noise_component is not None else raw_input
@@ -86,7 +108,10 @@ class AnomalousEventManager:
             "structural": structural_component,
             "noise": noise_component,
         }
-        self.entropy_map["ADMITTED"].append(metrics)
+        if self._storage is not None:
+            self._storage.save_entropy_event(metrics)
+        else:
+            self.entropy_map["ADMITTED"].append(metrics)
         return structural_component, metrics
 
     def entropy_barrier(self, entropy_score: float, structural_complexity: float = 0.0) -> bool:
@@ -167,7 +192,8 @@ class AnomalousEventManager:
             "structural_size": len(str(structural_component)),
             "noise_snippet": str(noise_component)[:50] if noise_component is not None else None,
             "noise_size": len(str(noise_component)) if noise_component is not None else 0,
-            "timestamp": datetime.datetime.utcnow().isoformat()
+            "instance_name": self._instance_name,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
         
         self.logger.warning(
@@ -175,7 +201,10 @@ class AnomalousEventManager:
             extra={"iiae_data": meta}
         )
         
-        self.entropy_map[category].append(meta)
+        if self._storage is not None:
+            self._storage.save_entropy_event(meta)
+        else:
+            self.entropy_map[category].append(meta)
 
     def compute_epr(self) -> float:
         """

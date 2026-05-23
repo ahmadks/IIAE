@@ -1,7 +1,7 @@
 # idicoc_core/core/pipeline/kernel.py
 from __future__ import annotations
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 from idicoc_utils.hashing import sha256_hex
 
 from idicoc_core.core.admission.aem import AdmissionBreach
@@ -24,7 +24,6 @@ class CustodialKernel:
         dse,
         cmc,
         dqe,
-        mode: str = "factual",
         epsilon: float = 0.0,
         enable_hard_halt: bool = False,
     ):
@@ -35,7 +34,6 @@ class CustodialKernel:
         self.dse = dse
         self.cmc = cmc
         self.dqe = dqe
-        self.mode = mode
         self.epsilon = epsilon
         self.enable_hard_halt = enable_hard_halt
         self._dissonance_history: list[float] = []
@@ -59,7 +57,7 @@ class CustodialKernel:
             self.epsilon = epsilon
 
         # El Kernel fija el tiempo lógico de la operación
-        operation_time = timestamp or datetime.utcnow().isoformat()
+        operation_time = timestamp or datetime.now(timezone.utc).isoformat()
 
         try:
             # Stage 1 — Admission (notarial, asume estado ya admitido)
@@ -86,7 +84,6 @@ class CustodialKernel:
             # Actualizar epsilon dinámicamente
             self.epsilon = self.cmc.update_epsilon(
                 current_eps=self.epsilon,
-                mode=self.mode,
                 axiom_density=updated_graph.compute_axiom_density(),
                 dissonance_variance=self._compute_recent_variance(),
             )

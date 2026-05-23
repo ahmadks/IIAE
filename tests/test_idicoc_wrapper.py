@@ -22,9 +22,9 @@ def test_audit_config_properties():
     assert config.isg_delta_fp == 0.15
     assert config.correction_base_tolerance == 0.15
     assert config.context_axiom_conflict_threshold == 0.5
-    assert config.semantic_contradiction_snapping_threshold == 0.5
+    assert config.contradiction_snapping_threshold == 0.5
     assert config.source_name == "ai_comercial"
-    assert config.mode == "factual"
+    assert not hasattr(config, "mode")
     assert config.enable_hard_halt is False
 
     # Check warning when enable_hard_halt is set to True
@@ -81,7 +81,7 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
         semantic_embedding_model="mock-embedder",
         semantic_nli_model="mock-nli",
         correction_base_tolerance=0.2,
-        semantic_contradiction_snapping_threshold=0.6,
+        contradiction_snapping_threshold=0.6,
         context_axiom_conflict_threshold=0.4,
     )
     
@@ -135,7 +135,7 @@ def test_mathematical_strategy_compute():
         audit_mode="mathematical",
         mathematical_embedding_model=None, # no embedder
         correction_base_tolerance=0.2,
-        semantic_contradiction_snapping_threshold=0.6,
+        contradiction_snapping_threshold=0.6,
         context_axiom_conflict_threshold=0.4,
     )
     

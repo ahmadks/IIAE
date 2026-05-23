@@ -23,7 +23,6 @@ class KernelCustodyClient:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         metadata = metadata or {}
-        metadata["mode"] = metadata.get("mode", "factual")
         metadata["epsilon_used"] = metadata.get("epsilon_used", epsilon)
 
         timestamp = metadata.get("timestamp") if metadata.get("timestamp") else None

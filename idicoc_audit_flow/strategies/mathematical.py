@@ -181,14 +181,14 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
                 distances = [self._cosine_distance(source_emb, ref_emb) for ref_emb in ref_embs]
                 context_contradiction = max(distances) if distances else 0.0
                 for ctx, dist in zip(context_input, distances):
-                    if dist > self.config.semantic_contradiction_snapping_threshold:
+                    if dist > self.config.contradiction_snapping_threshold:
                         contradictory_contexts.append(ctx)
             else:
                 for ctx in context_input:
                     dist = 1.0 - self._similarity_ratio(source_input, ctx)
                     if dist > context_contradiction:
                         context_contradiction = dist
-                    if dist > self.config.semantic_contradiction_snapping_threshold:
+                    if dist > self.config.contradiction_snapping_threshold:
                         contradictory_contexts.append(ctx)
 
         metrics = {

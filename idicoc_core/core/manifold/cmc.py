@@ -32,21 +32,18 @@ class ManifoldConstructor:
     def __init__(self, dqe: Any | None = None):
         self.dqe = dqe
 
-    def compute_epsilon(self, mode: str, axiom_density: float, stability_factor: float) -> float:
+    def compute_epsilon(self, axiom_density: float, stability_factor: float) -> float:
         base = 0.05 + 0.5 * axiom_density * stability_factor
-        if mode == "strict":
-            return min(1.0, max(0.0, base * 0.5))
         return min(1.0, max(0.0, base))
 
     def update_epsilon(
         self,
         current_eps: float,
-        mode: str,
         axiom_density: float,
         dissonance_variance: float = 0.0,
         alpha: float = 0.1,
     ) -> float:
-        target = self.compute_epsilon(mode, axiom_density, 1.0 - dissonance_variance)
+        target = self.compute_epsilon(axiom_density, 1.0 - dissonance_variance)
         return (1.0 - alpha) * current_eps + alpha * target
 
     def build(self, canonical_state: Any, graph: Any, epsilon: float) -> Manifold:

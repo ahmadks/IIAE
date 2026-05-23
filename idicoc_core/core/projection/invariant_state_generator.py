@@ -1,7 +1,7 @@
 # idicoc_core/core/projection/invariant_generator.py
 from __future__ import annotations
 from typing import Any, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from idicoc_core.exceptions.integrity_breach import InvariantStateBreach
 from idicoc_core.core.source.anchor import SourceAnchor
@@ -52,7 +52,7 @@ class InvariantStateGenerator:
 
         metadata = {
             "stage": "MAII‑ISG",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "projection_history": self._registry.get_projection_trace(),
         }
 

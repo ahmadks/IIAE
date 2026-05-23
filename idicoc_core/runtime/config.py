@@ -1,7 +1,7 @@
 # idicoc_core/runtime/config.py
 from __future__ import annotations
-from datetime import datetime
-from typing import Callable, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Optional
 
 from idicoc_core.core.source.anchor import SourceAnchor
 from idicoc_core.core.admission.aem import AnomalousEventManager
@@ -33,20 +33,22 @@ class RuntimeConfig:
         constant_k,
         entropy_analyzer,
         property_graph: Optional[PropertyGraph] = None,
-        mode: str = "factual",
         rigidity_epsilon: float = 0.0,
         delta_fp: float = 0.15,
         enable_hard_halt: bool = False,
+        instance_name: str = "default_instance",
         log_destination: str = "stdout",
+        aem_storage: Optional[Any] = None,
+        ctm_storage: Optional[Any] = None,
     ):
         # Logging global
         configure_logging(log_destination)
 
         self.property_graph = property_graph or PropertyGraph()
-        self.mode = mode
         self.epsilon = rigidity_epsilon
         self.delta_fp = delta_fp
         self.enable_hard_halt = enable_hard_halt
+        self.instance_name = instance_name
 
         # 1. Anchor (k)
         self.anchor = SourceAnchor(constant_k)
@@ -55,7 +57,9 @@ class RuntimeConfig:
         self.aem = AnomalousEventManager(
             property_graph=self.property_graph,
             analyzer=entropy_analyzer,
-            threshold=0.85
+            threshold=0.85,
+            instance_name=self.instance_name,
+            storage_backend=aem_storage,
         )
 
         # 3. ISG
@@ -80,7 +84,12 @@ class RuntimeConfig:
 
         # 8. CTM
         self.hardware_sealer = EnvHardwareSealer()
-        self.ctm = CustodialTraceManager(dag=MerkleDAG(sealer=self.hardware_sealer))
+        self.ctm = CustodialTraceManager(
+            dag=MerkleDAG(
+                sealer=self.hardware_sealer,
+                storage_backend=ctm_storage,
+            )
+        )
 
         genesis_metadata = {
             "delta_fp": self.delta_fp,
@@ -90,8 +99,7 @@ class RuntimeConfig:
                 self.dqe.lambda_temporal,
             ),
             "epsilon_0": self.epsilon,
-            "mode": self.mode,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.ctm.initialize_genesis(genesis_metadata, timestamp=genesis_metadata["timestamp"])
 
@@ -109,7 +117,6 @@ class RuntimeConfig:
                 dse=self.dse,
                 cmc=self.cmc,
                 dqe=self.dqe,
-                mode=self.mode,
                 epsilon=self.epsilon,
                 enable_hard_halt=self.enable_hard_halt,
             )

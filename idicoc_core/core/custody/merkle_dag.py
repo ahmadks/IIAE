@@ -15,6 +15,18 @@ class HardwareSealer(Protocol):
     def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         ...
 
+class CTMStorageBackend(Protocol):
+    def save_node(self, node_hash: str, node_data: Dict[str, Any]) -> None:
+        ...
+    def load_node(self, node_hash: str) -> Optional[Dict[str, Any]]:
+        ...
+    def load_all_nodes(self) -> Dict[str, Dict[str, Any]]:
+        ...
+    def save_root_hash(self, root_hash: str) -> None:
+        ...
+    def load_root_hash(self) -> Optional[str]:
+        ...
+
 
 class NoOpHardwareSealer:
     def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,10 +67,29 @@ class MerkleNode:
 
 
 class MerkleDAG:
-    def __init__(self, sealer: Optional[HardwareSealer] = None):
+    def __init__(self, sealer: Optional[HardwareSealer] = None, storage_backend: Optional[CTMStorageBackend] = None):
         self._nodes: Dict[str, MerkleNode] = {}
         self._root_hash: Optional[str] = None
         self._sealer: HardwareSealer = sealer or NoOpHardwareSealer()
+        self._storage = storage_backend
+        
+        if self._storage is not None:
+            self._root_hash = self._storage.load_root_hash()
+            stored_nodes = self._storage.load_all_nodes() or {}
+            for h, data in stored_nodes.items():
+                self._nodes[h] = MerkleNode(
+                    node_hash=data["node_hash"],
+                    parent_hashes=data["parent_hashes"],
+                    timestamp=data["timestamp"],
+                    payload=data["payload"],
+                    hardware_evidence=data.get("hardware_evidence"),
+                    invariant_state_hash=data.get("invariant_state_hash"),
+                    property_graph_hash=data.get("property_graph_hash"),
+                    deviation_score=data.get("deviation_score"),
+                    correction_flag=data.get("correction_flag"),
+                    hss_anchor=data.get("hss_anchor"),
+                    epuf_anchor=data.get("epuf_anchor"),
+                )
 
     @property
     def root_hash(self) -> Optional[str]:
@@ -120,6 +151,11 @@ class MerkleDAG:
 
         self._nodes[node_hash] = node
         self._root_hash = node_hash
+        
+        if self._storage is not None:
+            self._storage.save_node(node_hash, asdict(node))
+            self._storage.save_root_hash(node_hash)
+            
         return node
 
     def get_node(self, node_hash: str) -> Optional[MerkleNode]:
@@ -142,14 +178,16 @@ class MerkleDAG:
 
 
 class CustodialTraceManager:
-    def __init__(self, dag: Optional[MerkleDAG] = None):
-        self._dag = dag or MerkleDAG()
+    def __init__(self, dag: Optional[MerkleDAG] = None, storage_backend: Optional[CTMStorageBackend] = None):
+        self._dag = dag or MerkleDAG(storage_backend=storage_backend)
 
     @property
     def root_hash(self) -> Optional[str]:
         return self._dag.root_hash
 
-    def initialize_genesis(self, metadata: Dict[str, Any], timestamp: str) -> MerkleNode:
+    def initialize_genesis(self, metadata: Dict[str, Any], timestamp: str) -> Optional[MerkleNode]:
+        if self._dag.root_hash:
+            return self._dag.get_node(self._dag.root_hash)
         return self._dag.create_genesis(metadata=metadata, timestamp=timestamp)
 
     def commit(

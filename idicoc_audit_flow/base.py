@@ -8,7 +8,7 @@ entrada de una IA comercial al núcleo determinista de idicoc_core.
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 import json
 import re
@@ -32,7 +32,7 @@ class CanonicalStateDTO:
     metadata: dict[str, Any] = field(default_factory=dict)
     source_axioms: list[str] = field(default_factory=list)
     integrity_hash: str = field(default="")
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __post_init__(self) -> None:
         if not self.integrity_hash:
