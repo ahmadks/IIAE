@@ -98,25 +98,25 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
 
     def compute(
         self,
-        source_input: str,
+        audit_input: str,
         context_input: List[str],
         context_axioms: List[str],
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
     ) -> Tuple[float, float, str, bool, Dict[str, Any]]:
-        normalized_source = self._normalize_text(source_input)
+        normalized_source = self._normalize_text(audit_input)
 
-        d1 = 1.0 - self._similarity_ratio(source_input, normalized_source)
+        d1 = 1.0 - self._similarity_ratio(audit_input, normalized_source)
 
         reference = context_axioms + context_input
         if reference and self.embedder:
-            source_emb = self.embedder.encode([source_input])[0]
+            source_emb = self.embedder.encode([audit_input])[0]
             ref_embs = self.embedder.encode(reference)
             distances = [self._cosine_distance(source_emb, ref_emb) for ref_emb in ref_embs]
             d2 = min(distances)
         else:
             if reference:
-                overlap = max(self._similarity_ratio(source_input, ref) for ref in reference)
+                overlap = max(self._similarity_ratio(audit_input, ref) for ref in reference)
                 d2 = 1.0 - overlap
             else:
                 d2 = 0.0
@@ -127,7 +127,7 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
             d3 = self._hash_distance(combined, self.expected_hash)
 
         if context_input:
-            source_freq = self._token_freq(source_input)
+            source_freq = self._token_freq(audit_input)
             context_freq = {}
             for chunk in context_input:
                 chunk_freq = self._token_freq(chunk)
@@ -148,14 +148,14 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
             d5 = 0.0
 
         if context_input and self.embedder:
-            source_emb = self.embedder.encode([source_input])[0]
+            source_emb = self.embedder.encode([audit_input])[0]
             ref_embs = self.embedder.encode(context_input)
             distances = [self._euclidean_distance(source_emb, ref_emb) for ref_emb in ref_embs]
             d6 = min(distances)
         else:
             d6 = 0.0
 
-        d7 = 0.0 if self._is_json(source_input) else 1.0
+        d7 = 0.0 if self._is_json(audit_input) else 1.0
 
         stages = [d1, d2, d3, d4, d5, d6, d7]
         D_s = sum(w * d for w, d in zip(self.weights, stages))
@@ -168,7 +168,7 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
 
         allowable_threshold = self.config.correction_base_tolerance + epsilon
         correction_flag = D_s > allowable_threshold
-        corrected_output = source_input
+        corrected_output = audit_input
         if correction_flag:
             corrected_output = "[MATHEMATICAL DISSONANCE] Desviación estructural detectada."
 
@@ -176,7 +176,7 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
         context_contradiction = 0.0
         if context_input:
             if self.embedder:
-                source_emb = self.embedder.encode([source_input])[0]
+                source_emb = self.embedder.encode([audit_input])[0]
                 ref_embs = self.embedder.encode(context_input)
                 distances = [self._cosine_distance(source_emb, ref_emb) for ref_emb in ref_embs]
                 context_contradiction = max(distances) if distances else 0.0
@@ -185,7 +185,7 @@ class MathematicalDissonanceStrategy(DissonanceStrategy):
                         contradictory_contexts.append(ctx)
             else:
                 for ctx in context_input:
-                    dist = 1.0 - self._similarity_ratio(source_input, ctx)
+                    dist = 1.0 - self._similarity_ratio(audit_input, ctx)
                     if dist > context_contradiction:
                         context_contradiction = dist
                     if dist > self.config.contradiction_snapping_threshold:

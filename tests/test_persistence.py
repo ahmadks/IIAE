@@ -84,7 +84,7 @@ def test_pipeline_with_persistence():
         
         # Process a valid interaction
         state = wrapper.process_interaction(
-            source_input="test transaction 123",
+            audit_input="test transaction 123",
             context_input=["test transaction 123"],
             context_axioms=["test transaction 123"],
         )

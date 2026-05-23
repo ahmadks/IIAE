@@ -19,7 +19,7 @@ class AuditConfig:
     # Tolerancias y umbrales configurables.
     # NOTA: Los valores por defecto indicados a continuación son únicamente de referencia
     # y deben ajustarse según las características del dominio específico (banca, IoT, salud, etc.).
-    
+
     # isg_delta_fp: usado exclusivamente en InvariantStateGenerator (colapso de estados canónicos)
     isg_delta_fp: float = 0.15
     # correction_base_tolerance: tolerancia base para decisión de corrección en DQE (D_s > correction_base_tolerance + epsilon)
@@ -64,7 +64,7 @@ class AuditConfig:
     enable_hard_halt: bool = False
 
     # Mapeo configurable de campos de entrada
-    input_field_source: str = "source_input"
+    input_field_audit: str = "audit_input"
     input_field_context: str = "context_input"
     input_field_axioms: str = "context_axioms"
 
@@ -76,10 +76,10 @@ class AuditConfig:
         """
         if self.enable_hard_halt:
             import warnings
+
             warnings.warn(
                 "La opción enable_hard_halt ha sido forzada a False ya que "
                 "el wrapper notario opera en modo pasivo y no debe bloquear el flujo.",
-                UserWarning
+                UserWarning,
             )
             self.enable_hard_halt = False
-

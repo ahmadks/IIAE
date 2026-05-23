@@ -46,18 +46,23 @@ class IDICOCWrapper(IDICOCWrapperContract):
         )
         self._initialized = True
 
-    def adapt_input(self, source_input: str, context_input: list[str] | None = None, context_axioms: list[str] | None = None) -> dict[str, Any]:
+    def adapt_input(
+        self,
+        audit_input: str,
+        context_input: list[str] | None = None,
+        context_axioms: list[str] | None = None,
+    ) -> dict[str, Any]:
         return {
-            self.config.input_field_source: str(source_input).strip(),
+            self.config.input_field_audit: str(audit_input).strip(),
             self.config.input_field_context: context_input or [],
             self.config.input_field_axioms: context_axioms or [],
             "source_name": self.config.source_name,
         }
 
-    def admit(self, source_input: Any) -> Any:
+    def admit(self, audit_input: Any) -> Any:
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
-        return self.pipeline.admit(source_input)
+        return self.pipeline.admit(audit_input)
 
     def process(self, admitted_input: Any) -> CanonicalStateDTO:
         if not self._initialized or self.pipeline is None:
@@ -67,14 +72,14 @@ class IDICOCWrapper(IDICOCWrapperContract):
             return self.process_dict(admitted_input)
 
         return self.process_interaction(
-            source_input=str(admitted_input),
+            audit_input=str(admitted_input),
             context_input=[],
             context_axioms=[],
         )
 
     def process_interaction(
         self,
-        source_input: str,
+        audit_input: str,
         context_input: list[str] | None = None,
         context_axioms: list[str] | None = None,
         epsilon_override: float | None = None,
@@ -83,7 +88,7 @@ class IDICOCWrapper(IDICOCWrapperContract):
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
         result = self.pipeline.execute(
-            source_input=source_input,
+            audit_input=audit_input,
             context_input=context_input,
             context_axioms=context_axioms,
             epsilon_override=epsilon_override,
@@ -94,13 +99,17 @@ class IDICOCWrapper(IDICOCWrapperContract):
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
-        source_input = data.get(self.config.input_field_source, data.get("text", ""))
-        context_input = data.get(self.config.input_field_context, data.get("context_input", []))
-        context_axioms = data.get(self.config.input_field_axioms, data.get("context_axioms", []))
+        audit_input = data.get(self.config.input_field_audit, data.get("text", ""))
+        context_input = data.get(
+            self.config.input_field_context, data.get("context_input", [])
+        )
+        context_axioms = data.get(
+            self.config.input_field_axioms, data.get("context_axioms", [])
+        )
         epsilon_override = data.get("epsilon_override", None)
 
         return self.process_interaction(
-            source_input=str(source_input),
+            audit_input=str(audit_input),
             context_input=context_input if isinstance(context_input, list) else [],
             context_axioms=context_axioms if isinstance(context_axioms, list) else [],
             epsilon_override=epsilon_override,
@@ -117,10 +126,12 @@ class IDICOCWrapper(IDICOCWrapperContract):
         elif self.config.ctm_mode == "log_only":
             self.pipeline.logger.error(
                 f"Compliance/Kernel Failure Log Only: {snapshot.get('error') or snapshot.get('warning') or 'unknown error'}",
-                extra={"iiae_data": snapshot}
+                extra={"iiae_data": snapshot},
             )
 
-    def verify_compliance(self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0) -> bool:
+    def verify_compliance(
+        self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0
+    ) -> bool:
         if not canonical_state.verify_integrity():
             snapshot = {
                 "event": "verify_compliance",
@@ -186,7 +197,9 @@ class IDICOCWrapper(IDICOCWrapperContract):
 
         return True
 
-    def integrate_with_kernel(self, canonical_state: CanonicalStateDTO, kernel: Any) -> Any:
+    def integrate_with_kernel(
+        self, canonical_state: CanonicalStateDTO, kernel: Any
+    ) -> Any:
         if hasattr(kernel, "process"):
             kernel.process(canonical_state.data)
             return {
@@ -202,7 +215,9 @@ class IDICOCWrapper(IDICOCWrapperContract):
         self._log_or_seal_failure(failure_response)
         return failure_response
 
-    def handle_compliance_breach(self, error: Exception, context: dict[str, Any]) -> Any:
+    def handle_compliance_breach(
+        self, error: Exception, context: dict[str, Any]
+    ) -> Any:
         return {
             "error": str(error),
             "context": context,
@@ -210,7 +225,9 @@ class IDICOCWrapper(IDICOCWrapperContract):
 
     def get_entropy_analyzer(self) -> EntropyAnalyzer:
         if self.entropy_analyzer is None:
-            raise WrapperInitializationError("No hay analizador de entropía configurado.")
+            raise WrapperInitializationError(
+                "No hay analizador de entropía configurado."
+            )
         return self.entropy_analyzer
 
     def is_initialized(self) -> bool:

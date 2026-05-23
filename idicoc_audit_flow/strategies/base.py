@@ -4,12 +4,12 @@ from typing import Any, Dict, List, Tuple
 
 
 class DissonanceStrategy(ABC):
-    """Estrategia para calcular disonancia entre source_input, context_input y context_axioms."""
+    """Estrategia para calcular disonancia entre audit_input, context_input y context_axioms."""
 
     @abstractmethod
     def compute(
         self,
-        source_input: str,
+        audit_input: str,
         context_input: List[str],
         context_axioms: List[str],
         epsilon: float = 0.0,

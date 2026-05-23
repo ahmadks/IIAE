@@ -67,18 +67,18 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
 
     def compute(
         self,
-        source_input: str,
+        audit_input: str,
         context_input: List[str],
         context_axioms: List[str],
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
     ) -> Tuple[float, float, str, bool, Dict[str, Any]]:
-        if not source_input.strip():
+        if not audit_input.strip():
             return 1.0, 1.0, '[REJECT] Salida vacía o colapso de señal.', True, {
                 'error': 'empty_output'
             }
 
-        source_embedding = self.encoder.encode(source_input, normalize_embeddings=True)
+        source_embedding = self.encoder.encode(audit_input, normalize_embeddings=True)
 
         references: list[tuple[str, bool]] = [
             *( (axiom, True) for axiom in context_axioms ),
@@ -97,7 +97,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
         for reference, is_axiom in references:
             ref_embedding = self.encoder.encode(reference, normalize_embeddings=True)
             cosine_distance = self._cosine_distance(source_embedding, ref_embedding)
-            contradiction_score = self._nli_contradiction(premise=reference, hypothesis=source_input)
+            contradiction_score = self._nli_contradiction(premise=reference, hypothesis=audit_input)
 
             max_cosine = max(max_cosine, cosine_distance)
 
@@ -132,7 +132,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
                 for chunk in context_input
             ]
             factual_contradictions = [
-                self._nli_contradiction(premise=chunk, hypothesis=source_input)
+                self._nli_contradiction(premise=chunk, hypothesis=audit_input)
                 for chunk in context_input
             ]
             D_f = max(min(factual_cosines) if factual_cosines else 1.0, max(factual_contradictions) if factual_contradictions else 0.0)
@@ -140,7 +140,7 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
         allowable_threshold = self.config.correction_base_tolerance + epsilon
         snapping_flag = not support_found and max_context_contradiction > self.config.contradiction_snapping_threshold
         correction_flag = (D_s > allowable_threshold) or snapping_flag
-        corrected_output = source_input
+        corrected_output = audit_input
 
         if correction_flag:
             if snapping_flag:

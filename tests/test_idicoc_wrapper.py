@@ -98,7 +98,7 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
     # Compute with no disonancia
     strategy._cosine_distance = lambda a, b: 0.05
     D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        source_input="source text",
+        audit_input="source text",
         context_input=["support text"],
         context_axioms=["some axiom"],
         epsilon=0.0,
@@ -113,7 +113,7 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
     # Compute with factual snapping (support_found=False, max_context_contradiction > snapping_threshold)
     strategy._cosine_distance = lambda a, b: 0.8
     D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        source_input="source text",
+        audit_input="source text",
         context_input=["contradict text"],
         context_axioms=["some axiom"],
         epsilon=0.0,
@@ -144,7 +144,7 @@ def test_mathematical_strategy_compute():
     
     # Test compute
     D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        source_input="hello world",
+        audit_input="hello world",
         context_input=["hello world"],
         context_axioms=["hello world"],
         epsilon=0.0,
@@ -158,7 +158,7 @@ def test_mathematical_strategy_compute():
 
     # Test mismatch (contradiction)
     D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        source_input="completely different text",
+        audit_input="completely different text",
         context_input=["hello world"],
         context_axioms=["hello world"],
         epsilon=0.0,
@@ -186,7 +186,7 @@ def test_pipeline_exception_handling(mock_strategy_class):
     
     # Calling process should not raise an exception, but return CanonicalStateDTO with error
     state = wrapper.process_interaction(
-        source_input="source test",
+        audit_input="source test",
         context_input=["context test"],
         context_axioms=["axiom test"]
     )
@@ -234,7 +234,7 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
     strategy._nli_contradiction = nli_with_one_critical
 
     D_s, D_f, _, correction_flag, metrics = strategy.compute(
-        source_input="some output text",
+        audit_input="some output text",
         context_input=["benign context 1", "benign context 2", "benign context 3"],
         context_axioms=["critical_axiom: must not be violated", "benign axiom 1", "benign axiom 2"],
         epsilon=0.0,
@@ -269,7 +269,7 @@ def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
     wrapper = IDICOCWrapper(config, entropy_analyzer)
 
     state = wrapper.process_interaction(
-        source_input="test input",
+        audit_input="test input",
         context_input=["ctx"],
         context_axioms=["ax"],
     )

@@ -60,24 +60,24 @@ class IIAEEnterpriseSDKWrapper:
         self.axiom_engine.provision_graph(self.graph)
         self._initialized = True
 
-    def admit(self, source_input: str) -> tuple[str, dict[str, Any]]:
+    def admit(self, audit_input: str) -> tuple[str, dict[str, Any]]:
         if not self._initialized:
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
-        if source_input is None or not isinstance(source_input, str) or not source_input.strip():
+        if audit_input is None or not isinstance(audit_input, str) or not audit_input.strip():
             admission_metrics = {
                 "entropy": 1.0,
                 "category": "DISCARDED_NOISE",
                 "admitted": False,
                 "error": "Entrada vacía o nula",
                 "structural": "",
-                "noise": source_input,
+                "noise": audit_input,
             }
             return "", admission_metrics
 
         try:
             admitted_structure, admission_metrics = self.runtime_config.aem.admit(
-                source_input,
+                audit_input,
                 hard_halt_on_breach=False,
             )
         except Exception as exc:
@@ -87,7 +87,7 @@ class IIAEEnterpriseSDKWrapper:
                 "admitted": False,
                 "error": str(exc),
                 "structural": "",
-                "noise": source_input,
+                "noise": audit_input,
             }
             admitted_structure = ""
 
@@ -95,7 +95,7 @@ class IIAEEnterpriseSDKWrapper:
 
     def execute(
         self,
-        source_input: str,
+        audit_input: str,
         context_input: Optional[List[str]] = None,
         context_axioms: Optional[List[str]] = None,
         epsilon_override: float | None = None,
@@ -104,7 +104,7 @@ class IIAEEnterpriseSDKWrapper:
 
         try:
             admission_metrics: dict[str, Any] = {}
-            admitted_input, admission_metrics = self.admit(source_input)
+            admitted_input, admission_metrics = self.admit(audit_input)
 
             if admitted_input is None or not isinstance(admitted_input, str):
                 admitted_input = ""
@@ -118,7 +118,7 @@ class IIAEEnterpriseSDKWrapper:
             context_chunks = context_input or []
 
             D_s, D_f, final_output, correction_flag, extra_metrics = self.dissonance_strategy.compute(
-                source_input=source_input,
+                audit_input=audit_input,
                 context_input=context_chunks,
                 context_axioms=all_axioms,
                 epsilon=epsilon_used,
