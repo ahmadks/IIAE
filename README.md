@@ -43,7 +43,7 @@ This framework acts as a **notary**: it measures, classifies, and records AI sys
 ┌─────────────────────────────────────────────────────────────────┐
 │                      IIAEService (Wrapper)                      │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  Input Adaptation & Field Mapping (IDICOCWrapperContract)│  │
+│  │  Input Adaptation & Field Mapping (IIAENotaryContract)│  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                            ▼                                     │
 │  ┌───────────────────────────────────────────────────────────┐  │
@@ -705,7 +705,7 @@ print(f"Timestamp: {result['timestamp']}")
 
 #### IIAEService (wrapper_pipeline.py)
 
-Main entry point. Implements `IDICOCWrapperContract`.
+Main entry point. Implements `IIAENotaryContract`.
 
 **Methods:**
 - `initialize(config: AuditConfig) -> None`: Set up service

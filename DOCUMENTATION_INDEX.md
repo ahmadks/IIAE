@@ -272,7 +272,7 @@ print(f"D_s: {result.metadata['d_s']:.3f}")
 - Interfaz API es idéntica (solo cambio de nombre)
 
 ### ✅ Lo que NO cambió
-- `IDICOCWrapperContract` (base class)
+- `IIAENotaryContract` (base class)
 - `IIAEServiceAuditor` (core)
 - Métodos públicos
 - Firma de funciones

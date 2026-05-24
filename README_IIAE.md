@@ -627,7 +627,7 @@ print(f"Custody hash: {root_hash}")
 |---|---|
 | **wrapper_pipeline.py** | `IIAEService` - entrada principal |
 | **pipeline.py** | `IIAEServiceAuditor` - orquestador |
-| **base.py** | Contratos: `CanonicalStateDTO`, `EntropyAnalyzer`, `IDICOCWrapperContract` |
+| **base.py** | Contratos: `CanonicalStateDTO`, `EntropyAnalyzer`, `IIAENotaryContract` |
 | **config.py** | `AuditConfig` - configuración global |
 | **axioms.py** | `AxiomEngine` - gestor de restricciones |
 | **strategies/semantic.py** | NLI + embeddings |

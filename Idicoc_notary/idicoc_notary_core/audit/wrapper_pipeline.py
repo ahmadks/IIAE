@@ -11,14 +11,14 @@ from typing import Any, Optional
 from .base import (
     CanonicalStateDTO,
     EntropyAnalyzer,
-    IDICOCWrapperContract,
+    IIAENotaryContract,
 )
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .pipeline import IIAEServiceAuditor
 
 
-class IIAEService(IDICOCWrapperContract):
+class IIAEService(IIAENotaryContract):
     """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
     def __init__(

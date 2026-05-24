@@ -91,12 +91,12 @@ class BankEntropyAnalyzer:
         return bool(noise_component)
 
 
-class IDICOCWrapperContract(ABC):
-    """Contrato abstracto del wrapper IDICOC.
+class IIAENotaryContract(ABC):
+    """Contrato abstracto del Auditor IIAE.
 
-    NOTARIO: Este wrapper nunca rechaza ni bloquea entradas o salidas.
+    NOTARIO: Este Auditor nunca rechaza ni bloquea entradas o salidas.
     Solo mide, clasifica, notifica (vía logs y CTM) y retorna métricas.
-    Las decisiones de acción son competencia del operador, no del wrapper.
+    Las decisiones de acción son competencia del operador, no del auditor.
     """
 
     @abstractmethod

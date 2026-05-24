@@ -10,7 +10,7 @@ from .base import (
     BankEntropyAnalyzer,
     CanonicalStateDTO,
     EntropyAnalyzer,
-    IDICOCWrapperContract,
+    IIAENotaryContract,
 )
 from .config import AuditConfig
 from .exceptions import ComplianceBreach, WrapperInitializationError
@@ -24,7 +24,7 @@ __all__ = [
     "AuditConfig",
     "CanonicalStateDTO",
     "EntropyAnalyzer",
-    "IDICOCWrapperContract",
+    "IIAENotaryContract",
     "AxiomEngine",
     "KernelCustodyClient",
     "IIAEServiceAuditor",
