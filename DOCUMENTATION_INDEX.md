@@ -46,35 +46,7 @@
 
 ---
 
-### 2. [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md)
-
-**Contenido:**
-- Verificación completa del refactoring `IDICOCWrapper` → `IIAEService`
-- Matriz detallada de cambios (10 archivos)
-- Verificación de integridad
-- Búsqueda de referencias residuales
-- Checklist final
-- Status de cada cambio
-
-**Para quién:**
-- 🔍 Necesitas entender qué cambió? ✅ Lee este
-- 🧪 Quieres verificar el refactoring? ✅ Sigue el checklist
-- 📋 Cambios en 7 archivos auditados
-
-**Verificaciones Realizadas:**
-```
-✅ Clase renombrada (1 archivo)
-✅ Importaciones actualizadas (4 módulos)
-✅ Exportaciones actualizadas (__all__)
-✅ Instanciaciones actualizadas (7 ocurrencias)
-✅ IIAEServiceAuditor verificado
-✅ Sin referencias residuales
-✅ Documentación consistente
-```
-
----
-
-### 3. [Idicoc_notary/README.md](Idicoc_notary/README.md)
+### 2. [Idicoc_notary/README.md](Idicoc_notary/README.md)
 
 **Contenido:**
 - Documentación específica del módulo auditoria
@@ -90,7 +62,6 @@
 /Users/kamal/Personal/AntigravityWorkspace/IIAE/
 │
 ├── 📄 README_IIAE.md                    ⭐ DOC PRINCIPAL
-├── 📄 REFACTORING_SUMMARY.md            ← Cambios realizados
 ├── 📄 DOCUMENTATION_INDEX.md            ← Este archivo
 ├── 📄 README.md                         ← Archivo raíz
 ├── 📄 SECURITY.md
@@ -212,22 +183,7 @@ config = AuditConfig(
 
 ---
 
-### 🔍 Code Reviewer / Auditor
-1. Leer: [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md)
-2. Verificar: Matriz de cambios
-3. Ejecutar: Checklist final
-4. Revisar: Cada archivo listado
-5. Validar: Tests pasan
-
-**Archivos a revisar:**
-- `wrapper_pipeline.py` (definición IIAEService)
-- `pipeline.py` (definición IIAEServiceAuditor)
-- `audit/__init__.py` (exports)
-- `idicoc_notary_core/__init__.py` (re-exports)
-
----
-
-### 📊 Arquitecto de Sistema
+###  Arquitecto de Sistema
 1. Leer: [README_IIAE.md#Overview](README_IIAE.md#overview)
 2. Estudiar: Diagrama de 7 etapas
 3. Leer: [README_IIAE.md#Conceptos Clave](README_IIAE.md#conceptos-clave)
@@ -342,8 +298,8 @@ print(f"D_s: {result.metadata['d_s']:.3f}")
 
 | Métrica | Valor |
 |---|---|
-| Documentos principales | 3 |
-| Líneas de documentación | ~2,500+ |
+| Documentos principales | 2 |
+| Líneas de documentación | ~2,900+ |
 | Secciones cobertas | 20+ |
 | Ejemplos de código | 10+ |
 | Casos de uso | 3 |
@@ -355,7 +311,7 @@ print(f"D_s: {result.metadata['d_s']:.3f}")
 ## ✅ Checklist de Verificación
 
 - ✅ README_IIAE.md creado
-- ✅ REFACTORING_SUMMARY.md creado
+- ✅ DOCUMENTATION_INDEX.md actualizado
 - ✅ Todos los cambios verificados
 - ✅ No hay referencias residuales a `IDICOCWrapper`
 - ✅ IIAEService presente en todos los exports
@@ -364,6 +320,7 @@ print(f"D_s: {result.metadata['d_s']:.3f}")
 - ✅ Documentación consistente
 - ✅ Ejemplos funcionales
 - ✅ Troubleshooting completo
+- ✅ Todos los __init__.py actualizados
 
 ---
 
