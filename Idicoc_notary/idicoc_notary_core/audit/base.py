@@ -9,10 +9,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any
 import json
 import re
 
+from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from idicoc_notary_core.utils.hashing import sha256_hex
 
 
@@ -56,39 +57,6 @@ class CanonicalStateDTO:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CanonicalStateDTO:
         return cls(**data)
-
-
-class EntropyAnalyzer(Protocol):
-    """Protocolo para analizadores de entropía en el wrapper."""
-
-    def measure_entropy(self, raw_input: Any) -> float:
-        ...
-
-    def decompose(self, raw_input: Any) -> tuple[Any, Any]:
-        ...
-
-    def is_recoverable(self, noise_component: Any) -> bool:
-        ...
-
-
-class BankEntropyAnalyzer:
-    """Ejemplo mínimo de analizador de entropía específico para banca."""
-
-    def measure_entropy(self, raw_input: Any) -> float:
-        if raw_input is None:
-            return 1.0
-        text = str(raw_input)
-        non_alpha = sum(1 for c in text if not c.isalnum() and not c.isspace())
-        return min(1.0, non_alpha / max(1, len(text)))
-
-    def decompose(self, raw_input: Any) -> tuple[str, Any]:
-        text = str(raw_input)
-        structural = re.sub(r"\b\d{10,}\b", "[CUENTA]", text)
-        noise = re.findall(r"\b\d{10,}\b", text)
-        return structural, noise
-
-    def is_recoverable(self, noise_component: Any) -> bool:
-        return bool(noise_component)
 
 
 class IIAENotaryContract(ABC):

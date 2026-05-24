@@ -5,7 +5,8 @@ import torch
 from unittest.mock import MagicMock, patch
 
 from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.base import BankEntropyAnalyzer, CanonicalStateDTO
+from tests.mocks import BankEntropyAnalyzer
+from idicoc_notary_core.audit.base import CanonicalStateDTO
 from idicoc_notary_core.audit.pipeline import IIAEServiceAuditor
 from idicoc_notary_core.audit.wrapper_pipeline import IIAEService
 from idicoc_notary_core.kernel.projection.invariant_state_generator import InvariantStateGenerator, CanonicalState
@@ -128,48 +129,6 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
 
 
 # ===================================================================
-# TEST 4: Mathematical Strategy with metrics
-# ===================================================================
-def test_mathematical_strategy_compute():
-    config = AuditConfig(
-        audit_mode="mathematical",
-        mathematical_embedding_model=None, # no embedder
-        correction_base_tolerance=0.2,
-        contradiction_snapping_threshold=0.6,
-        context_axiom_conflict_threshold=0.4,
-    )
-    
-    from idicoc_notary_core.audit.strategies.mathematical import MathematicalDissonanceStrategy
-    strategy = MathematicalDissonanceStrategy(config)
-    
-    # Test compute
-    D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        audit_input="hello world",
-        context_input=["hello world"],
-        context_axioms=["hello world"],
-        epsilon=0.0,
-        validate_conflicts=True
-    )
-    # Since inputs match, similarity is high, distance is 0.0
-    assert correction_flag is False
-    assert metrics["context_contradiction"] == 0.0
-    assert len(metrics["violated_axioms"]) == 0
-    assert len(metrics["contradictory_contexts"]) == 0
-
-    # Test mismatch (contradiction)
-    D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
-        audit_input="completely different text",
-        context_input=["hello world"],
-        context_axioms=["hello world"],
-        epsilon=0.0,
-        validate_conflicts=True
-    )
-    assert metrics["context_contradiction"] > 0.6
-    assert "hello world" in metrics["violated_axioms"]
-    assert "hello world" in metrics["contradictory_contexts"]
-
-
-# ===================================================================
 # TEST 5: Pipeline & Wrapper execution with robust exception handling
 # ===================================================================
 @patch('idicoc_notary_core.audit.pipeline.SemanticDissonanceStrategy')
@@ -180,7 +139,7 @@ def test_pipeline_exception_handling(mock_strategy_class):
     mock_strategy_class.return_value = mock_strategy
 
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig(audit_mode="semantic")
+    config = AuditConfig()
 
     wrapper = IIAEService(config, entropy_analyzer)
     
@@ -265,7 +224,7 @@ def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
     mock_strategy_class.return_value = mock_strategy
 
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig(audit_mode="semantic")
+    config = AuditConfig()
     wrapper = IIAEService(config, entropy_analyzer)
 
     state = wrapper.process_interaction(
@@ -294,7 +253,7 @@ def test_verify_compliance_algebraic_validation(mock_strategy_class):
 
 
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig(audit_mode="semantic", rigidity_epsilon=1.0)
+    config = AuditConfig(rigidity_epsilon=1.0)
     wrapper = IIAEService(config, entropy_analyzer)
 
     # Case 1: valid algebraic components → should return True

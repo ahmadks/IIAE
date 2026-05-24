@@ -14,8 +14,6 @@ from typing import Any, Literal
 class AuditConfig:
     """Configuración completa del auditor IDICOC."""
 
-    audit_mode: Literal["semantic", "mathematical"] = "semantic"
-
     # Tolerancias y umbrales configurables.
     # NOTA: Los valores por defecto indicados a continuación son únicamente de referencia
     # y deben ajustarse según las características del dominio específico (banca, IoT, salud, etc.).
@@ -47,10 +45,6 @@ class AuditConfig:
     semantic_nli_model: str = "facebook/bart-large-mnli"
     semantic_max_rag_results: int = 5
     semantic_min_rag_score: float = 0.1
-
-    # Parámetros específicos del modo matemático
-    mathematical_weights: tuple[float, ...] = (0.15, 0.15, 0.15, 0.15, 0.14, 0.13, 0.13)
-    mathematical_embedding_model: str | None = None
 
     # Configuración de validación y notario
     validate_context_against_axioms: bool = False

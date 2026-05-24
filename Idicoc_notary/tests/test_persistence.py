@@ -3,7 +3,8 @@ import json
 import pytest
 import tempfile
 from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.base import BankEntropyAnalyzer, CanonicalStateDTO
+from tests.mocks import BankEntropyAnalyzer
+from idicoc_notary_core.audit.base import CanonicalStateDTO
 from idicoc_notary_core.audit.persistence.file_backend import FileAEMStorage, FileCTMStorage
 from idicoc_notary_core.audit.wrapper_pipeline import IIAEService
 from idicoc_notary_core.kernel.admission.aem import AnomalousEventManager
@@ -76,7 +77,7 @@ def test_pipeline_with_persistence():
         aem_storage = FileAEMStorage(aem_path)
         ctm_storage = FileCTMStorage(ctm_nodes, ctm_root)
         
-        config = AuditConfig(audit_mode="mathematical", rigidity_epsilon=0.5, ctm_mode="full")
+        config = AuditConfig(rigidity_epsilon=0.5, ctm_mode="full")
         analyzer = BankEntropyAnalyzer()
         
         # Instantiate wrapper with storage backends
@@ -111,7 +112,7 @@ def test_pipeline_with_persistence():
         assert len(wrapper2.pipeline.aem.entropy_map["DISCARDED_NOISE"]) == 1
 
 def test_ctm_modes():
-    config_log = AuditConfig(audit_mode="mathematical", rigidity_epsilon=0.5, ctm_mode="log_only")
+    config_log = AuditConfig(rigidity_epsilon=0.5, ctm_mode="log_only")
     analyzer = BankEntropyAnalyzer()
     wrapper_log = IIAEService(config_log, analyzer)
     
@@ -124,7 +125,7 @@ def test_ctm_modes():
     assert result["audit_receipt"] == {"status": "log_only"}
     
     # Test disabled mode
-    config_dis = AuditConfig(audit_mode="mathematical", rigidity_epsilon=0.5, ctm_mode="disabled")
+    config_dis = AuditConfig(rigidity_epsilon=0.5, ctm_mode="disabled")
     wrapper_dis = IIAEService(config_dis, analyzer)
     result_dis = wrapper_dis.pipeline.execute("test log", ["test log"], ["test log"])
     assert result_dis["kernel_result"] == {"status": "disabled"}

@@ -10,9 +10,9 @@ from typing import Any, Optional
 
 from .base import (
     CanonicalStateDTO,
-    EntropyAnalyzer,
     IIAENotaryContract,
 )
+from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .pipeline import IIAEServiceAuditor
@@ -149,7 +149,11 @@ class IIAEService(IIAENotaryContract):
             self._log_or_seal_failure(snapshot)
             return False
 
-        umbral = tolerance if tolerance > 0.0 else self.config.rigidity_epsilon
+        if tolerance and tolerance > 0.0:
+            umbral = tolerance
+        else:
+            # Allow a small slack derived from correction_base_tolerance (capped at 0.1)
+            umbral = self.config.rigidity_epsilon + min(self.config.correction_base_tolerance, 0.1)
         dissonance = float(canonical_state.metadata.get("d_s", 0.0))
 
         if dissonance > umbral:

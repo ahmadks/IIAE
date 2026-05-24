@@ -32,6 +32,13 @@ class AEMStorageBackend(Protocol):
     def clear(self) -> None:
         ...
 
+__all__ = [
+    "EntropyAnalyzer",
+    "AdmissionBreach",
+    "AEMStorageBackend",
+    "AnomalousEventManager",
+]
+
 class AnomalousEventManager:
     """
     AEM: Dominio de Aislamiento (Lead Shield).

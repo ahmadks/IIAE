@@ -1,12 +1,11 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
-import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
 from .base import DissonanceStrategy
+
+SentenceTransformer = None
+AutoModelForSequenceClassification = None
+AutoTokenizer = None
 
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
@@ -18,24 +17,36 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
         config: AuditConfig,
     ) -> None:
         self.config = config
+
+        global SentenceTransformer, AutoModelForSequenceClassification, AutoTokenizer
+        if SentenceTransformer is None:
+            from sentence_transformers import SentenceTransformer as SentenceTransformer
+        if AutoTokenizer is None or AutoModelForSequenceClassification is None:
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer as AutoTokenizer
+
+        import numpy as np
+        import torch
+
+        self.np = np
+        self.torch = torch
         self.encoder = SentenceTransformer(config.semantic_embedding_model)
         self.nli_tokenizer = AutoTokenizer.from_pretrained(config.semantic_nli_model)
         self.nli_model = AutoModelForSequenceClassification.from_pretrained(config.semantic_nli_model)
 
-    def _cosine_distance(self, a: np.ndarray, b: np.ndarray) -> float:
-        dot_product = np.dot(a, b)
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
+    def _cosine_distance(self, a: "np.ndarray", b: "np.ndarray") -> float:
+        dot_product = self.np.dot(a, b)
+        norm_a = self.np.linalg.norm(a)
+        norm_b = self.np.linalg.norm(b)
         if norm_a == 0.0 or norm_b == 0.0:
             return 1.0
         return float(1.0 - (dot_product / (norm_a * norm_b)))
 
     def _nli_contradiction(self, premise: str, hypothesis: str) -> float:
         inputs = self.nli_tokenizer(premise, hypothesis, return_tensors='pt', truncation=True)
-        with torch.no_grad():
+        with self.torch.no_grad():
             outputs = self.nli_model(**inputs)
 
-        probs = torch.softmax(outputs.logits, dim=-1).squeeze().tolist()
+        probs = self.torch.softmax(outputs.logits, dim=-1).squeeze().tolist()
         if isinstance(probs, float):
             return probs
         return float(probs[0])
@@ -122,6 +133,8 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
         # λ_inv=0 (sin acceso al estado latente), λ_logic=1, λ_temporal=0 (reservado).
         # El supremo evita diluir una única discrepancia crítica por promedios.
         d_logic = max(max_cosine, max_contradiction)
+        if not violated_axioms and support_found and max_context_contradiction <= self.config.contradiction_snapping_threshold:
+            d_logic = min(d_logic, 0.3)
         D_s = min(1.0, d_logic)
 
         D_f = 1.0
@@ -137,6 +150,9 @@ class SemanticDissonanceStrategy(DissonanceStrategy):
             D_f = max(min(factual_cosines) if factual_cosines else 1.0, max(factual_contradictions) if factual_contradictions else 0.0)
 
         allowable_threshold = self.config.correction_base_tolerance + epsilon
+        if not violated_axioms and support_found and max_context_contradiction <= self.config.contradiction_snapping_threshold:
+            allowable_threshold = max(allowable_threshold, 0.3)
+
         snapping_flag = not support_found and max_context_contradiction > self.config.contradiction_snapping_threshold
         correction_flag = (D_s > allowable_threshold) or snapping_flag
         corrected_output = audit_input

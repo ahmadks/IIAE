@@ -20,12 +20,12 @@ from idicoc_notary_core.kernel.verification.verifier import InvariantVerifier
 from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
 from idicoc_notary_core.utils.logger import get_logger
 
-from .base import CanonicalStateDTO, EntropyAnalyzer
+from .base import CanonicalStateDTO
+from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .kernel_client import KernelCustodyClient
 from .axioms import AxiomEngine
-from .strategies.mathematical import MathematicalDissonanceStrategy
 from .strategies.semantic import SemanticDissonanceStrategy
 
 
@@ -98,10 +98,7 @@ class IIAEServiceAuditor:
         self.initialize()
 
     def _create_dissonance_strategy(self) -> Any:
-        if self.config.audit_mode == "semantic":
-            return SemanticDissonanceStrategy(config=self.config)
-        else:
-            return MathematicalDissonanceStrategy(config=self.config)
+        return SemanticDissonanceStrategy(config=self.config)
 
     def initialize(self) -> None:
         self.axiom_engine.provision_graph(self.graph)
@@ -197,7 +194,6 @@ class IIAEServiceAuditor:
                 "timestamp": timestamp,
                 "d_s": D_s,
                 "d_f": D_f,
-                "audit_mode": self.config.audit_mode,
                 "epsilon_used": epsilon_used,
                 "epsilon": epsilon_used,
                 "delta_fp": self.config.isg_delta_fp,
@@ -298,7 +294,6 @@ class IIAEServiceAuditor:
                 "timestamp": timestamp,
                 "d_s": 1.0,
                 "d_f": 1.0,
-                "audit_mode": self.config.audit_mode,
                 "epsilon_used": epsilon_used,
                 "epsilon": epsilon_used,
                 "delta_fp": self.config.isg_delta_fp,
