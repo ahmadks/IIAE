@@ -38,20 +38,23 @@ def test_audit_config_properties():
 # TEST 2: InvariantStateGenerator with delta_fp
 # ===================================================================
 def test_invariant_state_generator_delta_fp():
-    anchor = SourceAnchor("test_anchor")
+    class DummyAnchor:
+        identity = "test_anchor"
+
+    anchor = DummyAnchor()
     registry = ProjectionRegistry()
     
     # ISG with high tolerance delta_fp = 0.99 (collapses to anchor if distance < 0.99)
     # distance for "test_anchor text" vs "test_anchor" is 0.5 < 0.99 -> collapses
     isg_high = InvariantStateGenerator(anchor, registry, delta_fp=0.99)
     state = isg_high.generate("test_anchor text")
-    assert state.data == "test_anchor"
+    assert state.semantic_vector == "test_anchor"
 
     # ISG with low tolerance delta_fp = 0.01 (should not collapse)
     # distance for "test_anchor text" vs "test_anchor" is 0.5 >= 0.01 -> does not collapse
     isg_low = InvariantStateGenerator(anchor, registry, delta_fp=0.01)
     state2 = isg_low.generate("test_anchor text")
-    assert state2.data == "test_anchor text"
+    assert state2.semantic_vector == "test_anchor text"
 
 
 # ===================================================================

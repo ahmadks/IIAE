@@ -1,4 +1,4 @@
-# idicoc_notary_core/kernel/projection/invariant_generator.py
+# idicoc_notary_core/kernel/projection/invariant_state_generator.py
 from __future__ import annotations
 from typing import Any, Dict
 from datetime import datetime, timezone
@@ -11,12 +11,31 @@ from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 class CanonicalState:
     """
     Representación formal del estado invariante V^t.
-    Es el único tipo de estado que puede entrar al Verifier y al CTM.
+    Contiene dos proyecciones complementarias:
+      - semantic_vector: ruta semántica/textual para estrategias basadas en significado.
+      - measure_vector: ruta métrica para estrategias basadas en medidas numéricas.
     """
-    def __init__(self, data: Any, metadata: Dict):
-        self.data = data
+
+    def __init__(self, semantic_vector: Any, measure_vector: Any, metadata: Dict):
+        self.semantic_vector = semantic_vector
+        self.measure_vector = measure_vector
         self.metadata = metadata
         self.is_canonical = True
+
+    def get_representation(self, preference: str = "semantic") -> Any:
+        if preference == "measure":
+            return self.measure_vector if self.measure_vector is not None else self.semantic_vector
+        return self.semantic_vector if self.semantic_vector is not None else self.measure_vector
+
+    def __str__(self) -> str:
+        payload = self.get_representation("semantic")
+        return str(payload)
+
+    def __repr__(self) -> str:
+        return (
+            f"CanonicalState(semantic_vector={self.semantic_vector!r}, "
+            f"measure_vector={self.measure_vector!r}, metadata={self.metadata!r})"
+        )
 
 
 class InvariantStateGenerator:
@@ -40,9 +59,9 @@ class InvariantStateGenerator:
         Proyecta la señal admitida a un estado canónico V^t.
         """
         try:
-            projected = self._project_to_invariant(admitted_input)
+            semantic_projection = self._project_to_invariant(admitted_input)
+            measure_projection = self._project_to_measure(admitted_input)
         except Exception as e:
-            # Cualquier fallo aquí es una violación de integridad de proyección
             raise InvariantStateBreach(
                 message="Fallo en la proyección canónica (MAII‑ISG).",
                 invalid_state=admitted_input,
@@ -56,7 +75,11 @@ class InvariantStateGenerator:
             "projection_history": self._registry.get_projection_trace(),
         }
 
-        return CanonicalState(projected, metadata)
+        return CanonicalState(
+            semantic_vector=semantic_projection,
+            measure_vector=measure_projection,
+            metadata=metadata,
+        )
 
     def _project_to_invariant(self, data: Any) -> Any:
         """
@@ -67,6 +90,9 @@ class InvariantStateGenerator:
 
         Se aplica una normalización básica y un colapso por tolerancia δ_fp.
         """
+        if isinstance(data, CanonicalState):
+            return data.get_representation("semantic")
+
         if hasattr(data, "data"):
             return self._project_to_invariant(data.data)
 
@@ -83,6 +109,29 @@ class InvariantStateGenerator:
             return serialized
 
         return data
+
+    def _project_to_measure(self, data: Any) -> list[float]:
+        if isinstance(data, CanonicalState):
+            return data.get_representation("measure")
+
+        if hasattr(data, "data"):
+            return self._project_to_measure(data.data)
+
+        if isinstance(data, str):
+            normalized = self._normalize_text(data)
+            return [float(len(normalized)), float(len(set(normalized.split())))]
+
+        if isinstance(data, dict) or isinstance(data, list):
+            serialized = self._canonical_json(data)
+            return [float(len(serialized)), float(len(set(serialized.split())))]
+
+        if isinstance(data, (list, tuple, set)):
+            return [float(len(data))]
+
+        try:
+            return [float(data)]
+        except Exception:
+            return [0.0]
 
     def _normalize_text(self, text: str) -> str:
         return " ".join(text.lower().strip().split())

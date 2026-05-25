@@ -26,7 +26,7 @@ class DynamicSchemaExtractor:
 
     def _infer_axioms(self, raw_input: Any, canonical_state: Any) -> list[dict[str, Any]]:
         raw_text = str(raw_input) if raw_input is not None else ""
-        canonical_text = str(getattr(canonical_state, "data", canonical_state))
+        canonical_text = str(canonical_state)
         axioms: list[dict[str, Any]] = []
 
         if raw_text and canonical_text:
@@ -85,8 +85,11 @@ class DynamicSchemaExtractor:
         σ: Structural Signature (hash)
         """
         subject = type(raw_input).__name__
+        canonical_payload = getattr(canonical_state, "semantic_vector", None)
+        if canonical_payload is None:
+            canonical_payload = getattr(canonical_state, "measure_vector", canonical_state)
         predicate = "transforms_to"
-        obj = type(canonical_state.data).__name__ if hasattr(canonical_state, 'data') else repr(canonical_state)
+        obj = type(canonical_payload).__name__ if canonical_payload is not None else repr(canonical_state)
         scope = "session"
         timestamp = datetime.now(timezone.utc).isoformat()
         

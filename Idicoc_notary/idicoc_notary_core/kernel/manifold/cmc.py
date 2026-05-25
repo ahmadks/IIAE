@@ -14,10 +14,11 @@ class Manifold:
     graph: Any
 
     def contains(self, point: Any) -> bool:
+        candidate = point
         if hasattr(point, "data"):
             candidate = point.data
-        else:
-            candidate = point
+        elif hasattr(point, "semantic_vector") or hasattr(point, "measure_vector"):
+            candidate = getattr(point, "semantic_vector", None) or getattr(point, "measure_vector", point)
 
         if hasattr(self, "dqe") and self.dqe is not None:
             dissonance = self.dqe.compute_dissonance(candidate, self.canonical_state, self.graph)
@@ -47,13 +48,17 @@ class ManifoldConstructor:
         return (1.0 - alpha) * current_eps + alpha * target
 
     def build(self, canonical_state: Any, graph: Any, epsilon: float) -> Manifold:
-        canonical_hash = sha256_hex(canonical_json(getattr(canonical_state, "data", canonical_state)))
+        representative = canonical_state
+        if hasattr(canonical_state, "semantic_vector") or hasattr(canonical_state, "measure_vector"):
+            representative = getattr(canonical_state, "semantic_vector", None) or getattr(canonical_state, "measure_vector", canonical_state)
+
+        canonical_hash = sha256_hex(canonical_json(representative))
         active_axioms = graph.get_active_axioms() if hasattr(graph, "get_active_axioms") else []
         manifold = Manifold(
             canonical_state_hash=canonical_hash,
             epsilon=epsilon,
             active_axioms=active_axioms,
-            canonical_state=getattr(canonical_state, "data", canonical_state),
+            canonical_state=representative,
             graph=graph,
         )
         manifold.dqe = self.dqe

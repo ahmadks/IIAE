@@ -44,8 +44,8 @@ class AuditConfig:
     source_name: str = "ai_comercial"
 
     # Paths de persistencia inyectables para AEM / CTM.
-    aem_storage_path: str = "aem_entropy.json"
-    ctm_nodes_path: str = "ctm_nodes.json"
+    aem_storage_path: str = "tests/results/aem_entropy.json"
+    ctm_nodes_path: str = "tests/results/ctm_nodes.json"
     ctm_root_path: str = "ctm_root.txt"
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False

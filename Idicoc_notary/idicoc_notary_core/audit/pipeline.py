@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
 from idicoc_notary_core.kernel.admission.aem import AnomalousEventManager
 from idicoc_notary_core.kernel.custody.merkle_dag import (
     CustodialTraceManager,
@@ -51,7 +52,7 @@ class IIAEServiceAuditor:
         self.axiom_engine = AxiomEngine(axioms)
         self.logger = get_logger("audit_flow.pipeline")
 
-        self.anchor = SourceAnchor(self.config.constant_k)
+        self.anchor = SourceAnchor(np.zeros(1, dtype=float))
         if aem_storage is None:
             aem_storage = FileAEMStorage(self.config.aem_storage_path)
 
@@ -131,6 +132,7 @@ class IIAEServiceAuditor:
                 dse=self.dse,
                 cmc=self.cmc,
                 dqe=self.dqe,
+                dissonance_strategy=self.dissonance_strategy,
                 epsilon=self.config.rigidity_epsilon,
                 enable_hard_halt=self.config.enable_hard_halt,
             )
@@ -185,7 +187,7 @@ class IIAEServiceAuditor:
             admission_metrics: dict[str, Any] = {}
             admitted_input, admission_metrics = self.admit(audit_input)
 
-            if admitted_input is None or not isinstance(admitted_input, str):
+            if admitted_input is None:
                 admitted_input = ""
 
             policy_axioms = self.axiom_engine.render_axioms(self.graph)
@@ -241,29 +243,43 @@ class IIAEServiceAuditor:
             if self.config.ctm_mode == "full":
                 kernel_factory = self._make_kernel_factory()
                 kernel = kernel_factory()
-                kernel_result = kernel.process(
-                    canonical_state=canonical_state.data,
-                    dissonance=D_s,
-                    epsilon=epsilon_used,
-                    property_graph=self.graph,
-                    timestamp=metadata["timestamp"],
-                )
-                if kernel_result is None:
-                    kernel_result = {
-                        "status": "committed",
-                        "root_hash": self.ctm.root_hash,
-                    }
+                try:
+                    kernel_result = kernel.process(
+                        canonical_state=canonical_state.data,
+                        dissonance=D_s,
+                        epsilon=epsilon_used,
+                        property_graph=self.graph,
+                        timestamp=metadata["timestamp"],
+                    )
+                    if kernel_result is None:
+                        kernel_result = {
+                            "status": "committed",
+                            "root_hash": self.ctm.root_hash,
+                        }
 
-                receipt = self.kernel_client.commit(
-                    canonical_state=canonical_state.data,
-                    dissonance=D_s,
-                    fact_dissonance=D_f,
-                    epsilon=epsilon_used,
-                    delta_fp=self.config.isg_delta_fp,
-                    correction_flag=correction_flag,
-                    source=self.config.source_name,
-                    metadata=canonical_state.metadata,
-                )
+                    receipt = self.kernel_client.commit(
+                        canonical_state=canonical_state.data,
+                        dissonance=D_s,
+                        fact_dissonance=D_f,
+                        epsilon=epsilon_used,
+                        delta_fp=self.config.isg_delta_fp,
+                        correction_flag=correction_flag,
+                        source=self.config.source_name,
+                        metadata=canonical_state.metadata,
+                    )
+                except Exception as exc:
+                    self.logger.error(
+                        "Kernel or CTM commit failed",
+                        exc_info=exc,
+                        extra={
+                            "iiae_data": {
+                                "error": str(exc),
+                                "stage": "kernel_commit",
+                            }
+                        },
+                    )
+                    kernel_result = {"status": "uncommitted", "error": str(exc)}
+                    receipt = {"status": "uncommitted", "error": str(exc)}
             elif self.config.ctm_mode == "log_only":
                 self.logger.info(
                     "CTM Commit Log Only",

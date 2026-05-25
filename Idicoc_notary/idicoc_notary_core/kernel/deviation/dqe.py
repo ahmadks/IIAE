@@ -23,9 +23,17 @@ class DeviationQuantifier:
     def embed(self, value: Any) -> list[float]:
         if isinstance(value, str):
             return [float(len(value))]
+        if hasattr(value, "measure_vector"):
+            return self.embed(value.measure_vector)
+        if hasattr(value, "semantic_vector"):
+            return self.embed(value.semantic_vector)
         if hasattr(value, "data"):
             return self.embed(value.data)
         if isinstance(value, (list, tuple, set)):
+            if not value:
+                return [0.0]
+            if all(isinstance(item, (int, float)) for item in value):
+                return [float(item) for item in value]
             return [float(len(value))]
         return [0.0]
 
@@ -47,14 +55,14 @@ class DeviationQuantifier:
     def _gradient(self, y: Any, V_hat: Any, G: Any) -> list[float]:
         if isinstance(y, str):
             return [0.0]
-        diff = self._subtract_vectors(self.embed(y), self.embed(getattr(V_hat, "data", V_hat)))
+        diff = self._subtract_vectors(self.embed(y), self.embed(V_hat))
         norm = self._vector_norm(diff)
         if norm < 1e-9:
             return [0.0 for _ in diff]
         return [component / norm for component in diff]
 
     def compute_dissonance(self, y: Any, V_hat: Any, G: Any) -> float:
-        diff = self._subtract_vectors(self.embed(y), self.embed(getattr(V_hat, "data", V_hat)))
+        diff = self._subtract_vectors(self.embed(y), self.embed(V_hat))
         d_inv = self._vector_norm(diff) / MAX_DIST
         logic_penalties = [self._violation_penalty(y, ax) for ax in G.get_active_axioms()] if hasattr(G, "get_active_axioms") else []
         d_logic = sum(logic_penalties)

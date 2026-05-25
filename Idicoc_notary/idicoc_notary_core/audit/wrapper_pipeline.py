@@ -32,9 +32,23 @@ class IIAEService(IIAENotaryContract):
         self.entropy_analyzer = entropy_analyzer
         self.aem_storage = aem_storage
         self.ctm_storage = ctm_storage
+        # Anchor is private to the wrapper; strategies should access it via
+        # `self.get_terminal_reference()` or the configuration, not as a
+        # public compute parameter.
+        self._anchor: Any | None = None
         self.pipeline: IIAEServiceAuditor | None = None
         self._initialized = False
         self.initialize(config)
+
+    def get_terminal_reference(self) -> Any:
+        """Return the wrapper's terminal reference (private anchor or config).
+
+        Strategies or callers may use this accessor to obtain the canonical
+        reference for comparisons. Prefer configuration values when available.
+        """
+        if self._anchor is not None:
+            return self._anchor
+        return getattr(self.config, 'constant_k', None)
 
     def initialize(self, config: AuditConfig) -> None:
         self.config = config

@@ -24,6 +24,7 @@ class CustodialKernel:
         dse,
         cmc,
         dqe,
+        dissonance_strategy,
         epsilon: float = 0.0,
         enable_hard_halt: bool = False,
     ):
@@ -34,6 +35,7 @@ class CustodialKernel:
         self.dse = dse
         self.cmc = cmc
         self.dqe = dqe
+        self.dissonance_strategy = dissonance_strategy
         self.epsilon = epsilon
         self.enable_hard_halt = enable_hard_halt
         self._dissonance_history: list[float] = []
@@ -73,11 +75,12 @@ class CustodialKernel:
             self.state_s["buffers"][2] = updated_graph
 
             # Stage 4 — Manifold construction
-            manifold = self.cmc.build(canonical_state_obj, updated_graph, self.epsilon)
+            canonical_input = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
+            manifold = self.cmc.build(canonical_input, updated_graph, self.epsilon)
             self.state_s["buffers"][3] = manifold
 
             # Stage 5 — Deviation quantification
-            dissonance = self.dqe.compute_dissonance(admitted, canonical_state_obj, updated_graph)
+            dissonance = self.dqe.compute_dissonance(admitted, canonical_input, updated_graph)
             self.state_s["buffers"][4] = dissonance
             self._dissonance_history.append(dissonance)
 
@@ -89,7 +92,7 @@ class CustodialKernel:
             )
 
             if dissonance > self.epsilon:
-                corrected_state = self.dqe.project_to_manifold(admitted, manifold, canonical_state_obj, updated_graph)
+                corrected_state = self.dqe.project_to_manifold(admitted, manifold, canonical_input, updated_graph)
             else:
                 corrected_state = admitted
             self.state_s["buffers"][5] = corrected_state
@@ -103,11 +106,12 @@ class CustodialKernel:
             )
             self.state_s["buffers"][6] = "VERIFIED"
 
-            invariant_state_hash = sha256_hex(repr(canonical_state_obj.data) + canonical_state_obj.metadata.get("timestamp", ""))
+            canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
+            invariant_state_hash = sha256_hex(repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", ""))
             property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
 
             self.ctm.commit(
-                canonical_state_obj.data if hasattr(canonical_state_obj, 'data') else canonical_state_obj,
+                canonical_payload,
                 dissonance=dissonance,
                 epsilon=self.epsilon,
                 property_graph=updated_graph,

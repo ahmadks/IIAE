@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
+    from idicoc_notary_core.kernel.projection.invariant_state_generator import CanonicalState
     from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 
 
@@ -24,7 +25,6 @@ class DissonanceStrategy(ABC):
         audit_input: Any,
         context_input: List[str],
         context_axioms: List[str],
-        source_anchor: "SourceAnchor",
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
     ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
@@ -53,5 +53,19 @@ class DissonanceStrategy(ABC):
                 * 'reference_count' (int): Cantidad de referencias totales
                 * 'snapping_flag' (bool): Si se activó snapping fáctico
                 * 'correction_flag' (bool): Si se aplicó corrección
+        """
+        ...
+
+    @abstractmethod
+    def select_canonical_input(self, canonical_state: "CanonicalState") -> Any:
+        """
+        Elige la representación canónica correcta para el eje de disonancia de la estrategia.
+        """
+        ...
+
+    @abstractmethod
+    def canonical_axis(self) -> str:
+        """
+        Devuelve el eje preferido para la estrategia: 'semantic' o 'measure'.
         """
         ...
