@@ -34,12 +34,23 @@ class NoOpHardwareSealer:
 
 
 class EnvHardwareSealer:
-    def __init__(self, key_env: str = "IIAE_HARDWARE_KEY"):
+    def __init__(self, key_env: str = "IIAE_HARDWARE_KEY", require_key: bool = False):
+        self.key_env = key_env
+        self.require_key = require_key
         self.key = os.environ.get(key_env)
+
+        if self.require_key and not self.key:
+            raise RuntimeError(
+                f"Se requiere la variable de entorno de hardware '{key_env}' para el sellado.")
 
     def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.key:
+            if self.require_key:
+                raise RuntimeError(
+                    f"Se intentó sellar con hardware pero no se encontró la clave en '{self.key_env}'."
+                )
             return payload
+
         payload_copy = dict(payload)
         serialized = canonical_json(payload)
         signature = hmac_sha256_hex(self.key, serialized)
@@ -72,24 +83,9 @@ class MerkleDAG:
         self._root_hash: Optional[str] = None
         self._sealer: HardwareSealer = sealer or NoOpHardwareSealer()
         self._storage = storage_backend
-        
+
         if self._storage is not None:
             self._root_hash = self._storage.load_root_hash()
-            stored_nodes = self._storage.load_all_nodes() or {}
-            for h, data in stored_nodes.items():
-                self._nodes[h] = MerkleNode(
-                    node_hash=data["node_hash"],
-                    parent_hashes=data["parent_hashes"],
-                    timestamp=data["timestamp"],
-                    payload=data["payload"],
-                    hardware_evidence=data.get("hardware_evidence"),
-                    invariant_state_hash=data.get("invariant_state_hash"),
-                    property_graph_hash=data.get("property_graph_hash"),
-                    deviation_score=data.get("deviation_score"),
-                    correction_flag=data.get("correction_flag"),
-                    hss_anchor=data.get("hss_anchor"),
-                    epuf_anchor=data.get("epuf_anchor"),
-                )
 
     @property
     def root_hash(self) -> Optional[str]:
@@ -159,7 +155,31 @@ class MerkleDAG:
         return node
 
     def get_node(self, node_hash: str) -> Optional[MerkleNode]:
-        return self._nodes.get(node_hash)
+        if node_hash in self._nodes:
+            return self._nodes[node_hash]
+
+        if self._storage is None:
+            return None
+
+        node_data = self._storage.load_node(node_hash)
+        if node_data is None:
+            return None
+
+        node = MerkleNode(
+            node_hash=node_data["node_hash"],
+            parent_hashes=node_data["parent_hashes"],
+            timestamp=node_data["timestamp"],
+            payload=node_data["payload"],
+            hardware_evidence=node_data.get("hardware_evidence"),
+            invariant_state_hash=node_data.get("invariant_state_hash"),
+            property_graph_hash=node_data.get("property_graph_hash"),
+            deviation_score=node_data.get("deviation_score"),
+            correction_flag=node_data.get("correction_flag"),
+            hss_anchor=node_data.get("hss_anchor"),
+            epuf_anchor=node_data.get("epuf_anchor"),
+        )
+        self._nodes[node_hash] = node
+        return node
 
     def create_genesis(self, metadata: Dict[str, Any], timestamp: str) -> MerkleNode:
         payload = {
@@ -171,9 +191,15 @@ class MerkleDAG:
         return self.append(payload, timestamp=timestamp, parent_hashes=[])
 
     def to_dict(self) -> Dict[str, Any]:
+        nodes_dict: Dict[str, Dict[str, Any]]
+        if self._storage is not None:
+            nodes_dict = self._storage.load_all_nodes()
+        else:
+            nodes_dict = {h: asdict(n) for h, n in self._nodes.items()}
+
         return {
             "root_hash": self._root_hash,
-            "nodes": {h: asdict(n) for h, n in self._nodes.items()},
+            "nodes": nodes_dict,
         }
 
 

@@ -1,7 +1,7 @@
 """
 Excepciones del wrapper IDICOC.
 
-Solo incluye errores de inicialización y de cumplimiento.
+Incluye errores de inicialización, cumplimiento y persistencia.
 """
 
 from __future__ import annotations
@@ -43,3 +43,17 @@ class ComplianceBreach(RuntimeError):
             "dissonance": self.dissonance,
             "threshold": self.threshold,
         }
+
+
+class PersistenceError(RuntimeError):
+    """Error general de la capa de persistencia."""
+
+    def __init__(self, message: str):
+        super().__init__(f"[PersistenceError] {message}")
+
+
+class DataCorruptionError(PersistenceError):
+    """Error de datos corruptos en almacenamiento persistente."""
+
+    def __init__(self, filepath: str, message: str):
+        super().__init__(f"Archivo corrupto '{filepath}': {message}")

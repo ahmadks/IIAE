@@ -16,7 +16,7 @@ from .exceptions import ComplianceBreach, WrapperInitializationError
 from .kernel_client import KernelCustodyClient
 from .pipeline import IIAEServiceAuditor
 from .axioms import AxiomEngine
-from .semantic_dissonance import DissonanceStrategy
+from .dse import DissonanceStrategy
 from .wrapper_pipeline import IIAEService
 
 __all__ = [

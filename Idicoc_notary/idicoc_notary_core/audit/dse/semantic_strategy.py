@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
+from .dissonance_strategy import DissonanceStrategy
+
 # Inicialización diferida de librerías
 SentenceTransformer = None
 AutoModelForSequenceClassification = None
@@ -12,9 +14,9 @@ if TYPE_CHECKING:
     import numpy as np
 
 
-class DissonanceStrategy:
+class SemanticDissonanceStrategy(DissonanceStrategy):
     def __init__(self, config: "AuditConfig") -> None:
-        self.config = config
+        super().__init__(config)
 
         global SentenceTransformer, AutoModelForSequenceClassification, AutoTokenizer
         if SentenceTransformer is None:
@@ -37,7 +39,7 @@ class DissonanceStrategy:
                 if str(label).lower() == 'contradiction':
                     self.contradiction_idx = int(idx)
                     break
-        
+
         if self.contradiction_idx is None:
             self.contradiction_idx = getattr(self.config, 'nli_contradiction_index', 0)
 
@@ -63,7 +65,7 @@ class DissonanceStrategy:
         probs = self.torch.softmax(outputs.logits, dim=-1).squeeze().tolist()
         if isinstance(probs, float):
             return probs
-        
+
         score = float(probs[self.contradiction_idx])
         self._nli_cache[key] = score
         return score
@@ -75,43 +77,37 @@ class DissonanceStrategy:
 
     def compute(
         self,
-        audit_input: str,
+        audit_input: Any,
         context_input: List[str],
         context_axioms: List[str],
-        source_anchor: "SourceAnchor",  # Vinculación explícita con la Coálgebra Terminal
+        source_anchor: "SourceAnchor",
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
-    ) -> Tuple[float, float, str, bool, Dict[str, Any]]:
-        
-        if not audit_input.strip():
+    ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
+        semantic_input = str(audit_input) if audit_input is not None else ""
+        if not semantic_input.strip():
             return 1.0, 1.0, '[REJECT] Salida vacía o colapso de señal.', True, {
                 'error': 'empty_output'
             }
 
         normalize = getattr(self.config, 'embedding_normalize', True)
-        source_embedding = self.encoder.encode(audit_input, normalize_embeddings=normalize)
+        source_embedding = self.encoder.encode(semantic_input, normalize_embeddings=normalize)
 
         # -----------------------------------------------------------------
         # EVALUACIÓN DE LA COÁLGEBRA TERMINAL (SourceAnchor)
         # -----------------------------------------------------------------
         anchor_identity = source_anchor.identity
-        
+
         if isinstance(anchor_identity, str):
-            # Si el ancla es textual, se proyecta al espacio latente y se mide de forma combinada
             anchor_embedding = self.encoder.encode(anchor_identity, normalize_embeddings=normalize)
-            d_terminal = self._combined_distance(source_embedding, anchor_embedding, anchor_identity, audit_input)
+            d_terminal = self._combined_distance(source_embedding, anchor_embedding, anchor_identity, semantic_input)
         else:
-            # Si es un objeto vectorizado/Minimal Canonical Invariant Representation (\hat{V})
             anchor_embedding = anchor_identity
             d_terminal = self._cosine_distance(source_embedding, anchor_embedding)
 
-        # Rigidez Paramétrica: Cualquier desviación por encima de la tolerancia estricta rompe la terminalidad
         rigidity_threshold = getattr(self.config, 'terminal_rigidity_threshold', 0.01)
         terminality_violation = d_terminal > (rigidity_threshold + epsilon)
 
-        # -----------------------------------------------------------------
-        # CÓMPUTO COÁLGEBRAICO LOCAL: Evaluación de Sub-Grafos
-        # -----------------------------------------------------------------
         max_axiom_distance = 0.0
         max_context_distance = 0.0
         violated_axioms: list[str] = []
@@ -121,42 +117,35 @@ class DissonanceStrategy:
         axiom_embs: Dict[str, "np.ndarray"] = {}
         context_embs: Dict[str, "np.ndarray"] = {}
 
-        # 1. Sub-Grafo de Axiomas Invariantes
         for axiom in context_axioms:
             ax_embedding = self.encoder.encode(axiom, normalize_embeddings=normalize)
-            axiom_embs[axiom] = ax_embedding  
-            
-            distance = self._combined_distance(source_embedding, ax_embedding, axiom, audit_input)
+            axiom_embs[axiom] = ax_embedding
+
+            distance = self._combined_distance(source_embedding, ax_embedding, axiom, semantic_input)
             max_axiom_distance = max(max_axiom_distance, distance)
-            
             if distance > self.config.context_axiom_conflict_threshold:
                 violated_axioms.append(axiom)
 
-        # 2. Sub-Grafo de Fragmentos Fácticos (Contexto RAG)
         for chunk in context_input:
             chunk_embedding = self.encoder.encode(chunk, normalize_embeddings=normalize)
-            context_embs[chunk] = chunk_embedding  
-            
-            distance = self._combined_distance(source_embedding, chunk_embedding, chunk, audit_input)
+            context_embs[chunk] = chunk_embedding
+
+            distance = self._combined_distance(source_embedding, chunk_embedding, chunk, semantic_input)
             max_context_distance = max(max_context_distance, distance)
-            
             if distance > self.config.contradiction_snapping_threshold:
                 contradictory_contexts.append(chunk)
             if distance <= self.config.correction_base_tolerance:
                 support_found = True
 
-        # Unificación del Operador Supremum incluyendo la Distancia del Ancla Terminal
         d_logic = max(max_axiom_distance, max_context_distance, d_terminal)
         D_s = float(self.np.clip(d_logic, 0.0, 1.0))
         D_f = max_context_distance if context_input else 0.0
 
         allowable_threshold = self.config.correction_base_tolerance + epsilon
         snapping_flag = (not support_found) and (max_context_distance > self.config.contradiction_snapping_threshold)
-        
-        # El flag de corrección ahora se dispara de forma determinista ante la ruptura de la rigidez del Ancla
         correction_flag = (D_s > allowable_threshold) or snapping_flag or terminality_violation
 
-        corrected_output = audit_input
+        corrected_output: Any = semantic_input
         if correction_flag:
             if terminality_violation:
                 corrected_output = (
@@ -193,8 +182,11 @@ class DissonanceStrategy:
 
         if validate_conflicts and context_input and context_axioms:
             metrics['context_axiom_conflicts'] = self._check_context_axiom_conflicts(
-                context_input, context_axioms, context_embs, axiom_embs,
-                threshold=self.config.context_axiom_conflict_threshold
+                context_input,
+                context_axioms,
+                context_embs,
+                axiom_embs,
+                threshold=self.config.context_axiom_conflict_threshold,
             )
         else:
             metrics['context_axiom_conflicts'] = []

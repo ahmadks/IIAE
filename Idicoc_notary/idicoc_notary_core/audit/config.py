@@ -7,7 +7,10 @@ específicos de cada modo de disonancia.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .dse import DissonanceStrategy
 
 
 @dataclass
@@ -40,16 +43,30 @@ class AuditConfig:
     # source_name: identificador de la instancia de servicio (antes: service_instance_name)
     source_name: str = "ai_comercial"
 
+    # Paths de persistencia inyectables para AEM / CTM.
+    aem_storage_path: str = "aem_entropy.json"
+    ctm_nodes_path: str = "ctm_nodes.json"
+    ctm_root_path: str = "ctm_root.txt"
+    hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
+    require_hardware_seal: bool = False
+
+    # Estrategia de disonancia inyectable.
+    # Debe ser una clase que implemente la interfaz DissonanceStrategy.
+    # Por defecto utiliza SemanticDissonanceStrategy.
+    dissonance_strategy: Any = None
+
     # Parámetros específicos del modo semántico
     semantic_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_nli_model: str = "facebook/bart-large-mnli"
     semantic_max_rag_results: int = 5
     semantic_min_rag_score: float = 0.1
+    embedding_normalize: bool = True
+    terminal_rigidity_threshold: float = 0.01
 
     # Configuración de validación y notario
     validate_context_against_axioms: bool = False
 
-    ctm_mode: Literal["full", "log_only", "disabled"] = "full"
+    ctm_mode: str = "full"
 
     # Nota: El parámetro 'mode' (factual/hybrid/creative) ha sido eliminado.
     # La creatividad se controla exclusivamente mediante rigidity_epsilon.
@@ -72,6 +89,11 @@ class AuditConfig:
         """
         Validaciones y normalizaciones post-inicialización.
         """
+        # Si no se proporciona estrategia, usar SemanticDissonanceStrategy por defecto
+        if self.dissonance_strategy is None:
+            from .dse import SemanticDissonanceStrategy
+            self.dissonance_strategy = SemanticDissonanceStrategy
+
         if self.enable_hard_halt:
             import warnings
 

@@ -57,9 +57,9 @@ def test_invariant_state_generator_delta_fp():
 # ===================================================================
 # TEST 3: Semantic Strategy with mocks
 # ===================================================================
-@patch('idicoc_notary_core.audit.semantic_dissonance.SentenceTransformer')
-@patch('idicoc_notary_core.audit.semantic_dissonance.AutoTokenizer')
-@patch('idicoc_notary_core.audit.semantic_dissonance.AutoModelForSequenceClassification')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.SentenceTransformer')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.AutoTokenizer')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.AutoModelForSequenceClassification')
 def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_class):
     # Set up mocks for sentence transformer and NLI
     mock_encoder = MagicMock()
@@ -86,8 +86,8 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
         context_axiom_conflict_threshold=0.4,
     )
     
-    from idicoc_notary_core.audit.semantic_dissonance import DissonanceStrategy
-    strategy = DissonanceStrategy(config)
+    from idicoc_notary_core.audit.dse import SemanticDissonanceStrategy
+    strategy = SemanticDissonanceStrategy(config)
     
     # Patch self._nli_contradiction on strategy
     def mock_nli(premise, hypothesis):
@@ -131,15 +131,14 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
 # ===================================================================
 # TEST 5: Pipeline & Wrapper execution with robust exception handling
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
-def test_pipeline_exception_handling(mock_strategy_class):
+def test_pipeline_exception_handling():
     # Mock strategy compute to throw an exception
     mock_strategy = MagicMock()
     mock_strategy.compute.side_effect = RuntimeError("Mocked compute error")
-    mock_strategy_class.return_value = mock_strategy
+    mock_strategy_class = MagicMock(return_value=mock_strategy)
 
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig()
+    config = AuditConfig(dissonance_strategy=mock_strategy_class)
 
     wrapper = IIAEService(config, entropy_analyzer)
     
@@ -161,9 +160,9 @@ def test_pipeline_exception_handling(mock_strategy_class):
 # A single highly-contradictory axiom must dominate D_s regardless
 # of how many benign references are present.
 # ===================================================================
-@patch('idicoc_notary_core.audit.semantic_dissonance.SentenceTransformer')
-@patch('idicoc_notary_core.audit.semantic_dissonance.AutoTokenizer')
-@patch('idicoc_notary_core.audit.semantic_dissonance.AutoModelForSequenceClassification')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.SentenceTransformer')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.AutoTokenizer')
+@patch('idicoc_notary_core.audit.dse.semantic_strategy.AutoModelForSequenceClassification')
 def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class, mock_encoder_class):
     mock_encoder = MagicMock()
     mock_encoder_class.return_value = mock_encoder
@@ -178,8 +177,8 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
         context_axiom_conflict_threshold=0.5,
     )
 
-    from idicoc_notary_core.audit.semantic_dissonance import DissonanceStrategy
-    strategy = DissonanceStrategy(config)
+    from idicoc_notary_core.audit.dse import SemanticDissonanceStrategy
+    strategy = SemanticDissonanceStrategy(config)
     strategy._cosine_distance = lambda a, b: 0.05
 
     call_count = [0]
@@ -211,20 +210,33 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
 # ===================================================================
 # TEST 7: algebraic_components present and correct in pipeline metadata
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
-def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
+def test_pipeline_algebraic_components_in_metadata():
     mock_strategy = MagicMock()
     mock_strategy.compute.return_value = (
         0.3,   # D_s
         0.2,   # D_f
         "output text",
         False,
-        {"d_logic": 0.3, "max_context_distance": 0.1, "violated_axioms": [], "contradictory_contexts": []},
+        {
+            "d_logic": 0.3,
+            "d_s": 0.3,
+            "d_factual": 0.2,
+            "d_terminal": 0.0,
+            "terminality_violation": False,
+            "max_axiom_distance": 0.0,
+            "max_context_distance": 0.1,
+            "violated_axioms": [],
+            "contradictory_contexts": [],
+            "support_found": True,
+            "reference_count": 2,
+            "snapping_flag": False,
+            "correction_flag": False,
+        },
     )
-    mock_strategy_class.return_value = mock_strategy
+    mock_strategy_class = MagicMock(return_value=mock_strategy)
 
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig()
+    config = AuditConfig(dissonance_strategy=mock_strategy_class)
     wrapper = IIAEService(config, entropy_analyzer)
 
     state = wrapper.process_interaction(
@@ -246,14 +258,13 @@ def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
 # ===================================================================
 # TEST 8: verify_compliance validates coalgebraic weights and D_s=d_logic
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
-def test_verify_compliance_algebraic_validation(mock_strategy_class):
+def test_verify_compliance_algebraic_validation():
     # Stub the strategy so no ML models are loaded
+    mock_strategy_class = MagicMock()
     mock_strategy_class.return_value = MagicMock()
 
-
     entropy_analyzer = BankEntropyAnalyzer()
-    config = AuditConfig(rigidity_epsilon=1.0)
+    config = AuditConfig(rigidity_epsilon=1.0, dissonance_strategy=mock_strategy_class)
     wrapper = IIAEService(config, entropy_analyzer)
 
     # Case 1: valid algebraic components → should return True

@@ -11,16 +11,14 @@ from idicoc_notary_core.audit.wrapper_pipeline import IIAEService
 
 
 def _build_semantic_service(compute_return):
-    mock_strategy = MagicMock()
-    mock_strategy.compute.return_value = compute_return
+    mock_strategy_class = MagicMock()
+    mock_strategy_instance = MagicMock()
+    mock_strategy_instance.compute.return_value = compute_return
+    mock_strategy_class.return_value = mock_strategy_instance
 
-    with patch(
-        'idicoc_notary_core.audit.pipeline.DissonanceStrategy',
-        return_value=mock_strategy,
-    ):
-        config = AuditConfig()
-        entropy_analyzer = BankEntropyAnalyzer()
-        return IIAEService(config, entropy_analyzer)
+    config = AuditConfig(dissonance_strategy=mock_strategy_class)
+    entropy_analyzer = BankEntropyAnalyzer()
+    return IIAEService(config, entropy_analyzer)
 
 
 @pytest.fixture

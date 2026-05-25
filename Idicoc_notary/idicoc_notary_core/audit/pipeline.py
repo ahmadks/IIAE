@@ -21,12 +21,17 @@ from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
 from idicoc_notary_core.utils.logger import get_logger
 
 from .base import CanonicalStateDTO
+from .persistence.file_backend import FileAEMStorage, FileCTMStorage
 from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .kernel_client import KernelCustodyClient
 from .axioms import AxiomEngine
-from .semantic_dissonance import DissonanceStrategy
+from .dse import (
+    DissonanceStrategy as DissonanceStrategyProtocol,
+    LogicDissonanceStrategy,
+    SemanticDissonanceStrategy,
+)
 
 
 class IIAEServiceAuditor:
@@ -47,6 +52,15 @@ class IIAEServiceAuditor:
         self.logger = get_logger("audit_flow.pipeline")
 
         self.anchor = SourceAnchor(self.config.constant_k)
+        if aem_storage is None:
+            aem_storage = FileAEMStorage(self.config.aem_storage_path)
+
+        if ctm_storage is None:
+            ctm_storage = FileCTMStorage(
+                self.config.ctm_nodes_path,
+                self.config.ctm_root_path,
+            )
+
         self.aem = AnomalousEventManager(
             property_graph=self.graph,
             analyzer=self.entropy_analyzer,
@@ -66,7 +80,10 @@ class IIAEServiceAuditor:
         self.cmc = ManifoldConstructor(dqe=self.dqe)
         self.ctm = CustodialTraceManager(
             dag=MerkleDAG(
-                sealer=EnvHardwareSealer(),
+                sealer=EnvHardwareSealer(
+                    key_env=self.config.hardware_key_env_var,
+                    require_key=self.config.require_hardware_seal,
+                ),
                 storage_backend=ctm_storage,
             )
         )
@@ -97,8 +114,8 @@ class IIAEServiceAuditor:
         self._initialized = False
         self.initialize()
 
-    def _create_dissonance_strategy(self) -> Any:
-        return DissonanceStrategy(config=self.config)
+    def _create_dissonance_strategy(self) -> DissonanceStrategyProtocol:
+        return self.config.dissonance_strategy(config=self.config)
 
     def initialize(self) -> None:
         self.axiom_engine.provision_graph(self.graph)
@@ -155,7 +172,7 @@ class IIAEServiceAuditor:
 
     def execute(
         self,
-        audit_input: str,
+        audit_input: Any,
         context_input: Optional[List[str]] = None,
         context_axioms: Optional[List[str]] = None,
         epsilon_override: float | None = None,

@@ -48,12 +48,12 @@ class IIAEService(IIAENotaryContract):
 
     def adapt_input(
         self,
-        audit_input: str,
+        audit_input: Any,
         context_input: list[str] | None = None,
         context_axioms: list[str] | None = None,
     ) -> dict[str, Any]:
         return {
-            self.config.input_field_audit: str(audit_input).strip(),
+            self.config.input_field_audit: audit_input,
             self.config.input_field_context: context_input or [],
             self.config.input_field_axioms: context_axioms or [],
             "source_name": self.config.source_name,
@@ -72,14 +72,14 @@ class IIAEService(IIAENotaryContract):
             return self.process_dict(admitted_input)
 
         return self.process_interaction(
-            audit_input=str(admitted_input),
+            audit_input=admitted_input,
             context_input=[],
             context_axioms=[],
         )
 
     def process_interaction(
         self,
-        audit_input: str,
+        audit_input: Any,
         context_input: list[str] | None = None,
         context_axioms: list[str] | None = None,
         epsilon_override: float | None = None,
@@ -115,7 +115,7 @@ class IIAEService(IIAENotaryContract):
         client_id = data.get("client_id", None)
 
         return self.process_interaction(
-            audit_input=str(audit_input),
+            audit_input=audit_input,
             context_input=context_input if isinstance(context_input, list) else [],
             context_axioms=context_axioms if isinstance(context_axioms, list) else [],
             epsilon_override=epsilon_override,
