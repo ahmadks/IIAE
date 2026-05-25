@@ -15,7 +15,7 @@ def _build_semantic_service(compute_return):
     mock_strategy.compute.return_value = compute_return
 
     with patch(
-        'idicoc_notary_core.audit.pipeline.SemanticDissonanceStrategy',
+        'idicoc_notary_core.audit.pipeline.DissonanceStrategy',
         return_value=mock_strategy,
     ):
         config = AuditConfig()
@@ -34,7 +34,7 @@ def semantic_service():
             False,
             {
                 "d_logic": 0.1,
-                "context_contradiction": 0.0,
+                "max_context_distance": 0.0,
                 "violated_axioms": [],
                 "contradictory_contexts": [],
             },
@@ -103,7 +103,7 @@ def test_semantic_service_with_violation():
             True,
             {
                 "d_logic": 0.8,
-                "context_contradiction": 0.6,
+                "max_context_distance": 0.6,
                 "violated_axioms": ["Amount must not exceed the transaction limit."],
                 "contradictory_contexts": [
                     "Transfer 60000.00 euros, exceeding the limit."

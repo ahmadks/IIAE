@@ -26,7 +26,7 @@ from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .kernel_client import KernelCustodyClient
 from .axioms import AxiomEngine
-from .strategies.semantic import SemanticDissonanceStrategy
+from .semantic_dissonance import DissonanceStrategy
 
 
 class IIAEServiceAuditor:
@@ -98,7 +98,7 @@ class IIAEServiceAuditor:
         self.initialize()
 
     def _create_dissonance_strategy(self) -> Any:
-        return SemanticDissonanceStrategy(config=self.config)
+        return DissonanceStrategy(config=self.config)
 
     def initialize(self) -> None:
         self.axiom_engine.provision_graph(self.graph)

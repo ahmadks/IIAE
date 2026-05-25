@@ -57,9 +57,9 @@ def test_invariant_state_generator_delta_fp():
 # ===================================================================
 # TEST 3: Semantic Strategy with mocks
 # ===================================================================
-@patch('idicoc_notary_core.audit.strategies.semantic.SentenceTransformer')
-@patch('idicoc_notary_core.audit.strategies.semantic.AutoTokenizer')
-@patch('idicoc_notary_core.audit.strategies.semantic.AutoModelForSequenceClassification')
+@patch('idicoc_notary_core.audit.semantic_dissonance.SentenceTransformer')
+@patch('idicoc_notary_core.audit.semantic_dissonance.AutoTokenizer')
+@patch('idicoc_notary_core.audit.semantic_dissonance.AutoModelForSequenceClassification')
 def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_class):
     # Set up mocks for sentence transformer and NLI
     mock_encoder = MagicMock()
@@ -86,8 +86,8 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
         context_axiom_conflict_threshold=0.4,
     )
     
-    from idicoc_notary_core.audit.strategies.semantic import SemanticDissonanceStrategy
-    strategy = SemanticDissonanceStrategy(config)
+    from idicoc_notary_core.audit.semantic_dissonance import DissonanceStrategy
+    strategy = DissonanceStrategy(config)
     
     # Patch self._nli_contradiction on strategy
     def mock_nli(premise, hypothesis):
@@ -108,10 +108,10 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
     assert correction_flag is False
     assert corrected_output == "source text"
     assert metrics["support_found"] is True
-    assert metrics["context_contradiction"] == 0.1
+    assert metrics["max_context_distance"] == 0.1
     assert len(metrics["violated_axioms"]) == 0
 
-    # Compute with factual snapping (support_found=False, max_context_contradiction > snapping_threshold)
+    # Compute with factual snapping (support_found=False, max_context_distance > snapping_threshold)
     strategy._cosine_distance = lambda a, b: 0.8
     D_s, D_f, corrected_output, correction_flag, metrics = strategy.compute(
         audit_input="source text",
@@ -124,14 +124,14 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
     assert "[SNAPPING ACTIVE]" in corrected_output
     assert "contradict text" in corrected_output
     assert metrics["support_found"] is False
-    assert metrics["context_contradiction"] == 0.8
+    assert metrics["max_context_distance"] == 0.8
     assert metrics["contradictory_contexts"] == ["contradict text"]
 
 
 # ===================================================================
 # TEST 5: Pipeline & Wrapper execution with robust exception handling
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.SemanticDissonanceStrategy')
+@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
 def test_pipeline_exception_handling(mock_strategy_class):
     # Mock strategy compute to throw an exception
     mock_strategy = MagicMock()
@@ -157,13 +157,13 @@ def test_pipeline_exception_handling(mock_strategy_class):
 
 
 # ===================================================================
-# TEST 6: Supremum (max) D_s in SemanticDissonanceStrategy
+# TEST 6: Supremum (max) D_s in DissonanceStrategy
 # A single highly-contradictory axiom must dominate D_s regardless
 # of how many benign references are present.
 # ===================================================================
-@patch('idicoc_notary_core.audit.strategies.semantic.SentenceTransformer')
-@patch('idicoc_notary_core.audit.strategies.semantic.AutoTokenizer')
-@patch('idicoc_notary_core.audit.strategies.semantic.AutoModelForSequenceClassification')
+@patch('idicoc_notary_core.audit.semantic_dissonance.SentenceTransformer')
+@patch('idicoc_notary_core.audit.semantic_dissonance.AutoTokenizer')
+@patch('idicoc_notary_core.audit.semantic_dissonance.AutoModelForSequenceClassification')
 def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class, mock_encoder_class):
     mock_encoder = MagicMock()
     mock_encoder_class.return_value = mock_encoder
@@ -178,8 +178,8 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
         context_axiom_conflict_threshold=0.5,
     )
 
-    from idicoc_notary_core.audit.strategies.semantic import SemanticDissonanceStrategy
-    strategy = SemanticDissonanceStrategy(config)
+    from idicoc_notary_core.audit.semantic_dissonance import DissonanceStrategy
+    strategy = DissonanceStrategy(config)
     strategy._cosine_distance = lambda a, b: 0.05
 
     call_count = [0]
@@ -211,7 +211,7 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
 # ===================================================================
 # TEST 7: algebraic_components present and correct in pipeline metadata
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.SemanticDissonanceStrategy')
+@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
 def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
     mock_strategy = MagicMock()
     mock_strategy.compute.return_value = (
@@ -219,7 +219,7 @@ def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
         0.2,   # D_f
         "output text",
         False,
-        {"d_logic": 0.3, "context_contradiction": 0.1, "violated_axioms": [], "contradictory_contexts": []},
+        {"d_logic": 0.3, "max_context_distance": 0.1, "violated_axioms": [], "contradictory_contexts": []},
     )
     mock_strategy_class.return_value = mock_strategy
 
@@ -246,7 +246,7 @@ def test_pipeline_algebraic_components_in_metadata(mock_strategy_class):
 # ===================================================================
 # TEST 8: verify_compliance validates coalgebraic weights and D_s=d_logic
 # ===================================================================
-@patch('idicoc_notary_core.audit.pipeline.SemanticDissonanceStrategy')
+@patch('idicoc_notary_core.audit.pipeline.DissonanceStrategy')
 def test_verify_compliance_algebraic_validation(mock_strategy_class):
     # Stub the strategy so no ML models are loaded
     mock_strategy_class.return_value = MagicMock()

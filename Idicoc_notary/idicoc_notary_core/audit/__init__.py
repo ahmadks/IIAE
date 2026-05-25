@@ -16,7 +16,7 @@ from .exceptions import ComplianceBreach, WrapperInitializationError
 from .kernel_client import KernelCustodyClient
 from .pipeline import IIAEServiceAuditor
 from .axioms import AxiomEngine
-from .strategies import SemanticDissonanceStrategy
+from .semantic_dissonance import DissonanceStrategy
 from .wrapper_pipeline import IIAEService
 
 __all__ = [
@@ -30,5 +30,5 @@ __all__ = [
     "WrapperInitializationError",
     "ComplianceBreach",
     "IIAEService",
-    "SemanticDissonanceStrategy",
+    "DissonanceStrategy",
 ]

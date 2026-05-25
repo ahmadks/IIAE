@@ -11,7 +11,7 @@ from .audit import (
     IIAEService,
     IIAENotaryContract,
     KernelCustodyClient,
-    SemanticDissonanceStrategy,
+    DissonanceStrategy,
     WrapperInitializationError,
 )
 
@@ -24,6 +24,6 @@ __all__ = [
     "IIAEService",
     "IIAENotaryContract",
     "KernelCustodyClient",
-    "SemanticDissonanceStrategy",
+    "DissonanceStrategy",
     "WrapperInitializationError",
 ]
