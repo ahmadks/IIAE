@@ -58,6 +58,16 @@ class AuditConfig:
     # Parámetros específicos del modo semántico
     semantic_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_nli_model: str = "facebook/bart-large-mnli"
+    semantic_nli_conflict_threshold: float = 0.5
+    semantic_nli_warning_threshold: float = 0.75
+    semantic_nli_warning_geom_threshold: float = 0.1
+    semantic_nli_label_mapping: dict[str, str] = field(default_factory=lambda: {
+        "contradiction": "contradiction",
+        "entailment": "entailment",
+        "neutral": "neutral",
+    })
+    semantic_embedding_model_signature: str | None = None
+    semantic_embedding_model_signature_algo: str = "sha256"
     semantic_max_rag_results: int = 5
     semantic_min_rag_score: float = 0.1
     embedding_normalize: bool = True

@@ -93,16 +93,9 @@ class LogicDissonanceStrategy(DissonanceStrategy):
             'd_s': d_s,
             'd_logic': d_logic,
             'effective_threshold': effective_threshold,
-            'd_factual': 0.0,  # La estrategia lógica pura no evalúa hechos, evalúa estructura
             'd_terminal': d_s,
             'terminality_violation': not is_compliant,
-            'max_axiom_distance': 0.0,
-            'max_context_distance': 0.0,
-            'violated_axioms': [],
-            'contradictory_contexts': [],
-            'support_found': True,
             'reference_count': int(mu.size),
-            'snapping_flag': False,
             'correction_flag': not is_compliant
         }
         

@@ -42,7 +42,6 @@ class DissonanceStrategy(ABC):
             - metrics (Dict[str, Any]): Diccionario con TODOS estos campos REQUERIDOS:
                 * 'd_s' (float): Dissonancia estructural
                 * 'd_logic' (float): Dissonancia lógica máxima
-                * 'd_factual' (float): Dissonancia factual
                 * 'd_terminal' (float): Violación de coálgebra terminal
                 * 'terminality_violation' (bool): Si hay violación terminal
                 * 'max_axiom_distance' (float): Distancia máxima a axiomas

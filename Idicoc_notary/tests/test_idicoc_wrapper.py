@@ -111,7 +111,8 @@ def test_semantic_strategy_compute(mock_nli_class, mock_tok_class, mock_encoder_
     assert correction_flag is False
     assert corrected_output == "source text"
     assert metrics["support_found"] is True
-    assert metrics["max_context_distance"] == 0.1
+    assert metrics["max_context_distance"] == 0.05
+    assert metrics["max_context_distance_semantic"] == 0.1
     assert len(metrics["violated_axioms"]) == 0
 
     # Compute with factual snapping (support_found=False, max_context_distance > snapping_threshold)
@@ -201,13 +202,16 @@ def test_semantic_supremum_single_critical_axiom(mock_nli_class, mock_tok_class,
         epsilon=0.0,
     )
 
-    # d_logic = max(max_axiom_cosine=0.05, max_axiom_contradiction=0.95) = 0.95
-    assert metrics["d_logic"] == pytest.approx(0.95, abs=1e-6), (
-        "El supremo debe ser dominado por la única violación axiomática crítica (0.95), "
-        f"no por el promedio. d_logic={metrics['d_logic']}"
+    # d_logic_geom = max(max_axiom_cosine=0.05, max_context_distance=0.05) = 0.05
+    # d_logic_semantic refleja la violación NLI crítica: 0.95
+    assert metrics["d_logic"] == pytest.approx(0.05, abs=1e-6), (
+        "El valor geométrico d_logic debe permanecer puro y no ser contaminado por NLI. "
+        f"d_logic={metrics['d_logic']}"
     )
-    assert D_s == pytest.approx(0.95, abs=1e-6)
-    assert "d_logic" in metrics
+    assert metrics["d_logic_geom"] == pytest.approx(0.05, abs=1e-6)
+    assert metrics["d_logic_semantic"] == pytest.approx(0.95, abs=1e-6)
+    assert D_s == pytest.approx(0.05, abs=1e-6)
+    assert "d_logic_semantic" in metrics
 
 
 # ===================================================================

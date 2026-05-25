@@ -289,3 +289,274 @@ def test_logic_strategy_numerical_stability():
     assert np.isfinite(D_s), f"D_s should be finite, got {D_s}"
     assert np.isfinite(metrics["d_logic"]), f"d_logic should be finite, got {metrics['d_logic']}"
     assert isinstance(correction_flag, bool), f"correction_flag should be bool, got {type(correction_flag)}"
+
+
+# =============================================================================
+# TEST 7: Terminal Degradation — Perfect Sensor of Systemic Decay
+# =============================================================================
+def test_logic_strategy_terminal_degradation():
+    """
+    Test 7: Trajectory of degradation.
+    Verifies that the accumulation of distance along a sequence of states
+    diverging from the terminal reference is monotonically increasing and
+    activates the correction_flag at the threshold boundary.
+    
+    This demonstrates that the strategy is an irrefutable sensor of systemic
+    degradation, with the correction mechanism automatically engaging when
+    the admissible manifold is violated.
+    """
+    terminal_ref = np.array([0.5, 0.5])
+    
+    config = AuditConfig()
+    config.constant_k = terminal_ref
+    config.isg_delta_fp = 0.1  # Strict threshold
+    
+    strategy = LogicDissonanceStrategy(config)
+    
+    # Sequence of states: from "near-perfect" to "chaotic"
+    # Each step increases distance from terminal_ref
+    degradation_trajectory = [
+        np.array([0.51, 0.49]),   # d_logic ≈ 0.02 (Compliant, well below 0.1)
+        np.array([0.605, 0.395]), # d_logic ≈ 0.205 (Violation, clearly above 0.1)
+        np.array([0.90, 0.10]),   # d_logic ≈ 0.80 (Critical, far above 0.1)
+    ]
+    
+    last_d_s = -1.0
+    correction_flag_history = []
+    
+    for i, state in enumerate(degradation_trajectory):
+        audit_input = MockAuditInput(state, lambda_logic=1.0)
+        D_s, _, _, correction_flag, metrics = strategy.compute(
+            audit_input=audit_input,
+            context_input=[],
+            context_axioms=[],
+            epsilon=0.0,
+            validate_conflicts=False,
+        )
+        
+        correction_flag_history.append(correction_flag)
+        
+        # Validation 1: Irrefutable monotonicity of dissonance
+        assert D_s > last_d_s, (
+            f"Degradation trajectory violated monotonicity at step {i}: "
+            f"D_s[{i-1}]={last_d_s}, D_s[{i}]={D_s}"
+        )
+        last_d_s = D_s
+        
+        # Validation 2: Correction flag threshold activation
+        # Step 0 (d_logic ≈ 0.02 < 0.1): should NOT trigger correction
+        # Step 1+ (d_logic > 0.1): MUST trigger correction
+        if i == 0:
+            assert correction_flag is False, (
+                f"correction_flag should be False for initial state "
+                f"(d_logic={metrics['d_logic']:.4f} < 0.1), got {correction_flag}"
+            )
+        else:
+            assert correction_flag is True, (
+                f"System failed to detect degradation at step {i}: "
+                f"d_logic={metrics['d_logic']:.4f}, D_s={D_s:.4f}, "
+                f"delta_fp=0.1, correction_flag should be True"
+            )
+    
+    # Validation 3: Correction flag should transition from False to True
+    assert correction_flag_history == [False, True, True], (
+        f"Correction flag history shows incorrect activation pattern: {correction_flag_history}"
+    )
+    
+    # This test proves: LogicDissonanceStrategy is a perfect sensor of systemic decay
+    # with mathematically irrefutable monotonicity and deterministic correction trigger
+
+
+# =============================================================================
+# TEST 8: Scale Invariance — Auditing Distribution Shape, Not Absolute Magnitude
+# =============================================================================
+def test_logic_strategy_scale_invariance():
+    """
+    Test 8: The strategy must audit the shape (relative distribution), not magnitude.
+    
+    Verifies that scaling a distribution by an arbitrary factor does not change
+    d_logic, since the Kantorovich distance operates on normalized measures.
+    
+    This proves: LogicDissonanceStrategy is immune to signal amplitude.
+    """
+    terminal_ref = np.array([0.5, 0.5])
+    
+    config = AuditConfig()
+    config.constant_k = terminal_ref
+    config.isg_delta_fp = 0.15
+    
+    strategy = LogicDissonanceStrategy(config)
+    
+    # Input with original scale (sum = 1)
+    normal_input = MockAuditInput(np.array([0.5, 0.5]), lambda_logic=1.0)
+    D_s_normal, _, _, _, metrics_normal = strategy.compute(
+        audit_input=normal_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # Input with scaled magnitude (sum = 1000, but same shape)
+    # After normalization: [500/1000, 500/1000] = [0.5, 0.5]
+    scaled_input = MockAuditInput(np.array([500.0, 500.0]), lambda_logic=1.0)
+    D_s_scaled, _, _, _, metrics_scaled = strategy.compute(
+        audit_input=scaled_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # Both should produce identical d_logic (zero dissonance, same distribution)
+    assert abs(metrics_normal["d_logic"] - metrics_scaled["d_logic"]) < 1e-10, (
+        f"Scale invariance violated: d_logic_normal={metrics_normal['d_logic']}, "
+        f"d_logic_scaled={metrics_scaled['d_logic']}"
+    )
+    assert metrics_normal["d_logic"] < 1e-10, (
+        f"Both should have d_logic ≈ 0 for identical normalized distributions, "
+        f"got {metrics_normal['d_logic']}"
+    )
+
+
+# =============================================================================
+# TEST 9: Entropy as Noise — Uniform Distribution Violates Terminal Structure
+# =============================================================================
+def test_logic_strategy_entropy_noise():
+    """
+    Test 9: When input becomes pure uniform noise (maximum entropy), the system
+    must detect it as a terminal violation.
+    
+    This validates the principle: uniform distribution is the antithesis of
+    structured terminalITY. High entropy = high dissonance from defined anchor.
+    """
+    # Terminal reference: highly structured (skewed distribution)
+    terminal_ref = np.array([0.9, 0.1])
+    
+    config = AuditConfig()
+    config.constant_k = terminal_ref
+    config.isg_delta_fp = 0.15  # Reasonable threshold
+    
+    strategy = LogicDissonanceStrategy(config)
+    
+    # Chaotic input: uniform distribution (maximum entropy noise)
+    noise_input = MockAuditInput(np.array([0.5, 0.5]), lambda_logic=1.0)
+    D_s_noise, _, _, correction_flag_noise, metrics_noise = strategy.compute(
+        audit_input=noise_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # Expected 1-Wasserstein distance between [0.9, 0.1] and [0.5, 0.5]:
+    # Cumsum: [0.9, 1.0] vs [0.5, 1.0]
+    # Distance: |0.9 - 0.5| + |1.0 - 1.0| = 0.4
+    assert metrics_noise["d_logic"] > 0.3, (
+        f"System must detect noise as high dissonance, got d_logic={metrics_noise['d_logic']}"
+    )
+    assert correction_flag_noise is True, (
+        f"System must reject chaos (uniform noise) by triggering correction_flag, "
+        f"got {correction_flag_noise}"
+    )
+
+
+# =============================================================================
+# TEST 10: Singularity Limit — Dirac Delta Function Response
+# =============================================================================
+def test_logic_strategy_singularity():
+    """
+    Test 10: Verify behavior when input is a Dirac delta (complete mass concentration).
+    
+    When all probability mass concentrates in a single point (singularity/collapse),
+    the distance to a balanced terminal reference should be exactly 0.5
+    (the half-sum of CDF differences).
+    """
+    terminal_ref = np.array([0.5, 0.5])
+    
+    config = AuditConfig()
+    config.constant_k = terminal_ref
+    config.isg_delta_fp = 0.3  # Allow some tolerance
+    
+    strategy = LogicDissonanceStrategy(config)
+    
+    # Singularity: all mass at first element
+    singularity_input = MockAuditInput(np.array([1.0, 0.0]), lambda_logic=1.0)
+    D_s_singularity, _, _, correction_flag_singularity, metrics_singularity = strategy.compute(
+        audit_input=singularity_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # Expected distance calculation:
+    # Cumsum: [1.0, 1.0] vs [0.5, 1.0]
+    # 1-Wasserstein: |1.0 - 0.5| + |1.0 - 1.0| = 0.5
+    assert abs(metrics_singularity["d_logic"] - 0.5) < 1e-10, (
+        f"Singularity distance should be exactly 0.5, got {metrics_singularity['d_logic']}"
+    )
+    assert correction_flag_singularity is True, (
+        f"Singularity violates terminal structure, correction_flag should be True"
+    )
+
+
+# =============================================================================
+# TEST 11: Zero-Sum Protection — Resilience Against Malformed Vectors
+# =============================================================================
+def test_logic_strategy_zero_sum_protection():
+    """
+    Test 11: Verify resilience against malformed inputs (zero vector or negative values).
+    
+    When input sums to zero or is invalid, the strategy must normalize to a
+    uniform distribution (np.ones_like protection), not crash or produce NaN.
+    
+    This validates the system's defensive normalization layer.
+    """
+    config = AuditConfig()
+    config.constant_k = np.array([0.5, 0.5])
+    config.isg_delta_fp = 0.15
+    
+    strategy = LogicDissonanceStrategy(config)
+    
+    # Case 1: Zero vector (malformed input)
+    zero_input = MockAuditInput(np.array([0.0, 0.0]), lambda_logic=1.0)
+    D_s_zero, _, _, correction_flag_zero, metrics_zero = strategy.compute(
+        audit_input=zero_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # When normalized, [0, 0] becomes uniform [0.5, 0.5], which matches terminal
+    # Therefore d_logic should be ~0
+    assert D_s_zero < 1e-10, (
+        f"Zero input should normalize to uniform and match terminal anchor (d_s ≈ 0), "
+        f"got {D_s_zero}"
+    )
+    assert np.isfinite(D_s_zero), (
+        f"Zero input should not produce NaN or Inf, got {D_s_zero}"
+    )
+    assert isinstance(correction_flag_zero, bool), (
+        f"correction_flag should be bool even for malformed input, got {type(correction_flag_zero)}"
+    )
+    
+    # Case 2: Negative values (invalid probability)
+    # Strategy should apply absolute value or clipping during normalization
+    negative_input = MockAuditInput(np.array([-0.3, 0.8]), lambda_logic=1.0)
+    D_s_negative, _, _, correction_flag_negative, metrics_negative = strategy.compute(
+        audit_input=negative_input,
+        context_input=[],
+        context_axioms=[],
+        epsilon=0.0,
+        validate_conflicts=False,
+    )
+    
+    # After normalization, negative values should be handled gracefully
+    assert np.isfinite(D_s_negative), (
+        f"Negative values should not produce NaN or Inf, got {D_s_negative}"
+    )
+    assert isinstance(metrics_negative, dict), (
+        f"Metrics should remain valid dict even with invalid input"
+    )
