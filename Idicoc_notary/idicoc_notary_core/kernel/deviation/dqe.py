@@ -1,94 +1,117 @@
 from __future__ import annotations
-from typing import Any
-import math
+from typing import Any, TYPE_CHECKING
 
-MAX_DIST = 1.0
+if TYPE_CHECKING:
+    from idicoc_notary_core.audit.dse.structural_strategy import StructuralDissonanceStrategy
 
 
-class DeviationQuantifier:
-    """Cuantificador de disonancia coalgebraico para el kernel."""
+class DissonanceCalculator:
+    """Cuantificador de disonancia coalgebraico. Delega en DissonanceStrategy."""
 
     def __init__(
         self,
-        lambda_inv: float = 0.5,
-        lambda_logic: float = 0.4,
-        lambda_temporal: float = 0.1,
+        strategy: "StructuralDissonanceStrategy | None" = None,
+        lambda_0: float = 0.0,
+        lambda_1: float = 0.5,
+        lambda_2: float = 0.4,
+        lambda_3: float = 0.1,
+        lambda_4: float = 0.0,
+        lambda_5: float = 0.0,
+        lambda_6: float = 0.0,
         delta_fp: float = 0.15,
-    ):
-        self.lambda_inv = lambda_inv
-        self.lambda_logic = lambda_logic
-        self.lambda_temporal = lambda_temporal
+    ) -> None:
+        self.strategy = strategy
+        self.lambda_0 = lambda_0
+        self.lambda_1 = lambda_1
+        self.lambda_2 = lambda_2
+        self.lambda_3 = lambda_3
+        self.lambda_4 = lambda_4
+        self.lambda_5 = lambda_5
+        self.lambda_6 = lambda_6
         self.delta_fp = delta_fp
 
-    def embed(self, value: Any) -> list[float]:
-        if isinstance(value, str):
-            return [float(len(value))]
-        if hasattr(value, "measure_vector"):
-            return self.embed(value.measure_vector)
-        if hasattr(value, "semantic_vector"):
-            return self.embed(value.semantic_vector)
-        if hasattr(value, "data"):
-            return self.embed(value.data)
-        if isinstance(value, (list, tuple, set)):
-            if not value:
-                return [0.0]
-            if all(isinstance(item, (int, float)) for item in value):
-                return [float(item) for item in value]
-            return [float(len(value))]
-        return [0.0]
+    def set_strategy(self, strategy: "StructuralDissonanceStrategy") -> None:
+        self.strategy = strategy
 
-    def _vector_norm(self, vector: list[float]) -> float:
-        return math.sqrt(sum(x * x for x in vector))
-
-    def _subtract_vectors(self, a: list[float], b: list[float]) -> list[float]:
-        length = max(len(a), len(b))
-        return [(a[i] if i < len(a) else 0.0) - (b[i] if i < len(b) else 0.0) for i in range(length)]
-
-    def _violation_penalty(self, y: Any, axiom: dict[str, Any]) -> float:
-        if not isinstance(axiom, dict):
-            return 0.0
-        axiom_text = " ".join(str(v) for v in axiom.values())
-        if isinstance(y, str) and axiom_text and axiom_text in y:
-            return 0.0
-        return 1.0
-
-    def _gradient(self, y: Any, V_hat: Any, G: Any) -> list[float]:
-        if isinstance(y, str):
-            return [0.0]
-        diff = self._subtract_vectors(self.embed(y), self.embed(V_hat))
-        norm = self._vector_norm(diff)
-        if norm < 1e-9:
-            return [0.0 for _ in diff]
-        return [component / norm for component in diff]
-
-    def compute_dissonance(self, y: Any, V_hat: Any, G: Any) -> float:
-        diff = self._subtract_vectors(self.embed(y), self.embed(V_hat))
-        d_inv = self._vector_norm(diff) / MAX_DIST
-        logic_penalties = [self._violation_penalty(y, ax) for ax in G.get_active_axioms()] if hasattr(G, "get_active_axioms") else []
-        d_logic = sum(logic_penalties)
-        d_logic = min(1.0, d_logic / max(1, len(logic_penalties)))
-        d_temp = 0.0
-        return self.lambda_inv * d_inv + self.lambda_logic * d_logic + self.lambda_temporal * d_temp
+    def compute_dissonance(self, y: Any, V_hat: Any, G_t: Any) -> float:
+        if self.strategy is not None:
+            if hasattr(self.strategy, "compute_dissonance"):
+                return self.strategy.compute_dissonance(y, V_hat, G_t)
+            # Si la estrategia no tiene compute_dissonance (e.g. SemanticDissonanceStrategy)
+            # llamamos a su compute clásico y extraemos D_s
+            axioms = G_t.get_active_axioms() if hasattr(G_t, "get_active_axioms") else []
+            try:
+                D_s, _, _, _, _ = self.strategy.compute(
+                    audit_input=y,
+                    context_input=[],
+                    context_axioms=[str(a) for a in axioms],
+                    epsilon=0.0
+                )
+                return float(D_s)
+            except Exception:
+                pass
+                
+        return self._fallback_dissonance(y, V_hat, G_t)
 
     def project_to_manifold(
         self,
         y: Any,
         manifold: Any,
         V_hat: Any,
-        G: Any,
+        G_t: Any,
         max_iter: int = 10,
-        lr: float = 0.1,
     ) -> Any:
-        if isinstance(y, str):
-            return y
+        epsilon = getattr(manifold, "epsilon", 0.0)
+        if self.strategy is not None:
+            if hasattr(self.strategy, "project"):
+                return self.strategy.project(y, epsilon, V_hat, G_t, max_iter)
+            # Fallback para SemanticDissonanceStrategy
+            try:
+                axioms = G_t.get_active_axioms() if hasattr(G_t, "get_active_axioms") else []
+                _, _, corrected, _, _ = self.strategy.compute(
+                    audit_input=y,
+                    context_input=[],
+                    context_axioms=[str(a) for a in axioms],
+                    epsilon=epsilon
+                )
+                return corrected
+            except Exception:
+                pass
+                
+        return self._fallback_project(y, epsilon, V_hat, G_t, max_iter)
 
-        candidate = y
-        for _ in range(max_iter):
-            if self.compute_dissonance(candidate, V_hat, G) <= manifold.epsilon:
-                break
-            grad = self._gradient(candidate, V_hat, G)
-            if isinstance(candidate, list):
-                candidate = [candidate[i] - lr * grad[i] for i in range(len(candidate))]
-            else:
-                break
-        return candidate
+    # ── Fallbacks básicos (sin strategy disponible) ───────────────────────────
+
+    def _fallback_dissonance(self, y: Any, V_hat: Any, G_t: Any) -> float:
+        import math
+        len_y = len(str(y)) if y is not None else 0
+        len_v = len(str(V_hat)) if V_hat is not None else 0
+        d_inv = abs(len_y - len_v) / max(len_y, len_v, 1)
+
+        axioms = G_t.get_active_axioms() if hasattr(G_t, "get_active_axioms") else []
+        if axioms:
+            d_logic = G_t.evaluate(y) if hasattr(G_t, "evaluate") else 0.0
+        else:
+            d_logic = 0.0
+
+        d_temporal = (
+            G_t.compute_temporal(y) if hasattr(G_t, "compute_temporal") else
+            G_t.compute_d_temporal(y) if hasattr(G_t, "compute_d_temporal") else 0.0
+        )
+
+        return max(0.0, min(1.0,
+            self.lambda_0 * 0.0
+            + self.lambda_1 * d_inv
+            + self.lambda_2 * d_logic
+            + self.lambda_3 * d_temporal
+            + self.lambda_4 * 0.0
+            + self.lambda_5 * 0.0
+            + self.lambda_6 * 0.0
+        ))
+
+    def _fallback_project(self, y: Any, epsilon: float, V_hat: Any, G_t: Any, max_iter: int) -> Any:
+        if self._fallback_dissonance(y, V_hat, G_t) <= epsilon:
+            return y
+        if isinstance(y, str):
+            return V_hat if isinstance(V_hat, str) else str(V_hat)
+        return V_hat

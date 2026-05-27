@@ -14,6 +14,15 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class DSEConfig:
+    """Configuración específica para el Dynamic Schema Extractor (DSE)."""
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    nli_model: str = "facebook/bart-large-mnli"
+    nli_conflict_threshold: float = 0.5
+    nli_entailment_threshold: float = 0.7
+
+
+@dataclass
 class AuditConfig:
     """Configuración completa del auditor IDICOC."""
 
@@ -43,19 +52,25 @@ class AuditConfig:
     # source_name: identificador de la instancia de servicio (antes: service_instance_name)
     source_name: str = "ai_comercial"
 
-    # Paths de persistencia inyectables para AEM / CTM.
-    aem_storage_path: str = "tests/results/aem_entropy.json"
+    # Paths de persistencia inyectables para CTM.
     ctm_nodes_path: str = "tests/results/ctm_nodes.json"
     ctm_root_path: str = "ctm_root.txt"
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False
+
+    # Pesos de disonancia para las 7 etapas de la especificación IDICOC-DSE (lambda_0..lambda_6)
+    dissonance_weights: tuple[float, float, float, float, float, float, float] = (0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0)
 
     # Estrategia de disonancia inyectable.
     # Debe ser una clase que implemente la interfaz DissonanceStrategy.
     # Por defecto utiliza SemanticDissonanceStrategy.
     dissonance_strategy: Any = None
 
-    # Parámetros específicos del modo semántico
+    # Configuración específica para el Dynamic Schema Extractor (DSE)
+    dse_config: DSEConfig = field(default_factory=DSEConfig)
+
+    # Parámetros específicos del modo semántico (los mantendremos como campos estándar de AuditConfig
+    # para compatibilidad total con la inicialización __init__ y tests)
     semantic_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_nli_model: str = "facebook/bart-large-mnli"
     semantic_nli_conflict_threshold: float = 0.5
@@ -99,10 +114,25 @@ class AuditConfig:
         """
         Validaciones y normalizaciones post-inicialización.
         """
-        # Si no se proporciona estrategia, usar SemanticDissonanceStrategy por defecto
+        # Sincronizar campos estándar de AuditConfig con la configuración interna del DSE
+        if self.dse_config is not None:
+            # Si se pasaron valores en __init__, sincronizarlos hacia dse_config
+            self.dse_config.embedding_model = self.semantic_embedding_model
+            self.dse_config.nli_model = self.semantic_nli_model
+            self.dse_config.nli_conflict_threshold = self.semantic_nli_conflict_threshold
+
+        import os
+        # Asegurar que las rutas de persistencia relativas se resuelvan siempre respecto al directorio raíz del proyecto 'Idicoc_notary'
+        package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        if not os.path.isabs(self.ctm_nodes_path):
+            self.ctm_nodes_path = os.path.abspath(os.path.join(package_root, self.ctm_nodes_path))
+        if not os.path.isabs(self.ctm_root_path):
+            self.ctm_root_path = os.path.abspath(os.path.join(package_root, self.ctm_root_path))
+
+        # Si no se proporciona estrategia, usar StructuralDissonanceStrategy por defecto
         if self.dissonance_strategy is None:
-            from .dse import SemanticDissonanceStrategy
-            self.dissonance_strategy = SemanticDissonanceStrategy
+            from .dse import StructuralDissonanceStrategy
+            self.dissonance_strategy = StructuralDissonanceStrategy
 
         if self.enable_hard_halt:
             import warnings

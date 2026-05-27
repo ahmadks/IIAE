@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from idicoc_notary_core.kernel.deviation.dqe import DeviationQuantifier
+from idicoc_notary_core.kernel.deviation.dqe import DissonanceCalculator
 
-__all__ = ["DeviationQuantifier"]
+__all__ = ["DissonanceCalculator"]

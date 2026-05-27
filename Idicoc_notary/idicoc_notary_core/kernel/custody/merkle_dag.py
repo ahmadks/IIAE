@@ -225,6 +225,7 @@ class CustodialTraceManager:
         property_graph: Any = None,
         invariant_state_hash: Optional[str] = None,
         property_graph_hash: Optional[str] = None,
+        aem_counters: Optional[Dict[str, int]] = None,
     ) -> MerkleNode:
         logical_payload = {
             "type": "COMMIT",
@@ -235,6 +236,9 @@ class CustodialTraceManager:
             "epsilon": epsilon,
             "property_graph": self._safe_serialize(getattr(property_graph, "nodes", property_graph)),
         }
+        if aem_counters is not None:
+            logical_payload["aem_counters"] = aem_counters
+
         return self._dag.append(
             logical_payload,
             timestamp=timestamp,

@@ -13,7 +13,6 @@ from typing import Any
 import json
 import re
 
-from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from idicoc_notary_core.utils.hashing import sha256_hex
 
 
@@ -72,10 +71,6 @@ class IIAENotaryContract(ABC):
         ...
 
     @abstractmethod
-    def admit(self, raw_input: Any) -> Any:
-        ...
-
-    @abstractmethod
     def process(self, admitted_input: Any) -> CanonicalStateDTO:
         ...
 
@@ -95,10 +90,6 @@ class IIAENotaryContract(ABC):
     def handle_compliance_breach(
         self, error: Exception, context: dict[str, Any]
     ) -> Any:
-        ...
-
-    @abstractmethod
-    def get_entropy_analyzer(self) -> EntropyAnalyzer:
         ...
 
     def is_initialized(self) -> bool:

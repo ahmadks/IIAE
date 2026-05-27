@@ -5,7 +5,7 @@ import json
 import os
 from typing import Any, Dict, Generator, List, Optional
 
-from .backend import AEMStorageBackend, CTMStorageBackend
+from .backend import CTMStorageBackend
 from idicoc_notary_core.audit.exceptions import DataCorruptionError, PersistenceError
 
 
@@ -121,50 +121,6 @@ def _load_nodes_map_if_available(nodes_file: str) -> Optional[Dict[str, Dict[str
     return None
 
 
-class FileAEMStorage(AEMStorageBackend):
-    def __init__(self, filepath: str = "aem_entropy.json"):
-        self.filepath = filepath
-        self.data = {"DISCARDED_NOISE": [], "RECOVERABLE_NOISE": [], "ADMITTED": []}
-        self._load()
-
-    def _load(self) -> None:
-        if not os.path.exists(self.filepath):
-            return
-
-        loaded = _load_json_locked(self.filepath)
-        if not isinstance(loaded, dict):
-            raise DataCorruptionError(self.filepath, "Formato esperado: objeto JSON con categorías de eventos.")
-
-        self.data = {
-            "DISCARDED_NOISE": loaded.get("DISCARDED_NOISE", []),
-            "RECOVERABLE_NOISE": loaded.get("RECOVERABLE_NOISE", []),
-            "ADMITTED": loaded.get("ADMITTED", []),
-        }
-
-    def _save(self) -> None:
-        _atomic_write_json(self.filepath, self.data)
-
-    def save_entropy_event(self, event: Dict[str, Any]) -> None:
-        if not isinstance(event, dict):
-            raise ValueError("El evento de entropía debe ser un diccionario.")
-
-        category = event.get("category")
-        if category not in self.data:
-            raise ValueError(f"Categoría de evento desconocida: {category}")
-
-        self.data[category].append(event)
-        self._save()
-
-    def load_all_events(self) -> Dict[str, List[Dict[str, Any]]]:
-        return {
-            "DISCARDED_NOISE": list(self.data["DISCARDED_NOISE"]),
-            "RECOVERABLE_NOISE": list(self.data["RECOVERABLE_NOISE"]),
-            "ADMITTED": list(self.data["ADMITTED"]),
-        }
-
-    def clear(self) -> None:
-        self.data = {"DISCARDED_NOISE": [], "RECOVERABLE_NOISE": [], "ADMITTED": []}
-        self._save()
 
 
 class FileCTMStorage(CTMStorageBackend):

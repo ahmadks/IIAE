@@ -1,5 +1,5 @@
 """
-Test suite for LogicDissonanceStrategy: Mathematical validation of Kantorovich EMD
+Test suite for StructuralDissonanceStrategy: Mathematical validation of Kantorovich EMD
 and irrefutable terminality judgment through optimal transport.
 """
 
@@ -8,7 +8,7 @@ import numpy as np
 from unittest.mock import MagicMock
 
 from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.dse import LogicDissonanceStrategy
+from idicoc_notary_core.audit.dse import StructuralDissonanceStrategy
 
 
 class MockAuditInput:
@@ -36,7 +36,7 @@ def test_logic_strategy_identity_invariance():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.15
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Input identical to the terminal reference
     audit_input = MockAuditInput(terminal_ref, lambda_logic=1.0)
@@ -50,8 +50,8 @@ def test_logic_strategy_identity_invariance():
     )
     
     # Assertions: d_logic must be 0.0 (or extremely close due to float precision)
-    assert metrics["d_logic"] < 1e-10, (
-        f"Identity invariance violated: d_logic={metrics['d_logic']}, "
+    assert metrics["d_1"] < 1e-10, (
+        f"Identity invariance violated: d_logic={metrics['d_1']}, "
         "expected ≈0.0 for identical distributions"
     )
     assert D_s < 1e-10, (
@@ -81,7 +81,7 @@ def test_logic_strategy_orthogonal_maximum():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.05  # Very strict tolerance
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Orthogonal (Dirac delta): all mass at first element
     dirac_delta = np.array([1.0, 0.0, 0.0, 0.0])
@@ -98,8 +98,8 @@ def test_logic_strategy_orthogonal_maximum():
     # For 1-Wasserstein distance between uniform and delta:
     # distance = sum of absolute differences in CDFs
     # Expected d_logic ≈ 0.75 (area under the curve difference)
-    assert metrics["d_logic"] > 0.5, (
-        f"Orthogonal case should produce high d_logic, got {metrics['d_logic']}"
+    assert metrics["d_1"] > 0.5, (
+        f"Orthogonal case should produce high d_logic, got {metrics['d_1']}"
     )
     assert correction_flag is True, (
         f"correction_flag should be True for high dissonance, got {correction_flag}"
@@ -125,7 +125,7 @@ def test_logic_strategy_correction_flag_threshold():
     delta_fp = 0.2  # Strict but not extreme
     config.isg_delta_fp = delta_fp
     
-    strategy = LogicDissonanceStrategy(config, delta_fp=delta_fp)
+    strategy = StructuralDissonanceStrategy(config, delta_fp=delta_fp, lambda_1=1.0)
     
     # Case 1: Distribution just below threshold (should comply)
     # Distribution: [0.6, 0.4] vs anchor [0.5, 0.5]
@@ -183,7 +183,7 @@ def test_logic_strategy_epsilon_adjustment():
     delta_fp = 0.1
     config.isg_delta_fp = delta_fp
     
-    strategy = LogicDissonanceStrategy(config, delta_fp=delta_fp)
+    strategy = StructuralDissonanceStrategy(config, delta_fp=delta_fp, lambda_1=1.0)
     
     # Borderline input: d_logic ≈ 0.15 (exceeds delta_fp=0.1)
     borderline_input = MockAuditInput(np.array([0.65, 0.35]), lambda_logic=1.0)
@@ -216,10 +216,10 @@ def test_logic_strategy_epsilon_adjustment():
 # =============================================================================
 def test_logic_strategy_lambda_logic_scaling():
     """
-    Test 5: Verify that lambda_logic proportionally scales d_s.
+    Test 5: Verify that lambda_1 proportionally scales d_s.
     
-    The dissonance is: D_s = lambda_logic * d_logic
-    Doubling lambda_logic should double D_s while keeping d_logic constant.
+    The dissonance is: D_s = lambda_1 * d_1
+    Doubling lambda_1 should double D_s while keeping d_1 constant.
     """
     terminal_ref = np.array([0.5, 0.5])
     
@@ -227,35 +227,38 @@ def test_logic_strategy_lambda_logic_scaling():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.5  # Allow high values for this test
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config)
     
-    # Same measure, different lambda_logic values
+    # Same measure, different lambda_1 values
     measure = np.array([0.6, 0.4])
+    audit_input = MockAuditInput(measure)
     
-    input_lambda_1 = MockAuditInput(measure, lambda_logic=1.0)
+    # Scale 1: lambda_1 = 1.0
+    strategy.lambda_1 = 1.0
     D_s_1, _, _, _, metrics_1 = strategy.compute(
-        audit_input=input_lambda_1,
+        audit_input=audit_input,
         context_input=[],
         context_axioms=[],
         epsilon=0.0,
     )
     
-    input_lambda_2 = MockAuditInput(measure, lambda_logic=2.0)
+    # Scale 2: lambda_1 = 2.0
+    strategy.lambda_1 = 2.0
     D_s_2, _, _, _, metrics_2 = strategy.compute(
-        audit_input=input_lambda_2,
+        audit_input=audit_input,
         context_input=[],
         context_axioms=[],
         epsilon=0.0,
     )
     
-    # d_logic should remain the same
-    assert abs(metrics_1["d_logic"] - metrics_2["d_logic"]) < 1e-10, (
-        "d_logic should be independent of lambda_logic"
+    # d_1 should remain the same
+    assert abs(metrics_1["d_1"] - metrics_2["d_1"]) < 1e-10, (
+        "d_1 should be independent of lambda_1"
     )
     
     # D_s should scale proportionally
     assert abs(D_s_2 - 2 * D_s_1) < 1e-10, (
-        f"D_s should scale with lambda_logic: 2*D_s_1={2*D_s_1}, D_s_2={D_s_2}"
+        f"D_s should scale with lambda_1: 2*D_s_1={2*D_s_1}, D_s_2={D_s_2}"
     )
 
 
@@ -274,7 +277,7 @@ def test_logic_strategy_numerical_stability():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.5
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Tiny distribution (extreme probability mass at second element)
     tiny_input = MockAuditInput(np.array([1e-12, 1.0 - 1e-12]), lambda_logic=1.0)
@@ -287,7 +290,7 @@ def test_logic_strategy_numerical_stability():
     
     # Check for NaN, Inf, or invalid values
     assert np.isfinite(D_s), f"D_s should be finite, got {D_s}"
-    assert np.isfinite(metrics["d_logic"]), f"d_logic should be finite, got {metrics['d_logic']}"
+    assert np.isfinite(metrics["d_1"]), f"d_logic should be finite, got {metrics['d_1']}"
     assert isinstance(correction_flag, bool), f"correction_flag should be bool, got {type(correction_flag)}"
 
 
@@ -311,7 +314,7 @@ def test_logic_strategy_terminal_degradation():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.1  # Strict threshold
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Sequence of states: from "near-perfect" to "chaotic"
     # Each step increases distance from terminal_ref
@@ -349,12 +352,12 @@ def test_logic_strategy_terminal_degradation():
         if i == 0:
             assert correction_flag is False, (
                 f"correction_flag should be False for initial state "
-                f"(d_logic={metrics['d_logic']:.4f} < 0.1), got {correction_flag}"
+                f"(d_logic={metrics['d_1']:.4f} < 0.1), got {correction_flag}"
             )
         else:
             assert correction_flag is True, (
                 f"System failed to detect degradation at step {i}: "
-                f"d_logic={metrics['d_logic']:.4f}, D_s={D_s:.4f}, "
+                f"d_logic={metrics['d_1']:.4f}, D_s={D_s:.4f}, "
                 f"delta_fp=0.1, correction_flag should be True"
             )
     
@@ -363,7 +366,7 @@ def test_logic_strategy_terminal_degradation():
         f"Correction flag history shows incorrect activation pattern: {correction_flag_history}"
     )
     
-    # This test proves: LogicDissonanceStrategy is a perfect sensor of systemic decay
+    # This test proves: StructuralDissonanceStrategy is a perfect sensor of systemic decay
     # with mathematically irrefutable monotonicity and deterministic correction trigger
 
 
@@ -377,7 +380,7 @@ def test_logic_strategy_scale_invariance():
     Verifies that scaling a distribution by an arbitrary factor does not change
     d_logic, since the Kantorovich distance operates on normalized measures.
     
-    This proves: LogicDissonanceStrategy is immune to signal amplitude.
+    This proves: StructuralDissonanceStrategy is immune to signal amplitude.
     """
     terminal_ref = np.array([0.5, 0.5])
     
@@ -385,7 +388,7 @@ def test_logic_strategy_scale_invariance():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.15
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Input with original scale (sum = 1)
     normal_input = MockAuditInput(np.array([0.5, 0.5]), lambda_logic=1.0)
@@ -409,13 +412,13 @@ def test_logic_strategy_scale_invariance():
     )
     
     # Both should produce identical d_logic (zero dissonance, same distribution)
-    assert abs(metrics_normal["d_logic"] - metrics_scaled["d_logic"]) < 1e-10, (
-        f"Scale invariance violated: d_logic_normal={metrics_normal['d_logic']}, "
-        f"d_logic_scaled={metrics_scaled['d_logic']}"
+    assert abs(metrics_normal["d_1"] - metrics_scaled["d_1"]) < 1e-10, (
+        f"Scale invariance violated: d_logic_normal={metrics_normal['d_1']}, "
+        f"d_logic_scaled={metrics_scaled['d_1']}"
     )
-    assert metrics_normal["d_logic"] < 1e-10, (
+    assert metrics_normal["d_1"] < 1e-10, (
         f"Both should have d_logic ≈ 0 for identical normalized distributions, "
-        f"got {metrics_normal['d_logic']}"
+        f"got {metrics_normal['d_1']}"
     )
 
 
@@ -437,7 +440,7 @@ def test_logic_strategy_entropy_noise():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.15  # Reasonable threshold
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Chaotic input: uniform distribution (maximum entropy noise)
     noise_input = MockAuditInput(np.array([0.5, 0.5]), lambda_logic=1.0)
@@ -452,8 +455,8 @@ def test_logic_strategy_entropy_noise():
     # Expected 1-Wasserstein distance between [0.9, 0.1] and [0.5, 0.5]:
     # Cumsum: [0.9, 1.0] vs [0.5, 1.0]
     # Distance: |0.9 - 0.5| + |1.0 - 1.0| = 0.4
-    assert metrics_noise["d_logic"] > 0.3, (
-        f"System must detect noise as high dissonance, got d_logic={metrics_noise['d_logic']}"
+    assert metrics_noise["d_1"] > 0.3, (
+        f"System must detect noise as high dissonance, got d_logic={metrics_noise['d_1']}"
     )
     assert correction_flag_noise is True, (
         f"System must reject chaos (uniform noise) by triggering correction_flag, "
@@ -478,7 +481,7 @@ def test_logic_strategy_singularity():
     config.constant_k = terminal_ref
     config.isg_delta_fp = 0.3  # Allow some tolerance
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Singularity: all mass at first element
     singularity_input = MockAuditInput(np.array([1.0, 0.0]), lambda_logic=1.0)
@@ -493,8 +496,8 @@ def test_logic_strategy_singularity():
     # Expected distance calculation:
     # Cumsum: [1.0, 1.0] vs [0.5, 1.0]
     # 1-Wasserstein: |1.0 - 0.5| + |1.0 - 1.0| = 0.5
-    assert abs(metrics_singularity["d_logic"] - 0.5) < 1e-10, (
-        f"Singularity distance should be exactly 0.5, got {metrics_singularity['d_logic']}"
+    assert abs(metrics_singularity["d_1"] - 0.5) < 1e-10, (
+        f"Singularity distance should be exactly 0.5, got {metrics_singularity['d_1']}"
     )
     assert correction_flag_singularity is True, (
         f"Singularity violates terminal structure, correction_flag should be True"
@@ -517,7 +520,7 @@ def test_logic_strategy_zero_sum_protection():
     config.constant_k = np.array([0.5, 0.5])
     config.isg_delta_fp = 0.15
     
-    strategy = LogicDissonanceStrategy(config)
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
     
     # Case 1: Zero vector (malformed input)
     zero_input = MockAuditInput(np.array([0.0, 0.0]), lambda_logic=1.0)

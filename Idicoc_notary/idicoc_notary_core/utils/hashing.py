@@ -5,16 +5,32 @@ Hashing utilities for deterministic operations.
 import hashlib
 import json
 from typing import Any
+import numpy as np
 
+class NumpyEncoder(json.JSONEncoder):
+    """Custom encoder for NumPy data types."""
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        # Handle custom objects with to_dict or dict representations if needed
+        if hasattr(obj, "__dict__"):
+            return obj.__dict__
+        return super().default(obj)
 
 def canonical_json(data: Any) -> str:
     """
     Convert data to canonical JSON (sorted keys, no whitespace).
 
     Ensures same input always produces same hash (deterministic).
+    Handles NumPy arrays and types automatically.
     """
-
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, cls=NumpyEncoder)
 
 
 def sha256_hex(data: str) -> str:

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from .dissonance_strategy import DissonanceStrategy
-from .logic_strategy import LogicDissonanceStrategy
-from .semantic_strategy import SemanticDissonanceStrategy
+from .structural_strategy import StructuralDissonanceStrategy
 
 __all__ = [
     "DissonanceStrategy",
-    "LogicDissonanceStrategy",
-    "SemanticDissonanceStrategy",
+    "StructuralDissonanceStrategy",
 ]

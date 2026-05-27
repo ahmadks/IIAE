@@ -1,13 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-class AEMStorageBackend(ABC):
-    @abstractmethod
-    def save_entropy_event(self, event: Dict[str, Any]) -> None: ...
-    @abstractmethod
-    def load_all_events(self) -> Dict[str, List[Dict[str, Any]]]: ...
-    @abstractmethod
-    def clear(self) -> None: ...
 
 class CTMStorageBackend(ABC):
     @abstractmethod

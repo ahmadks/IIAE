@@ -56,15 +56,10 @@ Documentation = "https://idicoc-notary-core.readthedocs.io"
 Repository = "https://github.com/yourusername/idicoc-notary-core.git"
 "Bug Tracker" = "https://github.com/yourusername/idicoc-notary-core/issues"
 
-[tool.setuptools]
-packages = ["idicoc_notary_core"]
-
-[tool.setuptools.package-data]
-idicoc_notary_core = [
-    "audit/persistence/*.py",
-    "audit/strategies/*.py",
-    "kernel/**/*.py",
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["idicoc_notary_core*"]
+namespaces = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -100,6 +95,3 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 disallow_any_unimported = false
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true

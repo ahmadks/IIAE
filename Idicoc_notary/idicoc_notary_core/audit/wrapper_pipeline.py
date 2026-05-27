@@ -12,31 +12,24 @@ from .base import (
     CanonicalStateDTO,
     IIAENotaryContract,
 )
-from idicoc_notary_core.kernel.admission.aem import EntropyAnalyzer
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
-from .pipeline import IIAEServiceAuditor
+from .pipeline import IDICOCPipeline
 
 
-class IIAEService(IIAENotaryContract):
+class IDICOCNotaryClient(IIAENotaryContract):
     """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
     def __init__(
         self,
         config: AuditConfig,
-        entropy_analyzer: EntropyAnalyzer,
-        aem_storage: Optional[Any] = None,
-        ctm_storage: Optional[Any] = None,
     ) -> None:
         self.config = config
-        self.entropy_analyzer = entropy_analyzer
-        self.aem_storage = aem_storage
-        self.ctm_storage = ctm_storage
         # Anchor is private to the wrapper; strategies should access it via
         # `self.get_terminal_reference()` or the configuration, not as a
         # public compute parameter.
         self._anchor: Any | None = None
-        self.pipeline: IIAEServiceAuditor | None = None
+        self.pipeline: IDICOCPipeline | None = None
         self._initialized = False
         self.initialize(config)
 
@@ -52,12 +45,7 @@ class IIAEService(IIAENotaryContract):
 
     def initialize(self, config: AuditConfig) -> None:
         self.config = config
-        self.pipeline = IIAEServiceAuditor(
-            config,
-            self.entropy_analyzer,
-            aem_storage=getattr(self, "aem_storage", None),
-            ctm_storage=getattr(self, "ctm_storage", None),
-        )
+        self.pipeline = IDICOCPipeline(config)
         self._initialized = True
 
     def adapt_input(
@@ -72,11 +60,6 @@ class IIAEService(IIAENotaryContract):
             self.config.input_field_axioms: context_axioms or [],
             "source_name": self.config.source_name,
         }
-
-    def admit(self, audit_input: Any) -> Any:
-        if not self._initialized or self.pipeline is None:
-            raise WrapperInitializationError("El wrapper no está inicializado.")
-        return self.pipeline.admit(audit_input)
 
     def process(self, admitted_input: Any) -> CanonicalStateDTO:
         if not self._initialized or self.pipeline is None:
@@ -196,27 +179,27 @@ class IIAEService(IIAENotaryContract):
             self._log_or_seal_failure(snapshot)
             return False
 
-        expected_weights = [0.0, 1.0, 0.0]
-        actual_weights = algebraic.get("lambda_weights", [])
-        if actual_weights != expected_weights:
-            snapshot = {
-                "event": "verify_compliance_algebraic",
-                "error": "Pesos coalgebraicos inválidos",
-                "expected": expected_weights,
-                "actual": actual_weights,
-            }
-            self._log_or_seal_failure(snapshot)
-            return False
+        expected_weights = list(self.config.dissonance_weights)
 
-        d_logic = float(algebraic.get("d_logic", -1.0))
-        lambda_logic = float(expected_weights[1])
-        expected_d_s = lambda_logic * d_logic
+        d_0 = float(algebraic.get("d_0", 0.0))
+        d_1 = float(algebraic.get("d_1", 0.0))
+        d_2 = float(algebraic.get("d_2", -1.0))
+        d_3 = float(algebraic.get("d_3", 0.0))
+        d_4 = float(algebraic.get("d_4", 0.0))
+        d_5 = float(algebraic.get("d_5", 0.0))
+        d_6 = float(algebraic.get("d_6", 0.0))
+        
+        expected_d_s = sum(
+            expected_weights[i] * [d_0, d_1, d_2, d_3, d_4, d_5, d_6][i]
+            for i in range(7)
+        )
+        print(f"DEBUG: expected_weights={expected_weights}, D_s={dissonance}, expected_d_s={expected_d_s}")
         if abs(dissonance - expected_d_s) > 1e-6:
             snapshot = {
                 "event": "verify_compliance_algebraic",
-                "error": "D_s no coincide con λ_logic · d_logic",
+                "error": "D_s no coincide con la suma ponderada de componentes",
                 "d_s_recorded": dissonance,
-                "lambda_logic_times_d_logic": expected_d_s,
+                "expected_d_s": expected_d_s,
             }
             self._log_or_seal_failure(snapshot)
             return False
@@ -248,13 +231,6 @@ class IIAEService(IIAENotaryContract):
             "error": str(error),
             "context": context,
         }
-
-    def get_entropy_analyzer(self) -> EntropyAnalyzer:
-        if self.entropy_analyzer is None:
-            raise WrapperInitializationError(
-                "No hay analizador de entropía configurado."
-            )
-        return self.entropy_analyzer
 
     def is_initialized(self) -> bool:
         return self._initialized

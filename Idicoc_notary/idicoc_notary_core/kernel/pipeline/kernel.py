@@ -4,7 +4,6 @@ from typing import Any
 from datetime import datetime, timezone
 from idicoc_notary_core.utils.hashing import sha256_hex
 
-from idicoc_notary_core.kernel.admission.aem import AdmissionBreach
 from idicoc_notary_core.kernel.exceptions.integrity_breach import HardHaltException, InvariantStateBreach
 from idicoc_notary_core.kernel.exceptions.alignment_breach import AlignmentBreach
 
@@ -110,6 +109,15 @@ class CustodialKernel:
             invariant_state_hash = sha256_hex(repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", ""))
             property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
 
+            aem_counters = None
+            if hasattr(self, "aem") and self.aem is not None and hasattr(self.aem, "get_counters"):
+                t_s, v_s, r_s = self.aem.get_counters()
+                aem_counters = {
+                    "total_signals": t_s,
+                    "valid_signals": v_s,
+                    "rejected_signals": r_s,
+                }
+
             self.ctm.commit(
                 canonical_payload,
                 dissonance=dissonance,
@@ -118,28 +126,12 @@ class CustodialKernel:
                 timestamp=operation_time,
                 invariant_state_hash=invariant_state_hash,
                 property_graph_hash=property_graph_hash,
+                aem_counters=aem_counters,
             )
             self.state_s["registers"][0] = "COMMITTED"
             return {
                 "status": "committed",
                 "root_hash": self.ctm.root_hash,
-            }
-
-        except AdmissionBreach as breach:
-            snapshot = {
-                "kernel_state": self.state_s,
-                "breach": {
-                    "type": "AdmissionBreach",
-                    "message": str(breach),
-                    "entropy_map": getattr(self.aem, "entropy_map", {}),
-                },
-            }
-
-            self.ctm.seal_failure(snapshot, timestamp=operation_time)
-            self.state_s["registers"][0] = "ADMISSION_BREACH"
-            return {
-                "status": "admission_breach",
-                "snapshot": snapshot,
             }
 
         except (InvariantStateBreach, AlignmentBreach) as breach:

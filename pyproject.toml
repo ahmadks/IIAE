@@ -3,25 +3,20 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "iiae"
+name = "IIAE"
 version = "1.0.0"
-description = "Intelligent Invariant Audit Engine SDK"
+description = "Intelligent Invariant Audit Engine Workspace"
 readme = "README.md"
-requires-python = ">=3.8"
-dependencies = [
-    # minimal SDK dependencies
-]
-
-[project.optional-dependencies]
-core = [
-    "sentence-transformers",
-    "transformers",
-    "torch",
-    "networkx"
-]
-dev = [
-    "pytest"
-]
+requires-python = ">=3.13"
+dependencies = []
 
 [tool.setuptools.packages.find]
-include = ["iiae"]
+where = ["."]
+include = ["SLT*"]
+
+[tool.pyright]
+include = ["."]
+extraPaths = [
+    "./Idicoc_notary",
+    "./SLT"
+]
