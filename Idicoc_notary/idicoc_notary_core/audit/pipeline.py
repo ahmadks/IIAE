@@ -266,7 +266,7 @@ class IDICOCPipeline:
 
             from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
             evaluator = PropertyGraphEvaluator(self.graph)
-            d_logic = float(evaluator.evaluate(y_corrected))
+            d_logic = evaluator.evaluate(y_corrected)
 
             metadata = {
                 "timestamp": timestamp,
@@ -296,7 +296,7 @@ class IDICOCPipeline:
                     "d_0": 0.0,
                     "d_1": getattr(self.dissonance_strategy, "_d_inv_from_pair", lambda a, b: 0.0)(y_corrected, V_hat),
                     "d_2": d_logic,
-                    "d_3": float(evaluator.compute_temporal(y_corrected)),
+                    "d_3": evaluator.compute_temporal(y_corrected),
                     "d_4": 0.0,
                     "d_5": 0.0,
                     "d_6": 0.0,
