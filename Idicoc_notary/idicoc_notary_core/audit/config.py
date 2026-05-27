@@ -11,15 +11,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .dse import DissonanceStrategy
-
-
-@dataclass
-class DSEConfig:
-    """Configuración específica para el Dynamic Schema Extractor (DSE)."""
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    nli_model: str = "facebook/bart-large-mnli"
-    nli_conflict_threshold: float = 0.5
-    nli_entailment_threshold: float = 0.7
+    from .graph.loader import AxiomLoader
 
 
 @dataclass
@@ -49,49 +41,58 @@ class AuditConfig:
     """
     constant_k: Any = "k"
 
-    # source_name: identificador de la instancia de servicio (antes: service_instance_name)
-    source_name: str = "ai_comercial"
+    # instance_name: identificador de la instancia de servicio
+    instance_name: str = "ai_comercial"
 
     # Paths de persistencia inyectables para CTM.
-    ctm_nodes_path: str = "tests/results/ctm_nodes.json"
+    ctm_nodes_path: str = "Idicoc_notary/tests/results/ctm_nodes.json"
     ctm_root_path: str = "ctm_root.txt"
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False
 
     # Pesos de disonancia para las 7 etapas de la especificación IDICOC-DSE (lambda_0..lambda_6)
-    dissonance_weights: tuple[float, float, float, float, float, float, float] = (0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0)
+    dissonance_weights: tuple[float, float, float, float, float, float, float] = (
+        0.0,
+        0.5,
+        0.4,
+        0.1,
+        0.0,
+        0.0,
+        0.0,
+    )
 
     # Estrategia de disonancia inyectable.
     # Debe ser una clase que implemente la interfaz DissonanceStrategy.
     # Por defecto utiliza SemanticDissonanceStrategy.
     dissonance_strategy: Any = None
 
-    # Configuración específica para el Dynamic Schema Extractor (DSE)
-    dse_config: DSEConfig = field(default_factory=DSEConfig)
-
-    # Parámetros específicos del modo semántico (los mantendremos como campos estándar de AuditConfig
-    # para compatibilidad total con la inicialización __init__ y tests)
+    # Parámetros específicos de evaluación semántica
     semantic_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     semantic_nli_model: str = "facebook/bart-large-mnli"
     semantic_nli_conflict_threshold: float = 0.5
     semantic_nli_warning_threshold: float = 0.75
     semantic_nli_warning_geom_threshold: float = 0.1
-    semantic_nli_label_mapping: dict[str, str] = field(default_factory=lambda: {
-        "contradiction": "contradiction",
-        "entailment": "entailment",
-        "neutral": "neutral",
-    })
+    semantic_nli_label_mapping: dict[str, str] = field(
+        default_factory=lambda: {
+            "contradiction": "contradiction",
+            "entailment": "entailment",
+            "neutral": "neutral",
+        }
+    )
     semantic_embedding_model_signature: str | None = None
     semantic_embedding_model_signature_algo: str = "sha256"
     semantic_max_rag_results: int = 5
     semantic_min_rag_score: float = 0.1
     embedding_normalize: bool = True
+    embedding_signature: str | None = None
+    strict_embedding_signature: bool = False
     terminal_rigidity_threshold: float = 0.01
 
-    # Configuración de validación y notario
-    validate_context_against_axioms: bool = False
-
     ctm_mode: str = "full"
+    
+    # Sistema de inyección de axiomas
+    axiom_loader: "AxiomLoader | None" = None
+    axiom_file_path: str = "axioms.txt"
 
     # Nota: El parámetro 'mode' (factual/hybrid/creative) ha sido eliminado.
     # La creatividad se controla exclusivamente mediante rigidity_epsilon.
@@ -114,24 +115,36 @@ class AuditConfig:
         """
         Validaciones y normalizaciones post-inicialización.
         """
-        # Sincronizar campos estándar de AuditConfig con la configuración interna del DSE
-        if self.dse_config is not None:
-            # Si se pasaron valores en __init__, sincronizarlos hacia dse_config
-            self.dse_config.embedding_model = self.semantic_embedding_model
-            self.dse_config.nli_model = self.semantic_nli_model
-            self.dse_config.nli_conflict_threshold = self.semantic_nli_conflict_threshold
-
         import os
+
         # Asegurar que las rutas de persistencia relativas se resuelvan siempre respecto al directorio raíz del proyecto 'Idicoc_notary'
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        
+        # Calcular firma del modelo si no se proporciona
+        if not self.embedding_signature:
+            from idicoc_notary_core.utils.embedding_utils import compute_embedding_signature
+            self.embedding_signature = compute_embedding_signature(
+                self.semantic_embedding_model,
+                normalize=self.embedding_normalize
+            )
+
         if not os.path.isabs(self.ctm_nodes_path):
             self.ctm_nodes_path = os.path.abspath(os.path.join(package_root, self.ctm_nodes_path))
         if not os.path.isabs(self.ctm_root_path):
             self.ctm_root_path = os.path.abspath(os.path.join(package_root, self.ctm_root_path))
 
+        if self.axiom_loader is None:
+            axiom_path = self.axiom_file_path
+            if not os.path.isabs(axiom_path):
+                axiom_path = os.path.abspath(os.path.join(package_root, axiom_path))
+            if os.path.exists(axiom_path):
+                from .graph.loader import FileAxiomLoader
+                self.axiom_loader = FileAxiomLoader(axiom_path)
+
         # Si no se proporciona estrategia, usar StructuralDissonanceStrategy por defecto
         if self.dissonance_strategy is None:
             from .dse import StructuralDissonanceStrategy
+
             self.dissonance_strategy = StructuralDissonanceStrategy
 
         if self.enable_hard_halt:

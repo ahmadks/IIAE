@@ -61,7 +61,7 @@ def test_semantic_service_with_similar_inputs(semantic_service):
     audit_input = "Execute a transfer of 50000.00 euros, which is within the limit."
     axiom_input = ["Amount must not exceed the transaction limit."]
 
-    with patch("idicoc_notary_core.kernel.graph.property_graph.PropertyGraph.evaluate", return_value=0.1):
+    with patch("idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate", return_value=0.1):
         canonical_state = semantic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,

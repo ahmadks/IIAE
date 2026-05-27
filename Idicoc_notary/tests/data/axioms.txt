@@ -1,0 +1,7 @@
+# Archivo de axiomas de prueba
+# Formato: texto | tipo | polaridad | dureza | prioridad
+
+El sistema debe operar siempre por debajo del límite de Borel | protocol | affirmative | hard | 10
+Las promesas de retornos garantizados son fraude | fact | negative | hard | 10
+El saldo de la cuenta no puede ser negativo | logic | affirmative | hard | 9
+El sistema intentará responder en menos de 5 segundos | protocol | affirmative | soft | 5

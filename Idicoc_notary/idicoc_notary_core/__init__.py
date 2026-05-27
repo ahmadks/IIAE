@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from .audit import (
     AuditConfig,
-    AxiomEngine,
+    AxiomLoader,
+    FileAxiomLoader,
+    InlineAxiomLoader,
+    GraphCache,
+    NoOpGraphCache,
+    RedisGraphCache,
     CanonicalStateDTO,
     IDICOCPipeline,
     IDICOCNotaryClient,
@@ -16,7 +21,12 @@ from .audit import (
 
 __all__ = [
     "AuditConfig",
-    "AxiomEngine",
+    "AxiomLoader",
+    "FileAxiomLoader",
+    "InlineAxiomLoader",
+    "GraphCache",
+    "NoOpGraphCache",
+    "RedisGraphCache",
     "CanonicalStateDTO",
     "IDICOCPipeline",
     "IDICOCNotaryClient",

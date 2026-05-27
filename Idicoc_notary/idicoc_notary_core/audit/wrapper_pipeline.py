@@ -58,7 +58,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
             self.config.input_field_audit: audit_input,
             self.config.input_field_context: context_input or [],
             self.config.input_field_axioms: context_axioms or [],
-            "source_name": self.config.source_name,
+            "instance_name": self.config.instance_name,
         }
 
     def process(self, admitted_input: Any) -> CanonicalStateDTO:

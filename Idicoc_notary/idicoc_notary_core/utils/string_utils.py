@@ -8,15 +8,9 @@ class StringUtils:
 
     @classmethod
     def get_embedding_model(cls, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> Any:
-        """Carga y devuelve el modelo de embeddings de forma lazy."""
-        if cls._embedding_model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-                cls._embedding_model = SentenceTransformer(model_name)
-            except ImportError:
-                # Fallback genérico si no hay sentence-transformers
-                cls._embedding_model = None
-        return cls._embedding_model
+        """Carga y devuelve el modelo de embeddings usando el servicio central."""
+        from idicoc_notary_core.utils.embedding_service import EmbeddingService
+        return EmbeddingService().get_embedder(model_name)
 
     @classmethod
     def embed_text(cls, text: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> np.ndarray:

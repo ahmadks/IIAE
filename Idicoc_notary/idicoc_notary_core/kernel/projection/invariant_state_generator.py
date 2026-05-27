@@ -198,9 +198,13 @@ class InvariantStateGenerator:
 
         model_name = "sentence-transformers/all-MiniLM-L6-v2"
         try:
-            from sentence_transformers import SentenceTransformer
-            if not hasattr(self, "_embedding_model") or self._embedding_model is None:
-                self._embedding_model = SentenceTransformer(model_name)
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+            if getattr(self, "_embedding_model", None) is None:
+                self._embedding_model = EmbeddingService().get_embedder(model_name)
+            
+            if self._embedding_model is None:
+                raise ImportError("El servicio no pudo cargar el modelo.")
+                
             vector = self._embedding_model.encode(text, normalize_embeddings=True)
             return np.asarray(vector, dtype=float)
         except Exception as exc:

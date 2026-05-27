@@ -1,4 +1,4 @@
-# idicoc_notary_core/audit/dse/logic_strategy.py
+# idicoc_notary_core/audit/dse/structural_strategy.py
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import numpy as np
@@ -158,14 +158,18 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         d2 = 0.0
         if self._graph is not None:
             try:
-                d2 = float(self._graph.evaluate(audit_input))
+                from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+                evaluator = PropertyGraphEvaluator(self._graph)
+                d2 = float(evaluator.evaluate(audit_input))
             except Exception:
                 pass
         
         d3 = 0.0
-        if self._graph is not None and hasattr(self._graph, "compute_d_temporal"):
+        if self._graph is not None:
             try:
-                d3 = float(self._graph.compute_d_temporal(audit_input))
+                from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+                evaluator = PropertyGraphEvaluator(self._graph)
+                d3 = float(evaluator.compute_temporal(audit_input))
             except Exception:
                 pass
                 
@@ -211,10 +215,14 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         v_hat_vec = StringUtils.to_vector(V_hat, model_name=model_name)
 
         d1 = self._compute_d_1_vectorized(y_vec, v_hat_vec)
-        d2 = float(G_t.evaluate(y)) if hasattr(G_t, "evaluate") else 0.0
-        d3 = float(G_t.compute_temporal(y)) if hasattr(G_t, "compute_temporal") else (
-            float(G_t.compute_d_temporal(y)) if hasattr(G_t, "compute_d_temporal") else 0.0
-        )
+        
+        d2 = 0.0
+        d3 = 0.0
+        if G_t is not None:
+            from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+            evaluator = PropertyGraphEvaluator(G_t)
+            d2 = float(evaluator.evaluate(y))
+            d3 = float(evaluator.compute_temporal(y))
 
         return max(0.0, min(1.0,
             self.lambda_1 * d1 +

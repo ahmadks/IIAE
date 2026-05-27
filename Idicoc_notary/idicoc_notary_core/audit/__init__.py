@@ -14,7 +14,8 @@ from .config import AuditConfig
 from .exceptions import ComplianceBreach, WrapperInitializationError
 from .ctm_client import KernelCustodyClient
 from .pipeline import IDICOCPipeline
-from .axioms import AxiomEngine
+from .graph.loader import AxiomLoader, FileAxiomLoader, InlineAxiomLoader
+from .graph.cache import GraphCache, NoOpGraphCache, RedisGraphCache
 from .dse import DissonanceStrategy
 from .wrapper_pipeline import IDICOCNotaryClient
 from .aem import AuditEntropyModule
@@ -23,7 +24,12 @@ __all__ = [
     "AuditConfig",
     "CanonicalStateDTO",
     "IIAENotaryContract",
-    "AxiomEngine",
+    "AxiomLoader",
+    "FileAxiomLoader",
+    "InlineAxiomLoader",
+    "GraphCache",
+    "NoOpGraphCache",
+    "RedisGraphCache",
     "KernelCustodyClient",
     "IDICOCPipeline",
     "WrapperInitializationError",

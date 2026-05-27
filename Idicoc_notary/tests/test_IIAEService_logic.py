@@ -90,7 +90,7 @@ def test_logic_service_with_compatible_distribution(logic_service):
         "No negative weights are allowed.",
     ]
 
-    with patch("idicoc_notary_core.kernel.graph.property_graph.PropertyGraph.evaluate", return_value=0.125):
+    with patch("idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate", return_value=0.125):
         canonical_state = logic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,
@@ -173,7 +173,7 @@ def test_logic_service_with_incompatible_distribution():
         "No negative weights are allowed.",
     ]
 
-    with patch("idicoc_notary_core.kernel.graph.property_graph.PropertyGraph.evaluate", side_effect=[0.85/0.4, 0.05/0.4]):
+    with patch("idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate", side_effect=[0.85/0.4, 0.05/0.4]):
         canonical_state = logic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,

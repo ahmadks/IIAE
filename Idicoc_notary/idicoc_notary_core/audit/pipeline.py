@@ -25,11 +25,11 @@ from .persistence.file_backend import FileCTMStorage
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .ctm_client import KernelCustodyClient
-from .axioms import AxiomEngine
 from .dse import (
     DissonanceStrategy as DissonanceStrategyProtocol,
     StructuralDissonanceStrategy,
 )
+from .graph.cache import GraphCache
 from .aem import AuditEntropyModule
 
 
@@ -39,11 +39,11 @@ class IDICOCPipeline:
     def __init__(
         self,
         config: AuditConfig,
-        axioms: Optional[List[Dict[str, Any]]] = None,
+        graph_cache: Optional[GraphCache] = None,
     ) -> None:
         self.config = config
-        self.graph = PropertyGraph()
-        self.axiom_engine = AxiomEngine(axioms)
+        self.graph_cache = graph_cache
+        self.graph = PropertyGraph(embedding_signature=self.config.embedding_signature)
         self.logger = get_logger("audit_flow.pipeline")
         self.aem = AuditEntropyModule()
 
@@ -79,7 +79,7 @@ class IDICOCPipeline:
         )
 
         genesis_metadata = {
-            "source_name": self.config.source_name,
+            "instance_name": self.config.instance_name,
             "ctm_mode": self.config.ctm_mode,
             "delta_fp": self.config.isg_delta_fp,
             "rigidity_epsilon": self.config.rigidity_epsilon,
@@ -92,6 +92,7 @@ class IDICOCPipeline:
                 self.dqe.lambda_5,
                 self.dqe.lambda_6,
             ],
+            "embedding_model_signature": self.config.embedding_signature,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.ctm.initialize_genesis(
@@ -111,8 +112,69 @@ class IDICOCPipeline:
         return self.config.dissonance_strategy(config=self.config)
 
     def initialize(self) -> None:
-        self.axiom_engine.provision_graph(self.graph)
+        self._load_initial_axioms()
         self._initialized = True
+
+    def _load_initial_axioms(self) -> None:
+        """Carga y procesa axiomas estáticos, usando caché si está disponible."""
+        if not self.config.axiom_loader:
+            return
+
+        # 1. Intentar recuperar desde caché
+        tenant_id = self.config.client_id
+        axioms_data = self.config.axiom_loader.load_axioms()
+        
+        # Calcular hash canónico de los datos
+        content_hash = sha256_hex(canonical_json(axioms_data))
+        cache_key = f"property_graph:{tenant_id}:{content_hash}"
+
+        if self.graph_cache:
+            cached_graph = self.graph_cache.get(cache_key)
+            if cached_graph:
+                # Validar la firma del embedding
+                if cached_graph.embedding_signature == self.config.embedding_signature:
+                    self.graph = cached_graph
+                    self.logger.info("PropertyGraph cargado desde caché exitosamente.")
+                    return
+                else:
+                    msg = f"Firma de embedding en caché ({cached_graph.embedding_signature}) no coincide con la actual ({self.config.embedding_signature})."
+                    if self.config.strict_embedding_signature:
+                        raise RuntimeError(f"Strict mode: {msg}")
+                    else:
+                        self.logger.warning(f"{msg} Invalidando caché y recalculando.")
+
+        # 2. Si no hay caché o fue invalidada, construimos el grafo
+        from idicoc_notary_core.utils.embedding_service import EmbeddingService
+        embed_service = EmbeddingService()
+
+        # Crear nuevo grafo
+        self.graph = PropertyGraph(embedding_signature=self.config.embedding_signature)
+
+        for idx, axiom_dict in enumerate(axioms_data):
+            axiom_id = axiom_dict.get("axiom_id") or axiom_dict.get("id") or f"axiom_loaded_{idx}"
+            
+            # Precomputar embedding
+            if "embedding" not in axiom_dict:
+                text_to_embed = axiom_dict.get("text") or axiom_dict.get("description") or str(axiom_dict)
+                try:
+                    vec = embed_service.encode(
+                        text_to_embed, 
+                        model_name=self.config.semantic_embedding_model, 
+                        normalize_embeddings=self.config.embedding_normalize
+                    )
+                    axiom_dict["embedding"] = vec.tolist()
+                except Exception as e:
+                    self.logger.warning(f"No se pudo precomputar embedding para {axiom_id}: {e}")
+
+            self.graph.add_axiom(axiom_id, axiom_dict)
+            
+        self.graph.detect_conflicts()
+        self.logger.info(f"Loaded {len(axioms_data)} static axioms into the PropertyGraph.")
+
+        # 3. Guardar en caché si está habilitada
+        if self.graph_cache:
+            self.graph_cache.set(cache_key, self.graph)
+            self.logger.info("PropertyGraph guardado en caché.")
 
     def execute(
         self,
@@ -134,23 +196,20 @@ class IDICOCPipeline:
 
         try:
             context_chunks = context_input or []
-            policy_axioms = self.axiom_engine.render_axioms(self.graph)
-            all_axioms = list(policy_axioms)
-            if context_axioms:
-                all_axioms.extend(context_axioms)
+            all_axioms = list(context_axioms) if context_axioms else []
 
             # 2. ISG
             V_hat = self.isg.generate(audit_input)
 
-            # 3. DSE
-            self.dse.update_graph(
-                raw_input=audit_input,
-                canonical_state=V_hat,
-                context_input=context_chunks,
-                context_axioms=all_axioms,
-            )
+            # 3. DSE (Solo lectura)
+            # El PropertyGraph es inmutable en tiempo de ejecución.
+            # Los axiomas fijos ya se cargaron. El contexto dinámico se pasará
+            # a la estrategia para su evaluación temporal pero no se guardará en el grafo.
 
-            # 4. CMC
+            # 4. Cálculo de Disonancia
+            self.dqe.set_strategy(self.dissonance_strategy)
+            
+            # CMC
             manifold = self.cmc.build(V_hat, self.graph, epsilon_used)
 
             # 5. DQE
@@ -205,7 +264,9 @@ class IDICOCPipeline:
             invariant_hash = sha256_hex(canonical_json(v_hat_payload))
             graph_hash = sha256_hex(canonical_json(self.graph.nodes))
 
-            d_logic = float(self.graph.evaluate(y_corrected)) if hasattr(self.graph, "evaluate") else 0.0
+            from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+            evaluator = PropertyGraphEvaluator(self.graph)
+            d_logic = float(evaluator.evaluate(y_corrected))
 
             metadata = {
                 "timestamp": timestamp,
@@ -221,7 +282,7 @@ class IDICOCPipeline:
                 },
                 "audit_metrics": {"d_s": D_s, "d_logic": d_logic},
                 "admission_breach": not admitted,
-                "source_name": self.config.source_name,
+                "instance_name": self.config.instance_name,
                 "client_id": client_id or self.config.client_id,
                 "trace_input": trace_input or self.config.trace_input,
                 "invariant_state_hash": invariant_hash,
@@ -235,7 +296,7 @@ class IDICOCPipeline:
                     "d_0": 0.0,
                     "d_1": getattr(self.dissonance_strategy, "_d_inv_from_pair", lambda a, b: 0.0)(y_corrected, V_hat),
                     "d_2": d_logic,
-                    "d_3": float(self.graph.compute_temporal(y_corrected)) if hasattr(self.graph, "compute_temporal") else 0.0,
+                    "d_3": float(evaluator.compute_temporal(y_corrected)),
                     "d_4": 0.0,
                     "d_5": 0.0,
                     "d_6": 0.0,
@@ -282,7 +343,7 @@ class IDICOCPipeline:
                             epsilon=epsilon_used,
                             delta_fp=self.config.isg_delta_fp,
                             correction_flag=correction_flag,
-                            source=self.config.source_name,
+                            source=self.config.instance_name,
                             metadata=metadata,
                         )
                     else:
@@ -325,7 +386,7 @@ class IDICOCPipeline:
             "admission_metrics": {"admitted": False, "error": reason},
             "audit_metrics": {"error": reason},
             "admission_breach": True,
-            "source_name": self.config.source_name,
+            "instance_name": self.config.instance_name,
             "client_id": client_id or self.config.client_id,
             "trace_input": trace_input or self.config.trace_input,
             "invariant_state_hash": "",

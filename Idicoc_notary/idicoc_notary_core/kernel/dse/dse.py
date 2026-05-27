@@ -43,8 +43,10 @@ class AxiomExtractor:
     def _get_embedder(self) -> Any:
         if self._embedder is None and self._models_available:
             try:
-                from sentence_transformers import SentenceTransformer
-                self._embedder = SentenceTransformer(self.embedding_model_name)
+                from idicoc_notary_core.utils.embedding_service import EmbeddingService
+                self._embedder = EmbeddingService().get_embedder(self.embedding_model_name)
+                if self._embedder is None:
+                    raise ImportError("El servicio no pudo cargar el modelo.")
             except Exception:
                 self._models_available = False
         return self._embedder
@@ -61,56 +63,55 @@ class AxiomExtractor:
                 self._models_available = False
         return self._nli_pipeline
 
-    def update_graph(
+    def extract_from_context(
         self,
-        raw_input: Any,
-        canonical_state: Any,
         context_input: Optional[list[str]] = None,
         context_axioms: Optional[list[str]] = None,
     ) -> PropertyGraph:
         """
-        Actualiza el PropertyGraph con axiomas derivados del input y el contexto.
+        Extrae y precomputa axiomas exclusivamente a partir del contexto estático.
+        Nunca recibe el audit_input en tiempo de ejecución.
         """
         context_input = context_input or []
         context_axioms = context_axioms or []
-
-        raw_text = self._to_text(raw_input)
-        canonical_text = self._to_text(canonical_state)
         timestamp = datetime.now(timezone.utc).isoformat()
+        
+        embedder = self._get_embedder()
 
-        # 1. Axioma base de transformación input → canonical
-        base_axioms = self._build_base_axiom(raw_text, canonical_text, timestamp)
-        for ax in base_axioms:
-            self.property_graph.add_axiom(ax["axiom_id"], ax)
-
-        # 2. Axiomas desde context_axioms predefinidos
+        # 1. Axiomas desde context_axioms predefinidos
         for axiom_text in context_axioms:
+            if not isinstance(axiom_text, str):
+                axiom_text = str(axiom_text)
             ax = self._axiom_from_text(axiom_text, axiom_type="protocol", timestamp=timestamp)
+            if embedder is not None:
+                try:
+                    vec = embedder.encode(axiom_text, normalize_embeddings=True)
+                    ax["embedding"] = vec.tolist()
+                except Exception:
+                    pass
             self.property_graph.add_axiom(ax["axiom_id"], ax)
 
-        # 3. Axiomas extraídos de context_input y raw_input
-        for text in context_input + [raw_text]:
-            if not text.strip():
+        # 2. Axiomas extraídos de context_input
+        for text in context_input:
+            if not isinstance(text, str) or not text.strip():
                 continue
             ax = self._axiom_from_text(text, axiom_type="fact", timestamp=timestamp)
+            if embedder is not None:
+                try:
+                    vec = embedder.encode(text, normalize_embeddings=True)
+                    ax["embedding"] = vec.tolist()
+                except Exception:
+                    pass
             self.property_graph.add_axiom(ax["axiom_id"], ax)
 
-        # 4. Detección de contradicciones vía NLI
+        # 3. Detección de contradicciones vía NLI en el contexto base
         if len(context_input) >= 2:
             contradiction_axioms = self._detect_contradictions(context_input, timestamp)
             for ax in contradiction_axioms:
                 self.property_graph.add_axiom(ax["axiom_id"], ax)
 
-        # 5. Axioma semántico del input vs canonical (embedding cosine similarity)
-        semantic_axiom = self._build_semantic_axiom(raw_text, canonical_text, timestamp)
-        if semantic_axiom:
-            self.property_graph.add_axiom(semantic_axiom["axiom_id"], semantic_axiom)
-
         self.property_graph.detect_conflicts()
         return self.property_graph
-
-    def extract_axioms(self, raw_input: Any, canonical_state: Any) -> PropertyGraph:
-        return self.update_graph(raw_input, canonical_state)
 
     def _build_base_axiom(
         self, raw_text: str, canonical_text: str, timestamp: str

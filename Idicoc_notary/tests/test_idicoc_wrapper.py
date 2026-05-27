@@ -23,7 +23,7 @@ def test_audit_config_properties():
     assert config.correction_base_tolerance == 0.15
     assert config.context_axiom_conflict_threshold == 0.5
     assert config.contradiction_snapping_threshold == 0.5
-    assert config.source_name == "ai_comercial"
+    assert config.instance_name == "ai_comercial"
     assert not hasattr(config, "mode")
     assert config.enable_hard_halt is False
 

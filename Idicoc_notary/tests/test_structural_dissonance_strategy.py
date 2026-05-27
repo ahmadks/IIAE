@@ -32,14 +32,18 @@ def test_compute_dissonance_with_property_graph(mock_to_vector, strategy):
     # Mock the EMD calculation internally
     strategy._compute_d_1_vectorized = MagicMock(return_value=0.2)
     
-    d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
-    
-    # d_s = lambda_inv(0.5) * d_inv(0.2) + lambda_logic(0.4) * d_logic(0.8) + lambda_temporal(0.1) * d_temporal(0.5)
-    # d_s = 0.1 + 0.32 + 0.05 = 0.47
-    assert abs(d_s - 0.47) < 1e-6
-    
-    mock_graph.evaluate.assert_called_once_with("candidato")
-    mock_graph.compute_temporal.assert_called_once_with("candidato")
+    # Mock the PropertyGraphEvaluator methods since the strategy now instantiates it
+    with patch('idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
+         patch('idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
+        
+        d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
+        
+        # d_s = lambda_inv(0.5) * d_inv(0.2) + lambda_logic(0.4) * d_logic(0.8) + lambda_temporal(0.1) * d_temporal(0.5)
+        # d_s = 0.1 + 0.32 + 0.05 = 0.47
+        assert abs(d_s - 0.47) < 1e-6
+        
+        mock_eval.assert_called_once_with("candidato")
+        mock_temp.assert_called_once_with("candidato")
 
 @patch('idicoc_notary_core.utils.string_utils.StringUtils.to_vector')
 def test_projection_manifold(mock_to_vector, strategy):

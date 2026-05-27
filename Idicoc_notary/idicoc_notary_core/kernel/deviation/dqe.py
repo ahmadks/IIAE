@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from idicoc_notary_core.audit.dse.structural_strategy import StructuralDissonanceStrategy
+    from idicoc_notary_core.audit.dse.dissonance_strategy import DissonanceStrategy
 
 
 class DissonanceCalculator:
@@ -10,7 +10,7 @@ class DissonanceCalculator:
 
     def __init__(
         self,
-        strategy: "StructuralDissonanceStrategy | None" = None,
+        strategy: "DissonanceStrategy | None" = None,
         lambda_0: float = 0.0,
         lambda_1: float = 0.5,
         lambda_2: float = 0.4,
@@ -30,7 +30,7 @@ class DissonanceCalculator:
         self.lambda_6 = lambda_6
         self.delta_fp = delta_fp
 
-    def set_strategy(self, strategy: "StructuralDissonanceStrategy") -> None:
+    def set_strategy(self, strategy: "DissonanceStrategy") -> None:
         self.strategy = strategy
 
     def compute_dissonance(self, y: Any, V_hat: Any, G_t: Any) -> float:
