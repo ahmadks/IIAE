@@ -63,14 +63,14 @@ class MerkleNode:
     parent_hashes: List[str]
     timestamp: str
     payload: Dict[str, Any]
-    # hardware_evidence: Optional[Dict[str, Any]] = None
-    # Campos extendidos del Anexo K
+    hardware_evidence: Optional[Dict[str, Any]] = None
+    # Campos extendidos
     invariant_state_hash: Optional[str] = None
     property_graph_hash: Optional[str] = None
     deviation_score: Optional[float] = None
     correction_flag: Optional[bool] = None
-    # hss_anchor: Optional[str] = None
-    # epuf_anchor: Optional[str] = None
+    hss_anchor: Optional[str] = None
+    epuf_anchor: Optional[str] = None
 
 
 class MerkleDAG:
@@ -121,7 +121,7 @@ class MerkleDAG:
         correction_flag: Optional[bool] = None,
     ) -> MerkleNode:
         """
-        Append determinista con metadatos extendidos del Anexo K.
+        Append determinista con metadatos extendidos.
         """
         parent_hashes = (
             parent_hashes
@@ -142,7 +142,7 @@ class MerkleDAG:
             parent_hashes=parent_hashes,
             timestamp=timestamp,
             payload=sealed_payload,
-            # hardware_evidence=sealed_payload.get("hardware_evidence"),
+            hardware_evidence=sealed_payload.get("hardware_evidence"),
             invariant_state_hash=invariant_state_hash,
             property_graph_hash=property_graph_hash,
             deviation_score=deviation_score,
@@ -174,13 +174,13 @@ class MerkleDAG:
             parent_hashes=node_data["parent_hashes"],
             timestamp=node_data["timestamp"],
             payload=node_data["payload"],
-            # hardware_evidence=node_data.get("hardware_evidence"),
+            hardware_evidence=node_data.get("hardware_evidence"),
             invariant_state_hash=node_data.get("invariant_state_hash"),
             property_graph_hash=node_data.get("property_graph_hash"),
             deviation_score=node_data.get("deviation_score"),
             correction_flag=node_data.get("correction_flag"),
-            # hss_anchor=node_data.get("hss_anchor"),
-            # epuf_anchor=node_data.get("epuf_anchor"),
+            hss_anchor=node_data.get("hss_anchor"),
+            epuf_anchor=node_data.get("epuf_anchor"),
         )
         self._nodes[node_hash] = node
         return node
@@ -302,7 +302,7 @@ class CustodialTraceManager:
             "epsilon": node.payload.get("payload", {}).get("epsilon"),
             "invariant_state_hash": node.invariant_state_hash,
             "property_graph_hash": node.property_graph_hash,
-            # "hardware_evidence": node.hardware_evidence,
+            "hardware_evidence": node.hardware_evidence,
         }
 
     @staticmethod

@@ -41,7 +41,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         """
         if self._anchor is not None:
             return self._anchor
-        return getattr(self.config, 'constant_k', None)
+        return getattr(self.config, "constant_k", None)
 
     def initialize(self, config: AuditConfig) -> None:
         self.config = config
@@ -101,12 +101,8 @@ class IDICOCNotaryClient(IIAENotaryContract):
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
         audit_input = data.get(self.config.input_field_audit, data.get("text", ""))
-        context_input = data.get(
-            self.config.input_field_context, data.get("context_input", [])
-        )
-        context_axioms = data.get(
-            self.config.input_field_axioms, data.get("context_axioms", [])
-        )
+        context_input = data.get(self.config.input_field_context, data.get("context_input", []))
+        context_axioms = data.get(self.config.input_field_axioms, data.get("context_axioms", []))
         epsilon_override = data.get("epsilon_override", None)
         trace_input = data.get("trace_input", "")
         client_id = data.get("client_id", None)
@@ -134,9 +130,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
                 extra={"iiae_data": snapshot},
             )
 
-    def verify_compliance(
-        self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0
-    ) -> bool:
+    def verify_compliance(self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0) -> bool:
         snapshot: dict[str, Any]
         if not canonical_state.verify_integrity():
             snapshot = {
@@ -166,7 +160,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
             return False
 
         # ---------------------------------------------------------------
-        # Verificación coalgebraica (Anexo J): los pesos λ deben ser
+        # Verificación coalgebraica: los pesos λ deben ser
         # [0.0, 1.0, 0.0] y d_s debe coincidir con λ_logic · d_logic.
         # Rol de notario: solo mide y registra, nunca bloquea.
         # ---------------------------------------------------------------
@@ -189,12 +183,13 @@ class IDICOCNotaryClient(IIAENotaryContract):
         d_4 = float(algebraic.get("d_4", 0.0))
         d_5 = float(algebraic.get("d_5", 0.0))
         d_6 = float(algebraic.get("d_6", 0.0))
-        
+
         expected_d_s = sum(
-            expected_weights[i] * [d_0, d_1, d_2, d_3, d_4, d_5, d_6][i]
-            for i in range(7)
+            expected_weights[i] * [d_0, d_1, d_2, d_3, d_4, d_5, d_6][i] for i in range(7)
         )
-        print(f"DEBUG: expected_weights={expected_weights}, D_s={dissonance}, expected_d_s={expected_d_s}")
+        print(
+            f"DEBUG: expected_weights={expected_weights}, D_s={dissonance}, expected_d_s={expected_d_s}"
+        )
         if abs(dissonance - expected_d_s) > 1e-6:
             snapshot = {
                 "event": "verify_compliance_algebraic",
@@ -207,9 +202,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
 
         return True
 
-    def integrate_with_kernel(
-        self, canonical_state: CanonicalStateDTO, kernel: Any
-    ) -> Any:
+    def integrate_with_kernel(self, canonical_state: CanonicalStateDTO, kernel: Any) -> Any:
         if hasattr(kernel, "process"):
             kernel.process(canonical_state.data)
             return {
@@ -225,9 +218,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         self._log_or_seal_failure(failure_response)
         return failure_response
 
-    def handle_compliance_breach(
-        self, error: Exception, context: dict[str, Any]
-    ) -> Any:
+    def handle_compliance_breach(self, error: Exception, context: dict[str, Any]) -> Any:
         return {
             "error": str(error),
             "context": context,
