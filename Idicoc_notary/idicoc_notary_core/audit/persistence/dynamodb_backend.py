@@ -12,20 +12,21 @@ class DynamoDBStorage(CTMStorageBackend):
     Almacena los bloques utilizando un atributo nativo de mapa de datos.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
+    EXPLICACIÓN EN LENGUAJE LLANO :
     Este componente interactúa con la base de datos NoSQL DynamoDB de AWS.
-    En producción (`mock=False`), exige que le proveas un nombre de tabla válido. 
-    Cualquier error de conexión o credenciales de AWS detendrá el flujo y lanzará una 
-    excepción del tipo PersistenceError. 
+    En producción (`mock=False`), exige que le proveas un nombre de tabla válido.
+    Cualquier error de conexión o credenciales de AWS detendrá el flujo y lanzará una
+    excepción del tipo PersistenceError.
     Usa `mock=True` únicamente para pruebas locales en memoria.
     ===========================================================================
     """
+
     def __init__(
         self,
         table_name: Optional[str] = None,
         mock: bool = False,
         region_name: str = "us-east-1",
-        **kwargs: Any
+        **kwargs: Any,
     ):
         self.mock = mock or kwargs.get("mock", False)
         self.table_name = table_name
@@ -52,12 +53,15 @@ class DynamoDBStorage(CTMStorageBackend):
                 raise ValueError(
                     "DynamoDBStorage requiere 'table_name' cuando no opera en modo mock."
                 )
-            
+
             try:
                 import importlib
+
                 boto3 = importlib.import_module("boto3")
                 self._boto3 = boto3
-                self._dynamodb = boto3.resource("dynamodb", region_name=self.region_name, **self.kwargs)
+                self._dynamodb = boto3.resource(
+                    "dynamodb", region_name=self.region_name, **self.kwargs
+                )
                 self._table = self._dynamodb.Table(self.table_name)
             except ImportError as exc:
                 raise RuntimeError(
@@ -74,11 +78,7 @@ class DynamoDBStorage(CTMStorageBackend):
         try:
             # node_data se guarda directamente como un mapa nativo en DynamoDB
             self._table.put_item(
-                Item={
-                    "node_hash": node_hash,
-                    "node_data": node_data,
-                    "type": "NODE"
-                }
+                Item={"node_hash": node_hash, "node_data": node_data, "type": "NODE"}
             )
         except Exception as exc:
             raise PersistenceError(f"Error al guardar nodo en DynamoDB: {exc}") from exc
@@ -105,9 +105,7 @@ class DynamoDBStorage(CTMStorageBackend):
         assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             nodes: Dict[str, Dict[str, Any]] = {}
-            response = self._table.scan(
-                FilterExpression="attribute_exists(node_data)"
-            )
+            response = self._table.scan(FilterExpression="attribute_exists(node_data)")
             for item in response.get("Items", []):
                 h = item["node_hash"]
                 nodes[h] = item["node_data"]
@@ -124,11 +122,7 @@ class DynamoDBStorage(CTMStorageBackend):
         assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             self._table.put_item(
-                Item={
-                    "node_hash": "__root_hash__",
-                    "value": root_hash,
-                    "type": "ROOT"
-                }
+                Item={"node_hash": "__root_hash__", "value": root_hash, "type": "ROOT"}
             )
         except Exception as exc:
             raise PersistenceError(f"Error al guardar hash raíz en DynamoDB: {exc}") from exc

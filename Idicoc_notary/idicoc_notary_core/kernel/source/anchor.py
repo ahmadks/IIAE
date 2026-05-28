@@ -2,6 +2,7 @@ from __future__ import annotations
 import numpy as np
 from idicoc_notary_core.kernel.exceptions.integrity_breach import InvariantStateBreach
 
+
 class SourceAnchor:
     """Representa la coálgebra terminal (k) como un punto fijo inmutable en el espacio latente.
 
@@ -9,10 +10,10 @@ class SourceAnchor:
     el espacio latente para medir disonancias semánticas y lógicas.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
+    EXPLICACIÓN EN LENGUAJE LLANO :
     El SourceAnchor es el "ANCLA DE REFERENCIA" o "ESTADO CANÓNICO IDEAL" (el atractor K).
-    Es un vector matemático inmutable que representa la verdad absoluta o estado base 
-    perfectamente alineado. Se usa como punto de comparación constante para determinar 
+    Es un vector matemático inmutable que representa la verdad absoluta o estado base
+    perfectamente alineado. Se usa como punto de comparación constante para determinar
     cuánto se desvían las peticiones y respuestas del sistema con respecto a esta base.
     ===========================================================================
 
@@ -37,6 +38,7 @@ class SourceAnchor:
         ...     print(e)
         [InvariantStateBreach] El vector del ancla no puede estar vacío.
     """
+
     def __init__(self, constant_k: np.ndarray):
         # 1. Proyección inmediata al espacio matemático (float)
         constant_k = np.asarray(constant_k, dtype=float)
@@ -46,13 +48,13 @@ class SourceAnchor:
             raise InvariantStateBreach(
                 message="El vector del ancla no puede estar vacío.",
                 invalid_state=constant_k,
-                origin="SourceAnchor.__init__"
+                origin="SourceAnchor.__init__",
             )
 
         # 3. Inmutabilidad Profunda (Deep Freeze) del estado
         self._k = np.array(constant_k, copy=True)
-        self._k.flags.writeable = False 
-        
+        self._k.flags.writeable = False
+
         # 4. Hash forense determinista basado en los bytes del vector
         self._fingerprint = hash(self._k.tobytes())
 
@@ -73,7 +75,7 @@ class SourceAnchor:
 
     def verify_isomorphism(self, state: np.ndarray) -> bool:
         """
-        Valida rigurosamente si un estado candidato es topológicamente isomorfo 
+        Valida rigurosamente si un estado candidato es topológicamente isomorfo
         al punto fijo terminal bajo un funtor de tolerancia definido (1e-6).
         """
         if state.shape != self._k.shape:

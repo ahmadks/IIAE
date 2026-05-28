@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+
 class AuditEntropyModule:
     """Modulo de Entropía de Auditoría (AEM) para el conteo de señales y registro de auditorías.
 
@@ -9,10 +10,10 @@ class AuditEntropyModule:
     traza inmutable de los motivos forenses de rechazo.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
-    Este módulo es simplemente un CONTADOR DE ADMISIONES Y RECHAZOS. 
-    Se encarga de llevar la cuenta de cuántas peticiones han sido aceptadas (admitidas), 
-    cuántas han sido rechazadas por violar disonancia o reglas duras, y guarda un 
+    EXPLICACIÓN EN LENGUAJE LLANO :
+    Este módulo es simplemente un CONTADOR DE ADMISIONES Y RECHAZOS.
+    Se encarga de llevar la cuenta de cuántas peticiones han sido aceptadas (admitidas),
+    cuántas han sido rechazadas por violar disonancia o reglas duras, y guarda un
     historial (audit trail) de los motivos de rechazo.
     Piénsalo como el contador de la puerta del club: cuenta cuánta gente entra bien y
     a cuánta se le deniega la entrada con sus respectivos motivos.
@@ -34,6 +35,7 @@ class AuditEntropyModule:
         >>> print(len(aem.get_audit_trail()))
         1
     """
+
     def __init__(self) -> None:
         self.total_signals: int = 0
         self.valid_signals: int = 0
@@ -54,10 +56,7 @@ class AuditEntropyModule:
         """Increments total_signals (y_t) and rejected_signals (n_t), and adds metadata to the trail."""
         self.total_signals += 1
         self.rejected_signals += 1
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            **(metadata or {})
-        }
+        record = {"timestamp": datetime.now(timezone.utc).isoformat(), **(metadata or {})}
         self.audit_trail_map.append(record)
 
     def get_counters(self) -> Tuple[int, int, int]:
