@@ -104,7 +104,7 @@ class AuditConfig:
     spsa_alpha: float = 0.602
     spsa_gamma: float = 0.101
     spsa_decay_enabled: bool = True
-    
+
     # Sistema de inyección de axiomas
     axiom_loader: "AxiomLoader | None" = None
     axiom_file_path: str = "axioms.txt"
@@ -134,13 +134,13 @@ class AuditConfig:
 
         # Asegurar que las rutas de persistencia relativas se resuelvan siempre respecto al directorio raíz del proyecto 'Idicoc_notary'
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        
+
         # Calcular firma del modelo si no se proporciona
         if not self.embedding_signature:
             from idicoc_notary_core.utils.embedding_utils import compute_embedding_signature
+
             self.embedding_signature = compute_embedding_signature(
-                self.semantic_embedding_model,
-                normalize=self.embedding_normalize
+                self.semantic_embedding_model, normalize=self.embedding_normalize
             )
 
         if not os.path.isabs(self.ctm_nodes_path):
@@ -154,6 +154,7 @@ class AuditConfig:
                 axiom_path = os.path.abspath(os.path.join(package_root, axiom_path))
             if os.path.exists(axiom_path):
                 from .graph.loader import FileAxiomLoader
+
                 self.axiom_loader = FileAxiomLoader(axiom_path)
 
         # Si no se proporciona estrategia, usar StructuralDissonanceStrategy por defecto
