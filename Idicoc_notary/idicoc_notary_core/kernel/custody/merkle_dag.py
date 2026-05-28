@@ -12,20 +12,15 @@ from idicoc_notary_core.utils.hashing import (
 
 
 class HardwareSealer(Protocol):
-    def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        ...
+    def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]: ...
+
 
 class CTMStorageBackend(Protocol):
-    def save_node(self, node_hash: str, node_data: Dict[str, Any]) -> None:
-        ...
-    def load_node(self, node_hash: str) -> Optional[Dict[str, Any]]:
-        ...
-    def load_all_nodes(self) -> Dict[str, Dict[str, Any]]:
-        ...
-    def save_root_hash(self, root_hash: str) -> None:
-        ...
-    def load_root_hash(self) -> Optional[str]:
-        ...
+    def save_node(self, node_hash: str, node_data: Dict[str, Any]) -> None: ...
+    def load_node(self, node_hash: str) -> Optional[Dict[str, Any]]: ...
+    def load_all_nodes(self) -> Dict[str, Dict[str, Any]]: ...
+    def save_root_hash(self, root_hash: str) -> None: ...
+    def load_root_hash(self) -> Optional[str]: ...
 
 
 class NoOpHardwareSealer:
@@ -41,7 +36,8 @@ class EnvHardwareSealer:
 
         if self.require_key and not self.key:
             raise RuntimeError(
-                f"Se requiere la variable de entorno de hardware '{key_env}' para el sellado.")
+                f"Se requiere la variable de entorno de hardware '{key_env}' para el sellado."
+            )
 
     def seal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.key:
@@ -67,18 +63,22 @@ class MerkleNode:
     parent_hashes: List[str]
     timestamp: str
     payload: Dict[str, Any]
-    hardware_evidence: Optional[Dict[str, Any]] = None
+    # hardware_evidence: Optional[Dict[str, Any]] = None
     # Campos extendidos del Anexo K
     invariant_state_hash: Optional[str] = None
     property_graph_hash: Optional[str] = None
     deviation_score: Optional[float] = None
     correction_flag: Optional[bool] = None
-    hss_anchor: Optional[str] = None
-    epuf_anchor: Optional[str] = None
+    # hss_anchor: Optional[str] = None
+    # epuf_anchor: Optional[str] = None
 
 
 class MerkleDAG:
-    def __init__(self, sealer: Optional[HardwareSealer] = None, storage_backend: Optional[CTMStorageBackend] = None):
+    def __init__(
+        self,
+        sealer: Optional[HardwareSealer] = None,
+        storage_backend: Optional[CTMStorageBackend] = None,
+    ):
         self._nodes: Dict[str, MerkleNode] = {}
         self._root_hash: Optional[str] = None
         self._sealer: HardwareSealer = sealer or NoOpHardwareSealer()
@@ -123,7 +123,11 @@ class MerkleDAG:
         """
         Append determinista con metadatos extendidos del Anexo K.
         """
-        parent_hashes = parent_hashes if parent_hashes is not None else ([self._root_hash] if self._root_hash else [])
+        parent_hashes = (
+            parent_hashes
+            if parent_hashes is not None
+            else ([self._root_hash] if self._root_hash else [])
+        )
 
         sealed_payload = self._build_payload(
             logical_payload=logical_payload,
@@ -138,7 +142,7 @@ class MerkleDAG:
             parent_hashes=parent_hashes,
             timestamp=timestamp,
             payload=sealed_payload,
-            hardware_evidence=sealed_payload.get("hardware_evidence"),
+            # hardware_evidence=sealed_payload.get("hardware_evidence"),
             invariant_state_hash=invariant_state_hash,
             property_graph_hash=property_graph_hash,
             deviation_score=deviation_score,
@@ -147,11 +151,11 @@ class MerkleDAG:
 
         self._nodes[node_hash] = node
         self._root_hash = node_hash
-        
+
         if self._storage is not None:
             self._storage.save_node(node_hash, asdict(node))
             self._storage.save_root_hash(node_hash)
-            
+
         return node
 
     def get_node(self, node_hash: str) -> Optional[MerkleNode]:
@@ -170,13 +174,13 @@ class MerkleDAG:
             parent_hashes=node_data["parent_hashes"],
             timestamp=node_data["timestamp"],
             payload=node_data["payload"],
-            hardware_evidence=node_data.get("hardware_evidence"),
+            # hardware_evidence=node_data.get("hardware_evidence"),
             invariant_state_hash=node_data.get("invariant_state_hash"),
             property_graph_hash=node_data.get("property_graph_hash"),
             deviation_score=node_data.get("deviation_score"),
             correction_flag=node_data.get("correction_flag"),
-            hss_anchor=node_data.get("hss_anchor"),
-            epuf_anchor=node_data.get("epuf_anchor"),
+            # hss_anchor=node_data.get("hss_anchor"),
+            # epuf_anchor=node_data.get("epuf_anchor"),
         )
         self._nodes[node_hash] = node
         return node
@@ -204,7 +208,9 @@ class MerkleDAG:
 
 
 class CustodialTraceManager:
-    def __init__(self, dag: Optional[MerkleDAG] = None, storage_backend: Optional[CTMStorageBackend] = None):
+    def __init__(
+        self, dag: Optional[MerkleDAG] = None, storage_backend: Optional[CTMStorageBackend] = None
+    ):
         self._dag = dag or MerkleDAG(storage_backend=storage_backend)
 
     @property
@@ -234,7 +240,9 @@ class CustodialTraceManager:
             "canonical_state": self._safe_serialize(canonical_state),
             "dissonance": dissonance,
             "epsilon": epsilon,
-            "property_graph": self._safe_serialize(getattr(property_graph, "nodes", property_graph)),
+            "property_graph": self._safe_serialize(
+                getattr(property_graph, "nodes", property_graph)
+            ),
         }
         if aem_counters is not None:
             logical_payload["aem_counters"] = aem_counters
@@ -266,7 +274,9 @@ class CustodialTraceManager:
             raise RuntimeError(f"Root hash {root_hash} no encontrado en el DAG.")
 
         if node.payload.get("type") != "FAILURE":
-            raise RuntimeError(f"El nodo {root_hash} no es de tipo FAILURE. Recuperación imposible.")
+            raise RuntimeError(
+                f"El nodo {root_hash} no es de tipo FAILURE. Recuperación imposible."
+            )
 
         snapshot = node.payload.get("snapshot")
         if not snapshot:
@@ -292,7 +302,7 @@ class CustodialTraceManager:
             "epsilon": node.payload.get("payload", {}).get("epsilon"),
             "invariant_state_hash": node.invariant_state_hash,
             "property_graph_hash": node.property_graph_hash,
-            "hardware_evidence": node.hardware_evidence,
+            # "hardware_evidence": node.hardware_evidence,
         }
 
     @staticmethod
