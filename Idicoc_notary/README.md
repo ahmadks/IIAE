@@ -178,8 +178,8 @@ print(result.ctm_node_hash)     # Merkle node SHA-256
 | `rigidity_epsilon` | `float` | `1e-6` | Threshold for Lipschitz contractivity gate |
 | `ctm_nodes_path` | `str` | `Idicoc_notary/tests/results/ctm_nodes.json` | Path for Merkle node storage |
 | `ctm_root_path` | `str` | `ctm_root.txt` | Path for Merkle root anchor |
-<!-- | `hardware_key_env_var` | `str` | `IIAE_HARDWARE_KEY` | Env variable for hardware seal key | -->
-<!-- | `require_hardware_seal` | `bool` | `False` | Fail if hardware key is absent | -->
+| `hardware_key_env_var` | `str` | `IIAE_HARDWARE_KEY` | Env variable for hardware seal key |
+| `require_hardware_seal` | `bool` | `False` | Fail if hardware key is absent |
 | `axiom_loader` | `AxiomLoader` | `None` | Dependency injected loader instance |
 | `axiom_file_path` | `str` | `"axioms.txt"` | Fallback path if loader is `None` |
 
