@@ -50,6 +50,13 @@ class AuditConfig:
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False
 
+    # Configuración de backends de persistencia avanzados para CTM
+    ctm_storage_backend: Any = "file"
+    ctm_postgres_uri: str | None = None
+    ctm_dynamodb_table: str | None = None
+    ctm_qldb_ledger: str | None = None
+    ctm_storage_kwargs: dict[str, Any] = field(default_factory=dict)
+
     # Pesos de disonancia para las 7 etapas de la especificación IDICOC-DSE (lambda_0..lambda_6)
     dissonance_weights: tuple[float, float, float, float, float, float, float] = (
         0.0,
@@ -87,8 +94,16 @@ class AuditConfig:
     embedding_signature: str | None = None
     strict_embedding_signature: bool = False
     terminal_rigidity_threshold: float = 0.01
+    embedding_max_chunks: int = 10
 
     ctm_mode: str = "full"
+
+    # Hiperparámetros dinámicos para optimización SPSA
+    spsa_a: float = 0.1
+    spsa_c: float = 1e-4
+    spsa_alpha: float = 0.602
+    spsa_gamma: float = 0.101
+    spsa_decay_enabled: bool = True
     
     # Sistema de inyección de axiomas
     axiom_loader: "AxiomLoader | None" = None

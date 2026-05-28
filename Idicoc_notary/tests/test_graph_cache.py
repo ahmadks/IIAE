@@ -53,7 +53,8 @@ def test_redis_cache_without_redis_installed():
     # Debería lanzar RuntimeError si intentamos instanciarlo (asumiendo que no mockeamos import redis)
     # o simplemente verificamos que la firma existe
     try:
-        import redis
+        import importlib
+        importlib.import_module("redis")
     except ImportError:
         with pytest.raises(RuntimeError):
             RedisGraphCache("redis://localhost:6379")

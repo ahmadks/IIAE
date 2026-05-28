@@ -137,6 +137,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
     def verify_compliance(
         self, canonical_state: CanonicalStateDTO, tolerance: float = 0.0
     ) -> bool:
+        snapshot: dict[str, Any]
         if not canonical_state.verify_integrity():
             snapshot = {
                 "event": "verify_compliance",

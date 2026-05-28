@@ -12,6 +12,7 @@ class Manifold:
     active_axioms: list[dict[str, Any]]
     canonical_state: Any
     graph: Any
+    dqe: Any = None
 
     def contains(self, point: Any) -> bool:
         candidate = point

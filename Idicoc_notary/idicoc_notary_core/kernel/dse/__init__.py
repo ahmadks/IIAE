@@ -1,2 +1,7 @@
-# Idicoc_notary/idicoc_notary_core/kernel/dse
-"""Package dse."""
+"""Package dse — AxiomExtractor del kernel."""
+
+from __future__ import annotations
+
+from .dse import AxiomExtractor
+
+__all__ = ["AxiomExtractor"]

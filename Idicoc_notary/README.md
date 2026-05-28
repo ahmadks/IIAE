@@ -45,6 +45,76 @@ IDICOCNotaryClient          ← public entry-point (IIAENotaryContract)
             └── CustodialTraceManager   (S₆) Merkle DAG + hardware seal
 ```
 
+### Glosario de Emergencia para Producción (3:00 AM)
+
+Si estás despierto a las 3:00 AM intentando descifrar una alerta de producción, aquí tienes la traducción de los términos académicos a lenguaje de ingeniería:
+
+*   **SourceAnchor (Attractor K / Ancla de Referencia):** Es un vector matemático fijo e inmutable que representa el "estado ideal o perfecto". Se usa como base absoluta para comparar cualquier desviación.
+*   **InvariantStateGenerator (ISG / Generador de Estado Invariante):** Toma el texto de entrada y lo traduce a un vector numérico (su embedding semántico). Si el vector está muy cerca de nuestro estado de referencia (`SourceAnchor`) por debajo del umbral de tolerancia `isg_delta_fp`, lo fuerza (colapsa) a ser exactamente igual al de referencia para evitar ruidos acumulados o variaciones numéricas sutiles.
+*   **AuditEntropyModule (AEM / Contador de Admisiones):** Funciona como el portero del flujo de auditoría: lleva la cuenta exacta de cuántas solicitudes son aprobadas (admisiones), cuántas son bloqueadas (rechazos) y registra un historial forense (`audit_trail_map`) con los motivos específicos del rechazo.
+*   **StructuralDissonanceStrategy (SPSA / Corrección sin Gradientes):** Algoritmo iterativo sumamente veloz que optimiza y proyecta (corrige) las respuestas de la IA hacia una zona permitida si estas superan los límites de desviación, protegiendo el sistema sin sobrecargar la CPU.
+
+---
+
+### Flujo de Datos Simplificado
+
+El siguiente diagrama detalla cómo fluye una petición de auditoría y dónde intervienen las etapas coalgebraicas y criptográficas:
+
+```text
+               [ Entrada de Auditoría (Texto / Datos) ]
+                                  │
+                                  ▼
+                [ InvariantStateGenerator (ISG) ]
+                 Convierte a vector y estabiliza
+                                  │
+                                  ▼
+               [ DSE & DissonanceCalculator (DQE) ]
+          Mide desviación (D_s) contra el Ancla de Referencia
+                                  │
+                 ¿D_s <= Rigidity Epsilon (Tolerancia)?
+                 /                                  \
+             (Sí)                                  (No)
+              /                                      \
+             ▼                                        ▼
+    [ Admitida Directa ]                   [ ManifoldConstructor (CMC) ]
+                                        Corrige vector vía SPSA si es posible
+                                                      │
+                                             ¿Corrección exitosa?
+                                             /                  \
+                                         (Sí)                  (No)
+                                          /                      \
+                                         ▼                        ▼
+                              [ Admitida Con Corrección ]    [ Rechazada ]
+                                         \                        /
+                                          ▼                      ▼
+                                       [ AuditEntropyModule (AEM) ]
+                                        Registra admisiones / rechazos
+                                                      │
+                                                      ▼
+                                       [ CustodialTraceManager (CTM) ]
+                                      Sella inmutablemente en el Merkle DAG
+```
+
+---
+
+### Guía Operativa de Emergencia: "Qué hacer a las 3:00 AM"
+
+Si recibes una alerta de producción de este servicio durante la noche, sigue esta lista de diagnóstico rápida:
+
+1.  **¿Se están rechazando todas las peticiones?**
+    *   Revisa los contadores del **AEM** (`aem_counters` en las respuestas). Si `rejected_signals` está subiendo de forma exponencial, es muy probable que el modelo de la IA haya empezado a generar respuestas inconsistentes o alucinadas que violan los axiomas de negocio configurados.
+    *   Verifica si se ha inyectado un archivo de axiomas corrupto o restrictivo (`axioms.txt`).
+2.  **¿Fallo de Firma de Embeddings (`strict_embedding_signature` activo)?**
+    *   Si el servicio no arranca y lanza un error sobre la firma del modelo de embeddings, significa que alguien cambió el modelo configurado (ej. de `all-MiniLM-L6-v2` a otro) en `AuditConfig` pero el modo estricto está habilitado.
+    *   **Solución:** Valida si el cambio de modelo fue planificado. Si es correcto, actualiza `embedding_signature` en la configuración con la firma correcta.
+3.  **¿Fallo de Conexión de Persistencia CTM (`psycopg2`, `boto3`, `pyqldb`)?**
+    *   En modo estricto (`mock=False`), el pipeline lanzará un `PersistenceError` si pierde conexión con la base de datos (PostgreSQL, DynamoDB o QLDB).
+    *   **Solución:** Comprueba las credenciales, la cadena de conexión en `ctm_postgres_uri` / `ctm_storage_kwargs` y el estado de salud de la base de datos de destino. Si estás en desarrollo local, puedes configurar temporalmente `mock=True` en `ctm_storage_kwargs` para aislar el error de infraestructura.
+4.  **¿Explosión de Cómputo por Texto Gigante?**
+    *   Si detectas latencias extremas o cuellos de botella de CPU/Memoria, es probable que un usuario haya enviado un documento de texto masivo. Nuestro mecanismo limita esto a `embedding_max_chunks` (por defecto 10 chunks). Si se excede, lanzará un `ValueError` claro para proteger el pod de producción.
+
+---
+
 ### Key Design Decisions
 
 | Concern | Solution |

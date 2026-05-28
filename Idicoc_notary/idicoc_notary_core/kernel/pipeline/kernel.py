@@ -40,7 +40,7 @@ class CustodialKernel:
         self._dissonance_history: list[float] = []
 
         # Estado coálgebraico S
-        self.state_s = {
+        self.state_s: dict[str, list[Any]] = {
             "buffers": [None] * 7,
             "registers": [None] * 7
         }

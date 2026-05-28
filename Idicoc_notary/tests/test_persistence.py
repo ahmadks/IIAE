@@ -25,12 +25,16 @@ def test_ctm_file_persistence():
         
         # Verify
         assert storage.load_root_hash() == "hash123"
-        assert storage.load_node("hash123")["payload"]["foo"] == "bar"
+        node1 = storage.load_node("hash123")
+        assert node1 is not None
+        assert node1["payload"]["foo"] == "bar"
         
         # Verify reload
         storage2 = FileCTMStorage(nodes_file, root_file)
         assert storage2.load_root_hash() == "hash123"
-        assert storage2.load_node("hash123")["payload"]["foo"] == "bar"
+        node2 = storage2.load_node("hash123")
+        assert node2 is not None
+        assert node2["payload"]["foo"] == "bar"
 
 def test_pipeline_with_persistence():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -71,6 +75,7 @@ def test_pipeline_with_persistence():
         wrapper2 = IDICOCNotaryClient(config2)
         
         # The reloaded MerkleDAG must have the exact same root hash and nodes
+        assert wrapper2.pipeline is not None
         assert wrapper2.pipeline.ctm.root_hash == root_hash_1
 
 def test_ctm_modes():
@@ -81,6 +86,7 @@ def test_ctm_modes():
     state_log = wrapper_log.process_interaction("test log", ["test log"], ["test log"])
     assert state_log.metadata["audit_metrics"] is not None
     
+    assert wrapper_log.pipeline is not None
     result = wrapper_log.pipeline.execute("test log", ["test log"], ["test log"])
     assert result["kernel_result"] == {"status": "log_only"}
     assert result["audit_receipt"] == {"status": "log_only"}
@@ -88,6 +94,7 @@ def test_ctm_modes():
     # Test disabled mode
     config_dis = AuditConfig(rigidity_epsilon=0.5, ctm_mode="disabled")
     wrapper_dis = IDICOCNotaryClient(config_dis)
+    assert wrapper_dis.pipeline is not None
     result_dis = wrapper_dis.pipeline.execute("test log", ["test log"], ["test log"])
     assert result_dis["kernel_result"] == {"status": "disabled"}
     assert result_dis["audit_receipt"] == {"status": "disabled"}

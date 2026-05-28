@@ -1,5 +1,7 @@
+"""Package deviation — DissonanceCalculator (DQE)."""
+
 from __future__ import annotations
 
-from idicoc_notary_core.kernel.deviation.dqe import DissonanceCalculator
+from .dqe import DissonanceCalculator
 
 __all__ = ["DissonanceCalculator"]

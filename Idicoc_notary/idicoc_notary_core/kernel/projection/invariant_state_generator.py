@@ -12,11 +12,28 @@ from idicoc_notary_core.utils.logger import get_logger
 
 
 class CanonicalState:
-    """
-    Representación formal del estado canónico V_hat.
+    """Representación formal del estado canónico V_hat generado por el ISG.
 
-    El ISG devuelve el estado canónico como la proyección invariante
-    generada por el SourceAnchor.
+    ===========================================================================
+    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
+    Este objeto representa el "estado ideal y definitivo" (un vector numérico)
+    al que se ha reducido la petición del usuario tras procesarla y estabilizarla.
+    Es el valor de referencia matemática que usaremos para comparar el resto de
+    operaciones y medir desviaciones.
+    ===========================================================================
+
+    Attributes:
+        measure_vector (np.ndarray): Vector numérico que contiene la representación latente.
+        metadata (dict): Metadatos del pipeline asociados a la generación (timestamps, trazas).
+        is_canonical (bool): Flag constante que valida la naturaleza del estado.
+
+    Examples:
+        >>> from idicoc_notary_core.kernel.projection.invariant_state_generator import CanonicalState
+        >>> state = CanonicalState(measure_vector=[0.1, 0.9], metadata={"timestamp": "2026-05-28"})
+        >>> print(state.is_canonical)
+        True
+        >>> print(state.semantic_vector)
+        [0.1, 0.9]
     """
 
     def __init__(self, measure_vector: Any, metadata: Dict):
@@ -43,21 +60,48 @@ class CanonicalState:
 
 
 class InvariantStateGenerator:
-    """
-    MAII‑ISG — Canonical Invariant State Generator (ontología monaxiomática).
+    """MAII‑ISG — Canonical Invariant State Generator (ontología monaxiomática).
 
-    Rol:
-    - Construye el estado canónico V_hat a partir de la entrada admitida.
-    - Implementa el Axioma de Unicidad colapsando al ancla terminal k si la
-      distancia informacional es menor a delta_fp.
-    - Trazabilidad total de proyecciones mediante el ProjectionRegistry.
+    ===========================================================================
+    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
+    El InvariantStateGenerator se encarga simplemente de convertir el texto del usuario
+    en un vector matemático fijo (un array de números que representa su significado).
+    Además, para garantizar que el sistema sea estable, si el vector resultante está
+    muy cerca del "estado de referencia" (SourceAnchor) por debajo de un umbral (delta_fp),
+    lo colapsa (fuerza) a que sea exactamente igual al de referencia. Esto evita pequeñas
+    desviaciones acumuladas (ruido de coma flotante o sutiles variaciones semánticas).
+    ===========================================================================
+
+    Attributes:
+        _anchor (SourceAnchor): Estado K inmutable de la coálgebra terminal de referencia.
+        _registry (ProjectionRegistry): Registro centralizado de proyecciones previas.
+        delta_fp (float): Umbral de tolerancia de punto fijo para colapso de estados.
+        require_embedding_model (bool): Si es True, exige disponibilidad de modelo sin fallback.
+        config (AuditConfig, optional): Configuración global inyectada del auditor.
+
+    Raises:
+        InvariantStateBreach: Si falla la proyección canónica o el modelo estricto es inaccesible.
+
+    Examples:
+        >>> from idicoc_notary_core.kernel.projection.invariant_state_generator import InvariantStateGenerator
+        >>> from idicoc_notary_core.kernel.source.anchor import SourceAnchor
+        >>> from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
+        >>> import numpy as np
+        >>> anchor = SourceAnchor(np.array([1.0, 0.0]))
+        >>> registry = ProjectionRegistry()
+        >>> isg = InvariantStateGenerator(anchor, registry, delta_fp=0.15)
+        >>> # Generación con un vector similar (distancia coseno < 0.15) provoca colapso a la referencia:
+        >>> state = isg.generate(np.array([0.99, 0.01]))
+        >>> print(state.measure_vector)
+        [1. 0.]
     """
 
-    def __init__(self, anchor: Any, registry: ProjectionRegistry, delta_fp: float = 0.15, require_embedding_model: bool = False):
+    def __init__(self, anchor: Any, registry: ProjectionRegistry, delta_fp: float = 0.15, require_embedding_model: bool = False, config: Any = None):
         self._anchor = anchor          # k (coálgebra terminal)
         self._registry = registry      # registro de proyecciones previas (no axiomas)
         self.delta_fp = delta_fp
         self.require_embedding_model = require_embedding_model
+        self.config = config
         self.logger = get_logger("kernel.isg")
 
     def generate(self, admitted_input: Any) -> CanonicalState:
@@ -89,6 +133,7 @@ class InvariantStateGenerator:
         """
         Operador de contracción hacia la estructura invariante.
         """
+        vector: Any = None
         if isinstance(data, CanonicalState):
             return data.get_representation()
 
@@ -197,16 +242,25 @@ class InvariantStateGenerator:
             dim = getattr(anchor_val, "shape", [1])[0]
 
         model_name = "sentence-transformers/all-MiniLM-L6-v2"
+        if getattr(self.config, "semantic_embedding_model", None) is not None:
+            model_name = self.config.semantic_embedding_model
+
+        if self.require_embedding_model:
+            from idicoc_notary_core.utils.string_utils import StringUtils
+            if StringUtils.get_embedding_model(model_name) is None:
+                raise InvariantStateBreach(
+                    message="Modelo de embedding obligatorio no disponible.",
+                    invalid_state=text,
+                    origin="MAII-ISG._text_to_vector"
+                )
+
         try:
-            from idicoc_notary_core.utils.embedding_service import EmbeddingService
-            if getattr(self, "_embedding_model", None) is None:
-                self._embedding_model = EmbeddingService().get_embedder(model_name)
-            
-            if self._embedding_model is None:
-                raise ImportError("El servicio no pudo cargar el modelo.")
-                
-            vector = self._embedding_model.encode(text, normalize_embeddings=True)
-            return np.asarray(vector, dtype=float)
+            from idicoc_notary_core.utils.string_utils import StringUtils
+            max_chunks = getattr(self.config, "embedding_max_chunks", 10)
+            vector = StringUtils.embed_text(text, model_name=model_name, max_chunks=max_chunks)
+            return vector
+        except InvariantStateBreach:
+            raise
         except Exception as exc:
             if self.require_embedding_model:
                 raise InvariantStateBreach(

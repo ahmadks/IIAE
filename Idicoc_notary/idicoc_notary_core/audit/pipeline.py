@@ -49,16 +49,46 @@ class IDICOCPipeline:
 
         self.anchor = SourceAnchor(np.zeros(1, dtype=float))
 
-        ctm_storage = FileCTMStorage(
-            self.config.ctm_nodes_path,
-            self.config.ctm_root_path,
-        )
+        # Selección dinámica y configurable de backend de almacenamiento para CTM
+        backend_type = getattr(self.config, "ctm_storage_backend", "file")
+        ctm_storage: Any
+        if isinstance(backend_type, str):
+            backend_type_lower = backend_type.lower()
+            if backend_type_lower == "file":
+                ctm_storage = FileCTMStorage(
+                    self.config.ctm_nodes_path,
+                    self.config.ctm_root_path,
+                )
+            elif backend_type_lower == "postgres":
+                from .persistence.postgres_backend import PostgresCTMStorage
+                uri = getattr(self.config, "ctm_postgres_uri", None)
+                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
+                ctm_storage = PostgresCTMStorage(connection_uri=uri, **kwargs)
+            elif backend_type_lower == "dynamodb":
+                from .persistence.dynamodb_backend import DynamoDBStorage
+                table = getattr(self.config, "ctm_dynamodb_table", None)
+                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
+                ctm_storage = DynamoDBStorage(table_name=table, **kwargs)
+            elif backend_type_lower == "qldb":
+                from .persistence.qldb_backend import QLDBCTMStorage
+                ledger = getattr(self.config, "ctm_qldb_ledger", None)
+                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
+                ctm_storage = QLDBCTMStorage(ledger_name=ledger, **kwargs)
+            else:
+                raise ValueError(f"Backend de almacenamiento CTM no soportado: {backend_type}")
+        else:
+            if isinstance(backend_type, type):
+                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
+                ctm_storage = backend_type(**kwargs)
+            else:
+                ctm_storage = backend_type
 
         self.registry = ProjectionRegistry()
         self.isg = InvariantStateGenerator(
             anchor=self.anchor,
             registry=self.registry,
             delta_fp=self.config.isg_delta_fp,
+            config=self.config,
         )
         self.verifier = InvariantVerifier(self.anchor)
         self.dse = AxiomExtractor(self.graph, self.config)
@@ -78,7 +108,7 @@ class IDICOCPipeline:
             )
         )
 
-        genesis_metadata = {
+        genesis_metadata: dict[str, Any] = {
             "instance_name": self.config.instance_name,
             "ctm_mode": self.config.ctm_mode,
             "delta_fp": self.config.isg_delta_fp,
@@ -312,7 +342,7 @@ class IDICOCPipeline:
                 source_axioms=all_axioms,
             )
 
-            kernel_result = {"status": "uncommitted"}
+            kernel_result: dict[str, Any] = {"status": "uncommitted"}
             receipt = {"status": "uncommitted"}
 
             if self.config.ctm_mode == "full":

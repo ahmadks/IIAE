@@ -1,2 +1,7 @@
-# Idicoc_notary/idicoc_notary_core/kernel/pipeline
-"""Package pipeline."""
+"""Package pipeline — CustodialKernel del kernel."""
+
+from __future__ import annotations
+
+from .kernel import CustodialKernel
+
+__all__ = ["CustodialKernel"]

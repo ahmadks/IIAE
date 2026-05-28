@@ -240,26 +240,39 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         if self.compute_dissonance(z, V_hat, G_t) <= epsilon:
             return z
 
-        lr = 0.1
-        c = 1e-4
-        for _ in range(max_iter):
+        # Obtener los hiperparámetros SPSA de la configuración del auditor
+        spsa_a = getattr(self.config, "spsa_a", 0.1)
+        spsa_c = getattr(self.config, "spsa_c", 1e-4)
+        spsa_alpha = getattr(self.config, "spsa_alpha", 0.602)
+        spsa_gamma = getattr(self.config, "spsa_gamma", 0.101)
+        spsa_decay_enabled = getattr(self.config, "spsa_decay_enabled", True)
+
+        for k in range(max_iter):
             current_diss = self.compute_dissonance(z, V_hat, G_t)
             if current_diss <= epsilon:
                 return z
             
+            # Calcular coeficientes SPSA dinámicos con ley de decaimiento condicional
+            if spsa_decay_enabled:
+                ak = spsa_a / ((k + 1) ** spsa_alpha)
+                ck = spsa_c / ((k + 1) ** spsa_gamma)
+            else:
+                ak = spsa_a
+                ck = spsa_c
+
             # Gradiente analítico de d_1 (distancia euclídea al target)
             grad_d1 = z - target
             
             # SPSA para aproximar el gradiente conjunto de d_2 y d_3
             delta = np.random.choice([-1.0, 1.0], size=z.size)
-            diss_plus = self.compute_dissonance(z + c * delta, V_hat, G_t)
-            diss_minus = self.compute_dissonance(z - c * delta, V_hat, G_t)
+            diss_plus = self.compute_dissonance(z + ck * delta, V_hat, G_t)
+            diss_minus = self.compute_dissonance(z - ck * delta, V_hat, G_t)
             
             # Si no hay variación detectable (función plana o entorno mock), usamos el gradiente analítico
             if abs(diss_plus - diss_minus) < 1e-9:
                 grad = grad_d1
             else:
-                grad = ((diss_plus - diss_minus) / (2.0 * c)) * delta
+                grad = ((diss_plus - diss_minus) / (2.0 * ck)) * delta
             
             norm = float(np.linalg.norm(grad))
             if norm < 1e-12:
@@ -268,7 +281,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
                 if norm < 1e-12:
                     break
             
-            z = z - lr * (grad / norm)
+            z = z - ak * (grad / norm)
         return z
 
     def _compute_d_1_vectorized(self, mu_raw: np.ndarray, ref_raw: np.ndarray) -> float:

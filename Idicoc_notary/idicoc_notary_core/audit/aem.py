@@ -3,9 +3,36 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 class AuditEntropyModule:
-    """
-    Audit Entropy Module (AEM) acting as a pure signal counter and audit trail map.
-    Tracks total, valid, and rejected signals, and logs rejection metadata.
+    """Modulo de Entropía de Auditoría (AEM) para el conteo de señales y registro de auditorías.
+
+    El AEM actúa como contador puro de señales de admisión/rechazo y mantiene una
+    traza inmutable de los motivos forenses de rechazo.
+
+    ===========================================================================
+    EXPLICACIÓN EN LENGUAJE LLANO (PARA EL INGENIERO DE CONTROL A LAS 3:00 AM):
+    Este módulo es simplemente un CONTADOR DE ADMISIONES Y RECHAZOS. 
+    Se encarga de llevar la cuenta de cuántas peticiones han sido aceptadas (admitidas), 
+    cuántas han sido rechazadas por violar disonancia o reglas duras, y guarda un 
+    historial (audit trail) de los motivos de rechazo.
+    Piénsalo como el contador de la puerta del club: cuenta cuánta gente entra bien y
+    a cuánta se le deniega la entrada con sus respectivos motivos.
+    ===========================================================================
+
+    Attributes:
+        total_signals (int): Cantidad total de peticiones procesadas por el pipeline.
+        valid_signals (int): Cantidad de peticiones que fueron admitidas (D_s <= epsilon).
+        rejected_signals (int): Cantidad de peticiones que fueron rechazadas (D_s > epsilon).
+        audit_trail_map (list of dict): Registro histórico detallado de los rechazos.
+
+    Examples:
+        >>> from idicoc_notary_core.audit.aem import AuditEntropyModule
+        >>> aem = AuditEntropyModule()
+        >>> aem.record_admission({"d_s": 0.05})
+        >>> aem.record_rejection({"d_s": 0.85, "reason": "dissonance breach"})
+        >>> print(aem.get_counters())
+        (2, 1, 1)
+        >>> print(len(aem.get_audit_trail()))
+        1
     """
     def __init__(self) -> None:
         self.total_signals: int = 0

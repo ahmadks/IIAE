@@ -1,7 +1,4 @@
-"""
-Hashing utilities for deterministic operations.
-"""
-
+import hmac
 import hashlib
 import json
 from typing import Any
@@ -48,4 +45,4 @@ def sha256_dict(data: dict) -> str:
 def hmac_sha256_hex(key: str, data: str) -> str:
     """Compute an HMAC-SHA256 signature over a string, return as hex."""
 
-    return hashlib.new("sha256", data.encode("utf-8"), key.encode("utf-8")).hexdigest()
+    return hmac.new(key.encode("utf-8"), data.encode("utf-8"), hashlib.sha256).hexdigest()
