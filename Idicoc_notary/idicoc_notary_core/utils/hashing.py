@@ -6,19 +6,19 @@ import numpy as np
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom encoder for NumPy data types."""
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.bool_):
-            return bool(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.bool_):
+            return bool(o)
         # Handle custom objects with to_dict or dict representations if needed
-        if hasattr(obj, "__dict__"):
-            return obj.__dict__
-        return super().default(obj)
+        if hasattr(o, "__dict__"):
+            return o.__dict__
+        return super().default(o)
 
 def canonical_json(data: Any) -> str:
     """

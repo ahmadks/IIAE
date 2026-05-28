@@ -36,6 +36,9 @@ class QLDBCTMStorage(CTMStorageBackend):
         self._mock_nodes: Dict[str, Dict[str, Any]] = {}
         self._mock_root: Optional[str] = None
 
+        # Atributo de driver: se inicializa en None y solo se popula en modo producción.
+        self._driver: Optional[Any] = None
+
         if self.mock:
             self.logger.warning(
                 "WARNING: QLDBCTMStorage está operando en MODO MOCK. "
@@ -64,6 +67,7 @@ class QLDBCTMStorage(CTMStorageBackend):
                 ) from exc
 
     def _setup_ledger(self) -> None:
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def create_tables(txn: Any) -> None:
                 txn.execute_statement("CREATE TABLE CTMNodes")
@@ -80,6 +84,7 @@ class QLDBCTMStorage(CTMStorageBackend):
             self._mock_nodes[node_hash] = node_data
             return
 
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def insert_node(txn: Any) -> None:
                 cursor = txn.execute_statement(
@@ -103,6 +108,7 @@ class QLDBCTMStorage(CTMStorageBackend):
             self.logger.info(f"[QLDB MOCK] Cargando nodo {node_hash}")
             return self._mock_nodes.get(node_hash)
 
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def query_node(txn: Any) -> Optional[Dict[str, Any]]:
                 cursor = txn.execute_statement(
@@ -120,6 +126,7 @@ class QLDBCTMStorage(CTMStorageBackend):
         if self.mock:
             return dict(self._mock_nodes)
 
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def query_all(txn: Any) -> Dict[str, Dict[str, Any]]:
                 cursor = txn.execute_statement("SELECT * FROM CTMNodes")
@@ -140,6 +147,7 @@ class QLDBCTMStorage(CTMStorageBackend):
             self._mock_root = root_hash
             return
 
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def insert_root(txn: Any) -> None:
                 txn.execute_statement("DELETE FROM CTMRoots")
@@ -155,6 +163,7 @@ class QLDBCTMStorage(CTMStorageBackend):
         if self.mock:
             return self._mock_root
 
+        assert self._driver is not None, "_driver debe estar inicializado en modo producción"
         try:
             def query_root(txn: Any) -> Optional[str]:
                 cursor = txn.execute_statement("SELECT root_hash FROM CTMRoots")

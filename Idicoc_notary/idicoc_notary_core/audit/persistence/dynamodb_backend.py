@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, Optional
 from .backend import CTMStorageBackend
 from idicoc_notary_core.audit.exceptions import PersistenceError
@@ -37,6 +36,11 @@ class DynamoDBStorage(CTMStorageBackend):
         self._mock_nodes: Dict[str, Dict[str, Any]] = {}
         self._mock_root: Optional[str] = None
 
+        # Atributos de conexión: se inicializan en None y solo se populan en modo producción.
+        self._boto3: Optional[Any] = None
+        self._dynamodb: Optional[Any] = None
+        self._table: Optional[Any] = None
+
         if self.mock:
             self.logger.warning(
                 "WARNING: DynamoDBStorage está operando en MODO MOCK. "
@@ -66,6 +70,7 @@ class DynamoDBStorage(CTMStorageBackend):
             self._mock_nodes[node_hash] = node_data
             return
 
+        assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             # node_data se guarda directamente como un mapa nativo en DynamoDB
             self._table.put_item(
@@ -83,6 +88,7 @@ class DynamoDBStorage(CTMStorageBackend):
             self.logger.info(f"[DynamoDB MOCK] Cargando nodo {node_hash}")
             return self._mock_nodes.get(node_hash)
 
+        assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             response = self._table.get_item(Key={"node_hash": node_hash})
             item = response.get("Item")
@@ -96,6 +102,7 @@ class DynamoDBStorage(CTMStorageBackend):
         if self.mock:
             return dict(self._mock_nodes)
 
+        assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             nodes: Dict[str, Dict[str, Any]] = {}
             response = self._table.scan(
@@ -114,6 +121,7 @@ class DynamoDBStorage(CTMStorageBackend):
             self._mock_root = root_hash
             return
 
+        assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             self._table.put_item(
                 Item={
@@ -129,6 +137,7 @@ class DynamoDBStorage(CTMStorageBackend):
         if self.mock:
             return self._mock_root
 
+        assert self._table is not None, "_table debe estar inicializado en modo producción"
         try:
             response = self._table.get_item(Key={"node_hash": "__root_hash__"})
             item = response.get("Item")

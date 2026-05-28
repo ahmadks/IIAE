@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import logging
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 from .backend import CTMStorageBackend
 from idicoc_notary_core.audit.exceptions import PersistenceError
 from idicoc_notary_core.utils.logger import get_logger
@@ -41,6 +40,11 @@ class PostgresCTMStorage(CTMStorageBackend):
         self._mock_nodes: Dict[str, Dict[str, Any]] = {}
         self._mock_root: Optional[str] = None
 
+        # Atributos de conexión: se inicializan en None y solo se populan en modo producción.
+        # El analizador estático puede rastrearlos correctamente a través de todos los paths.
+        self._conn_module: Optional[Any] = None
+        self._cursor_factory: Optional[Any] = None
+
         if self.mock:
             self.logger.warning(
                 "WARNING: PostgresCTMStorage está operando en MODO MOCK. "
@@ -66,6 +70,7 @@ class PostgresCTMStorage(CTMStorageBackend):
                 ) from exc
 
     def _setup_database(self) -> None:
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             with conn.cursor() as cur:
@@ -97,6 +102,7 @@ class PostgresCTMStorage(CTMStorageBackend):
             self._mock_nodes[node_hash] = node_data
             return
 
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             with conn.cursor() as cur:
@@ -118,6 +124,8 @@ class PostgresCTMStorage(CTMStorageBackend):
             self.logger.info(f"[Postgres MOCK] Cargando nodo {node_hash}")
             return self._mock_nodes.get(node_hash)
 
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
+        assert self._cursor_factory is not None, "_cursor_factory debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             with conn.cursor(cursor_factory=self._cursor_factory) as cur:
@@ -138,6 +146,8 @@ class PostgresCTMStorage(CTMStorageBackend):
         if self.mock:
             return dict(self._mock_nodes)
 
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
+        assert self._cursor_factory is not None, "_cursor_factory debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             nodes: Dict[str, Dict[str, Any]] = {}
@@ -158,6 +168,7 @@ class PostgresCTMStorage(CTMStorageBackend):
             self._mock_root = root_hash
             return
 
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             with conn.cursor() as cur:
@@ -178,6 +189,8 @@ class PostgresCTMStorage(CTMStorageBackend):
         if self.mock:
             return self._mock_root
 
+        assert self._conn_module is not None, "_conn_module debe estar inicializado en modo producción"
+        assert self._cursor_factory is not None, "_cursor_factory debe estar inicializado en modo producción"
         try:
             conn = self._conn_module.connect(self.connection_uri, **self.kwargs)
             root_hash = None

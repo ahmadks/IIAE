@@ -95,3 +95,29 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 disallow_any_unimported = false
+
+[tool.pyrefly]
+# Raíz del proyecto: permite resolver correctamente idicoc_notary_core y tests
+project_root = "."
+search_path = [".", "tests"]
+
+# Dependencias opcionales: boto3, psycopg2 y pyqldb solo se usan en producción
+# y se importan dinámicamente. Se suprimen sus errores de "source not found".
+ignore_missing_source = [
+    "boto3",
+    "botocore",
+    "psycopg2",
+    "psycopg2.extras",
+    "pyqldb",
+    "pyqldb.driver",
+    "pyqldb.driver.qldb_driver",
+    "dotenv",
+]
+
+# Excluir carpetas que no son parte del paquete distribuible
+exclude = [
+    ".venv/**",
+    "**/__pycache__/**",
+    "build/**",
+    "dist/**",
+]
