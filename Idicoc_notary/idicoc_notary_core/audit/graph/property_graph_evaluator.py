@@ -161,35 +161,39 @@ class PropertyGraphEvaluator:
     def _temporal_penalty(self, axiom: Dict[str, Any], now: datetime) -> float:
         valid_from = self._parse_dt(axiom.get("valid_from"))
         valid_until = self._parse_dt(axiom.get("valid_until"))
+        ttl_val = None
 
         if valid_until is None and axiom.get("ttl_seconds") is not None:
             base = valid_from or self._parse_dt(axiom.get("timestamp"))
             if base is not None:
                 try:
-                    ttl = float(axiom["ttl_seconds"])
+                    ttl_val = float(axiom["ttl_seconds"])
                     from datetime import timedelta
-                    valid_until = base + timedelta(seconds=ttl)
+                    valid_until = base + timedelta(seconds=ttl_val)
                 except (ValueError, TypeError):
                     pass
 
         if valid_from is None and valid_until is None:
             return 0.0
 
+        # Definir la ventana de validez para el suavizado de la penalización
+        if ttl_val is not None:
+            # Si es una restricción por TTL, usamos el propio TTL como ventana
+            window = max(1.0, ttl_val)
+        elif valid_until is not None and valid_from is not None:
+            # Si hay ventana explícita, usamos su duración
+            window = max(1.0, (valid_until - valid_from).total_seconds())
+        else:
+            # Por defecto, 1 día
+            window = 86400.0
+
         if valid_from is not None and now < valid_from:
             lag = (valid_from - now).total_seconds()
-            if valid_until is not None:
-                window = max(1.0, (valid_until - valid_from).total_seconds())
-            else:
-                window = 86400.0
-            return min(1.0, lag / window)
+            return 2.0 / (1.0 + math.exp(-lag / window)) - 1.0
 
         if valid_until is not None and now > valid_until:
             overrun = (now - valid_until).total_seconds()
-            if valid_from is not None:
-                window = max(1.0, (valid_until - valid_from).total_seconds())
-            else:
-                window = 86400.0
-            return min(1.0, overrun / window)
+            return 2.0 / (1.0 + math.exp(-overrun / window)) - 1.0
 
         return 0.0
 

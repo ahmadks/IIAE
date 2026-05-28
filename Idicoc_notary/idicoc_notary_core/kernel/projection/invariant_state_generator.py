@@ -102,12 +102,15 @@ class InvariantStateGenerator:
         require_embedding_model: bool = False,
         config: Any = None,
     ):
+        import threading
         self._anchor = anchor  # k (coálgebra terminal)
         self._registry = registry  # registro de proyecciones previas (no axiomas)
         self.delta_fp = delta_fp
         self.require_embedding_model = require_embedding_model
         self.config = config
         self.logger = get_logger("kernel.isg")
+        self._fallback_count = 0
+        self._fallback_lock = threading.Lock()
 
     def generate(self, admitted_input: Any) -> CanonicalState:
         """
@@ -123,10 +126,14 @@ class InvariantStateGenerator:
                 origin="MAII‑ISG.generate",
             )
 
+        with self._fallback_lock:
+            current_fallbacks = self._fallback_count
+
         metadata = {
             "stage": "MAII‑ISG",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "projection_history": self._registry.get_projection_trace(),
+            "embedding_fallback_incidents": current_fallbacks,
         }
 
         return CanonicalState(
@@ -283,6 +290,14 @@ class InvariantStateGenerator:
         except InvariantStateBreach:
             raise
         except Exception as exc:
+            self.logger.error(
+                f"Degradación del servicio de embeddings detectada: {exc}. "
+                "Activando fallback numérico determinista offline (MAII-ISG) para garantizar continuidad.",
+                exc_info=exc
+            )
+            with self._fallback_lock:
+                self._fallback_count += 1
+
             if self.require_embedding_model:
                 raise InvariantStateBreach(
                     message=f"Modelo de embedding obligatorio no disponible: {exc}",

@@ -268,20 +268,34 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             diss_plus = self.compute_dissonance(z + ck * delta, V_hat, G_t)
             diss_minus = self.compute_dissonance(z - ck * delta, V_hat, G_t)
             
+            # Sanitización de perturbaciones antes del cálculo del gradiente
+            if not np.isfinite(diss_plus) or not np.isfinite(diss_minus):
+                break
+
             # Si no hay variación detectable (función plana o entorno mock), usamos el gradiente analítico
             if abs(diss_plus - diss_minus) < 1e-9:
                 grad = grad_d1
             else:
                 grad = ((diss_plus - diss_minus) / (2.0 * ck)) * delta
             
+            # Sanitización del gradiente frente a inestabilidad numérica
+            if not np.isfinite(grad).all():
+                break
+
             norm = float(np.linalg.norm(grad))
             if norm < 1e-12:
                 grad = grad_d1
+                if not np.isfinite(grad).all():
+                    break
                 norm = float(np.linalg.norm(grad))
                 if norm < 1e-12:
                     break
             
-            z = z - ak * (grad / norm)
+            z_cand = z - ak * (grad / norm)
+            if np.isfinite(z_cand).all():
+                z = z_cand
+            else:
+                break
         return z
 
     def _compute_d_1_vectorized(self, mu_raw: np.ndarray, ref_raw: np.ndarray) -> float:

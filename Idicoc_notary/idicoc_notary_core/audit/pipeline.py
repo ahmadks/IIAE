@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
+import threading
 from idicoc_notary_core.kernel.custody.merkle_dag import (
     CustodialTraceManager,
     EnvHardwareSealer,
@@ -46,6 +47,7 @@ class IDICOCPipeline:
         self.graph = PropertyGraph(embedding_signature=self.config.embedding_signature)
         self.logger = get_logger("audit_flow.pipeline")
         self.aem = AuditEntropyModule()
+        self._aem_lock = threading.Lock()
 
         self.anchor = SourceAnchor(np.zeros(1, dtype=float))
 
@@ -135,6 +137,23 @@ class IDICOCPipeline:
             if self.config.ctm_mode == "full"
             else None
         )
+        
+        # Inicializar Write-Ahead Logger para resiliencia Enterprise
+        import os
+        wal_path = getattr(self.config, "ctm_wal_path", None)
+        if not wal_path:
+            wal_path = os.path.join(os.path.dirname(self.config.ctm_nodes_path or "."), "ctm_wal.log")
+        from .persistence.ctm_wal import WriteAheadLogger
+        self.wal = WriteAheadLogger(wal_path)
+        
+        # Recuperación automática al arranque
+        pending_txs = self.wal.recover_pending_transactions()
+        if pending_txs:
+            self.logger.warning(
+                f"Se detectaron {len(pending_txs)} transacciones pendientes de confirmación en el WAL local. "
+                "Requiere reconciliación manual o resincronización automatizada."
+            )
+
         self._initialized = False
         self.initialize()
 
@@ -237,8 +256,6 @@ class IDICOCPipeline:
             # a la estrategia para su evaluación temporal pero no se guardará en el grafo.
 
             # 4. Cálculo de Disonancia
-            self.dqe.set_strategy(self.dissonance_strategy)
-            
             # CMC
             manifold = self.cmc.build(V_hat, self.graph, epsilon_used)
 
@@ -270,7 +287,7 @@ class IDICOCPipeline:
             elif hasattr(y_corrected, "distribution") and isinstance(y_corrected.distribution, np.ndarray):
                 y_corrected = y_corrected.distribution.tolist()
 
-            # 6. AEM
+            # 6. AEM (Hebra segura mediante Lock de exclusión mutua)
             aem_record = {
                 "d_s": D_s,
                 "d_f": D_f,
@@ -280,12 +297,13 @@ class IDICOCPipeline:
                 "audit_input": str(audit_input) if isinstance(audit_input, np.ndarray) else audit_input,
                 "timestamp": timestamp,
             }
-            if admitted:
-                self.aem.record_admission(aem_record)
-            else:
-                self.aem.record_rejection(aem_record)
+            with self._aem_lock:
+                if admitted:
+                    self.aem.record_admission(aem_record)
+                else:
+                    self.aem.record_rejection(aem_record)
 
-            total_sigs, valid_sigs, rej_sigs = self.aem.get_counters()
+                total_sigs, valid_sigs, rej_sigs = self.aem.get_counters()
 
             # 7. CTM
             v_hat_payload = getattr(V_hat, "measure_vector", getattr(V_hat, "data", V_hat))
@@ -346,6 +364,21 @@ class IDICOCPipeline:
             receipt = {"status": "uncommitted"}
 
             if self.config.ctm_mode == "full":
+                # Generar ID de transacción único
+                tx_id = f"tx_{invariant_hash}_{int(datetime.now(timezone.utc).timestamp())}"
+                
+                # Payload de seguridad del WAL
+                wal_payload = {
+                    "canonical_state": y_corrected,
+                    "dissonance": D_s,
+                    "invariant_state_hash": invariant_hash,
+                    "property_graph_hash": graph_hash,
+                    "timestamp": timestamp
+                }
+                
+                # Escribir al WAL local antes de interactuar con DB/Red síncrona
+                self.wal.write(tx_id, wal_payload)
+
                 try:
                     self.ctm.commit(
                         canonical_state=y_corrected,
@@ -378,6 +411,10 @@ class IDICOCPipeline:
                         )
                     else:
                         receipt = kernel_result
+                    
+                    # Sellar confirmación de éxito en el WAL local
+                    self.wal.mark_completed(tx_id)
+
                 except Exception as exc:
                     self.logger.error("CTM commit failed", exc_info=exc)
                     kernel_result = {"status": "uncommitted", "error": str(exc)}
