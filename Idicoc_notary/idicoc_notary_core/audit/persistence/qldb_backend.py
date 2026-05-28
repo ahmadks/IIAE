@@ -13,7 +13,7 @@ class QLDBCTMStorage(CTMStorageBackend):
     Aprovecha el ledger transaccional inmutable para guardar las evidencias del Merkle DAG.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     Este componente guarda las pruebas del Merkle DAG en un libro contable inmutable de Amazon QLDB.
     En producción (`mock=False`), requiere obligatoriamente que configures un ledger activo.
     Cualquier error de comunicación con el ledger arrojará un PersistenceError inmediatamente.

@@ -10,7 +10,7 @@ class SourceAnchor:
     el espacio latente para medir disonancias semánticas y lógicas.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     El SourceAnchor es el "ANCLA DE REFERENCIA" o "ESTADO CANÓNICO IDEAL" (el atractor K).
     Es un vector matemático inmutable que representa la verdad absoluta o estado base
     perfectamente alineado. Se usa como punto de comparación constante para determinar

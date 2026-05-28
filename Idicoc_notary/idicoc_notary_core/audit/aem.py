@@ -10,7 +10,7 @@ class AuditEntropyModule:
     traza inmutable de los motivos forenses de rechazo.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     Este módulo es simplemente un CONTADOR DE ADMISIONES Y RECHAZOS.
     Se encarga de llevar la cuenta de cuántas peticiones han sido aceptadas (admitidas),
     cuántas han sido rechazadas por violar disonancia o reglas duras, y guarda un

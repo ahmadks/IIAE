@@ -14,7 +14,7 @@ class PostgresCTMStorage(CTMStorageBackend):
     tipo JSONB y estampas de tiempo automáticas.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     Este componente guarda los bloques del Merkle DAG en una base de datos Postgres.
     En producción (`mock=False`), exige que le proveas una URI de conexión válida.
     Cualquier error de red o base de datos detendrá el flujo y lanzará una excepción

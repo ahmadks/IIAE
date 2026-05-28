@@ -12,7 +12,7 @@ class DynamoDBStorage(CTMStorageBackend):
     Almacena los bloques utilizando un atributo nativo de mapa de datos.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     Este componente interactúa con la base de datos NoSQL DynamoDB de AWS.
     En producción (`mock=False`), exige que le proveas un nombre de tabla válido.
     Cualquier error de conexión o credenciales de AWS detendrá el flujo y lanzará una

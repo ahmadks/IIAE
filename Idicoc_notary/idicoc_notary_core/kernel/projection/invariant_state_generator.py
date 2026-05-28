@@ -15,7 +15,7 @@ class CanonicalState:
     """Representación formal del estado canónico V_hat generado por el ISG.
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     Este objeto representa el "estado ideal y definitivo" (un vector numérico)
     al que se ha reducido la petición del usuario tras procesarla y estabilizarla.
     Es el valor de referencia matemática que usaremos para comparar el resto de
@@ -61,7 +61,7 @@ class InvariantStateGenerator:
     """MAII‑ISG — Canonical Invariant State Generator (ontología monaxiomática).
 
     ===========================================================================
-    EXPLICACIÓN EN LENGUAJE LLANO :
+
     El InvariantStateGenerator se encarga simplemente de convertir el texto del usuario
     en un vector matemático fijo (un array de números que representa su significado).
     Además, para garantizar que el sistema sea estable, si el vector resultante está
