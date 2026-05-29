@@ -1,0 +1,12 @@
+# POLÍTICAS UNIFICADAS DEL NOTARIO IDICOC
+# Formato: ID|Texto_descriptivo|Tipo(regex/semantic)|Polaridad(affirmative/negative)|Dureza(hard/soft)|Peso|[Opcional: key=value]
+
+# ── 1. Restricciones por Expresión Regular ────────────────────────────────────
+# Nota: La evaluación regex se aplica sobre el texto vectorizado, el cual está en minúsculas y sin signos de puntuación.
+ax_regex_1|Toda señal numérica debe indicar su distribución (equilibrada o sesgada)|regex|affirmative|hard|10|pattern=distribución (equilibrada|sesgada)
+ax_regex_2|Las señales numéricas deben contener la palabra entropía|regex|affirmative|hard|10|pattern=entropía
+ax_regex_3|El texto libre no puede contener insultos genéricos (ej: basura)|regex|negative|hard|10|pattern=basura
+
+# ── 2. Axiomas Semánticos Fundamentales ───────────────────────────────────────
+ax_sem_1|El IIAE es un Notario, debe actuar con estricta neutralidad, objetividad e imparcialidad.|semantic|affirmative|hard|10
+ax_sem_2|El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.|semantic|affirmative|soft|5

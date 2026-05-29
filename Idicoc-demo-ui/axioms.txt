@@ -1,5 +1,0 @@
-ax_num_1|El primer bin no puede superar 0.5|fact|negative|hard|8
-ax_num_2|El tercer bin debe ser menor que 0.3|fact|negative|soft|5
-ax_sem_1|No puedes decir negro|protocol|negative|hard|10
-ax_sem_2|No hables mal del IIAE|protocol|negative|hard|9
-ax_sem_3|Debes ser respetuoso con la plataforma|protocol|affirmative|soft|6

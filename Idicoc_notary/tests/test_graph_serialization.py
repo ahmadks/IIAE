@@ -6,7 +6,7 @@ def test_to_dict_and_from_dict():
     graph = PropertyGraph(embedding_signature="test_sig")
     
     # Add a mock node with a numpy array
-    graph.add_axiom("ax1", {
+    graph.add_policy("ax1", {
         "text": "Hello",
         "embedding": np.array([0.1, 0.2, 0.3])
     })

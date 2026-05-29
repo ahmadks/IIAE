@@ -4,7 +4,7 @@ import os
 import json
 import hashlib
 import threading
-from typing import Any, Dict, List
+from typing import Any, Dict
 from idicoc_notary_core.utils.logger import get_logger
 
 class WriteAheadLogger:
@@ -81,14 +81,14 @@ class WriteAheadLogger:
             except Exception as e:
                 self.logger.error(f"Fallo al marcar confirmación en WAL para {transaction_id}: {e}")
 
-    def recover_pending_transactions(self) -> List[Dict[str, Any]]:
+    def recover_pending_transactions(self) -> Dict[str, Any]:
         """
         Analiza el WAL y recupera cualquier transacción que haya quedado PENDING sin su 
         correspondiente registro de COMPLETED. Valida la integridad física de cada entrada 
         con su respectivo checksum SHA-256.
         """
         if not os.path.exists(self.wal_path):
-            return []
+            return {}
 
         pending_map: Dict[str, Dict[str, Any]] = {}
         
@@ -113,7 +113,7 @@ class WriteAheadLogger:
                                     self.logger.critical(
                                         f"WAL CORRUPTO [Línea {line_num}]: Entrada PENDING sin payload o checksum. Abortando recuperación."
                                     )
-                                    return []
+                                    return {}
                                 
                                 # Validar integridad criptográfica (SHA-256)
                                 calculated_checksum = self._calculate_checksum(tx_id, payload)
@@ -123,7 +123,7 @@ class WriteAheadLogger:
                                         f"El checksum del WAL ({stored_checksum}) no coincide con el calculado ({calculated_checksum}). "
                                         "Posible corrupción física o truncado incompleto de disco. Abortando recuperación."
                                     )
-                                    return []
+                                    return {}
                                 
                                 pending_map[tx_id] = payload
                             elif status == "COMPLETED":
@@ -133,9 +133,9 @@ class WriteAheadLogger:
                             self.logger.critical(
                                 f"WAL CORRUPTO [Línea {line_num}]: JSON inválido (escritura parcial). Abortando recuperación."
                             )
-                            return []
+                            return {}
             except Exception as e:
                 self.logger.error(f"Error al analizar el registro WAL durante la recuperación: {e}")
-                return []
+                return {}
 
-        return list(pending_map.values())
+        return pending_map

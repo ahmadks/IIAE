@@ -12,5 +12,9 @@
     "editor.codeActionsOnSave": {
       "source.organizeImports": "explicit"
     }
-  }
+  },
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/Idicoc_notary"
+  ]
 }
+

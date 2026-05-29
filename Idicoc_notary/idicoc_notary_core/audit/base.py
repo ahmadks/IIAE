@@ -23,14 +23,14 @@ class CanonicalStateDTO:
 
     data: Resultado adaptado para el núcleo.
     metadata: Metadatos de auditoría y de disonancia.
-    source_axioms: Axiomas que generaron este estado.
+    source_policies: Policyas que generaron este estado.
     integrity_hash: Hash determinista para verificación.
     timestamp: Marca de tiempo ISO 8601.
     """
 
     data: Any
     metadata: dict[str, Any] = field(default_factory=dict)
-    source_axioms: list[str] = field(default_factory=list)
+    source_policies: list[str] = field(default_factory=list)
     integrity_hash: str = field(default="")
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -39,10 +39,11 @@ class CanonicalStateDTO:
             object.__setattr__(self, "integrity_hash", self.compute_hash())
 
     def compute_hash(self) -> str:
+        str_policies = [str(ax) for ax in self.source_policies]
         canonical_repr = {
             "data": str(self.data),
             "metadata": self.metadata,
-            "source_axioms": sorted(self.source_axioms),
+            "source_policies": sorted(str_policies),
             "timestamp": self.timestamp,
         }
         return sha256_hex(json.dumps(canonical_repr, sort_keys=True, default=str))

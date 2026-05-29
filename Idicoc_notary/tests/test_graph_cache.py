@@ -3,12 +3,12 @@ from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.audit.graph.cache import NoOpGraphCache, RedisGraphCache
 from idicoc_notary_core.audit.pipeline import IDICOCPipeline
 from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.graph.loader import InlineAxiomLoader
+from idicoc_notary_core.audit.graph.loader import InlinePolicyLoader
 
 def test_noop_graph_cache():
     cache = NoOpGraphCache()
     graph = PropertyGraph(embedding_signature="test_sig")
-    graph.add_axiom("1", {"text": "A"})
+    graph.add_policy("1", {"text": "A"})
     
     cache.set("key1", graph)
     
@@ -22,11 +22,11 @@ def test_noop_graph_cache():
 
 def test_pipeline_uses_cache():
     # Creamos un loader con datos fijos
-    loader = InlineAxiomLoader([{"id": "ax1", "text": "Test Axiom"}])
+    loader = InlinePolicyLoader([{"id": "ax1", "text": "Test Policy"}])
     config = AuditConfig(
         instance_name="test_instance", 
         semantic_embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-        axiom_loader=loader
+        policy_loader=loader
     )
     
     cache = NoOpGraphCache()
@@ -39,11 +39,11 @@ def test_pipeline_uses_cache():
     
     # Reemplazar el loader por uno que falla si es llamado para probar que usa caché
     class FailLoader:
-        def load_axioms(self):
-            # El pipeline llamará a load_axioms para derivar la clave de caché
-            return [{"id": "ax1", "text": "Test Axiom"}]
+        def load_policies(self):
+            # El pipeline llamará a load_policies para derivar la clave de caché
+            return [{"id": "ax1", "text": "Test Policy"}]
             
-    config.axiom_loader = FailLoader()
+    config.policy_loader = FailLoader()
     pipeline2 = IDICOCPipeline(config, graph_cache=cache)
     
     # Debe tener los mismos nodos

@@ -24,7 +24,7 @@ class DissonanceStrategy(ABC):
         self,
         audit_input: Any,
         context_input: List[str],
-        context_axioms: List[str],
+        context_policies: List[str],
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
     ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
@@ -44,9 +44,9 @@ class DissonanceStrategy(ABC):
                 * 'd_logic' (float): Dissonancia lógica máxima
                 * 'd_terminal' (float): Violación de coálgebra terminal
                 * 'terminality_violation' (bool): Si hay violación terminal
-                * 'max_axiom_distance' (float): Distancia máxima a axiomas
+                * 'max_policy_distance' (float): Distancia máxima a politicas
                 * 'max_context_distance' (float): Distancia máxima a contexto
-                * 'violated_axioms' (list[str]): Axiomas violados
+                * 'violated_policies' (list[str]): Policyas violados
                 * 'contradictory_contexts' (list[str]): Contextos contradictorios
                 * 'support_found' (bool): Si hay soporte en contexto
                 * 'reference_count' (int): Cantidad de referencias totales

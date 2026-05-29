@@ -1,7 +1,7 @@
-"""Package dse — AxiomExtractor del kernel."""
+"""Package dse — PolicyExtractor del kernel."""
 
 from __future__ import annotations
 
-from .dse import AxiomExtractor
+from .dse import PolicyExtractor
 
-__all__ = ["AxiomExtractor"]
+__all__ = ["PolicyExtractor"]

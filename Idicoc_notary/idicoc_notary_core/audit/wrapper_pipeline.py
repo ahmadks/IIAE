@@ -24,24 +24,9 @@ class IDICOCNotaryClient(IIAENotaryContract):
         self,
         config: AuditConfig,
     ) -> None:
-        self.config = config
-        # Anchor is private to the wrapper; strategies should access it via
-        # `self.get_terminal_reference()` or the configuration, not as a
-        # public compute parameter.
-        self._anchor: Any | None = None
         self.pipeline: IDICOCPipeline | None = None
         self._initialized = False
         self.initialize(config)
-
-    def get_terminal_reference(self) -> Any:
-        """Return the wrapper's terminal reference (private anchor or config).
-
-        Strategies or callers may use this accessor to obtain the canonical
-        reference for comparisons. Prefer configuration values when available.
-        """
-        if self._anchor is not None:
-            return self._anchor
-        return getattr(self.config, "constant_k", None)
 
     def initialize(self, config: AuditConfig) -> None:
         self.config = config
@@ -52,12 +37,12 @@ class IDICOCNotaryClient(IIAENotaryContract):
         self,
         audit_input: Any,
         context_input: list[str] | None = None,
-        context_axioms: list[str] | None = None,
+        context_policies: list[str] | None = None,
     ) -> dict[str, Any]:
         return {
             self.config.input_field_audit: audit_input,
             self.config.input_field_context: context_input or [],
-            self.config.input_field_axioms: context_axioms or [],
+            self.config.input_field_policies: context_policies or [],
             "instance_name": self.config.instance_name,
         }
 
@@ -66,43 +51,106 @@ class IDICOCNotaryClient(IIAENotaryContract):
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
         if isinstance(admitted_input, dict):
-            return self.process_dict(admitted_input)
+            res = self.process_dict(admitted_input)
+            return res.get("canonical_state")
 
-        return self.process_interaction(
+        res = self.process_interaction(
             audit_input=admitted_input,
             context_input=[],
-            context_axioms=[],
+            context_policies=[],
         )
+        return res.get("canonical_state")
 
     def process_interaction(
         self,
         audit_input: Any,
         context_input: list[str] | None = None,
-        context_axioms: list[str] | None = None,
+        context_policies: list[str | dict[str, Any]] | None = None,
         epsilon_override: float | None = None,
         trace_input: str = "",
         client_id: str | None = None,
-    ) -> CanonicalStateDTO:
+    ) -> dict[str, Any]:
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
+
+        # ── Normalización Universal al Espacio Semántico ──────────────────────
+        # IDICOC opera SIEMPRE en un único espacio semántico unificado (384D).
+        # Cualquier entrada — string, ndarray, lista, dict, escalar — se convierte
+        # primero a una descripción textual y luego a un embedding vectorial.
+        # Esto garantiza coherencia dimensional con:
+        #   · El ancla K (Axioma de Unicidad, ~384D)
+        #   · Los embeddings de las políticas del PropertyGraph (~384D)
+        #   · Los embeddings del contexto RAG (~384D)
+        # La comparación d_1 (EMD a K), d_2 (Policy Graph) y d_3 (bisimulación)
+        # trabajan así en el mismo espacio de Hilbert, sin incompatibilidades.
+        import numpy as np
+        from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
+        class SemanticPayload:
+            """Payload unificado: texto legible + vector embedding."""
+            def __init__(self, text: str, vec: "np.ndarray"):
+                self.text_content = text
+                self.distribution = vec
+
+        def _to_text(inp: Any) -> str:
+            """Serializa cualquier tipo de entrada a texto descriptivo en español."""
+            # Ya es un string
+            if isinstance(inp, str):
+                return inp
+            # Dict con campo 'text'
+            if isinstance(inp, dict) and "text" in inp:
+                return str(inp["text"])
+            # Ya tiene text_content (SemanticPayload previo)
+            if hasattr(inp, "text_content") and inp.text_content:
+                return str(inp.text_content)
+            # Array o lista numérica → descripción de distribución
+            try:
+                arr = np.asarray(inp, dtype=float).flatten()
+                if arr.ndim == 1 and arr.size > 0:
+                    s = arr.sum()
+                    dist = arr / s if s > 1e-12 else arr
+                    dominant = int(np.argmax(dist))
+                    entropy = float(-np.sum(dist * np.log(dist + 1e-12)))
+                    desc = ", ".join(f"dim{i}={v:.6f}" for i, v in enumerate(dist))
+                    balance = "equilibrada" if float(dist.max()) < 0.4 else "sesgada"
+                    return (
+                        f"Señal vectorial de auditoría [{arr.size}D]: [{desc}]. "
+                        f"Distribución {balance}. Dimensión dominante: dim{dominant} "
+                        f"({float(dist[dominant]):.6f}). Entropía: {entropy:.6f}."
+                    )
+            except (TypeError, ValueError):
+                pass
+            # Fallback genérico
+            return f"Entrada de auditoría: {str(inp)}"
+
+        text_val = _to_text(audit_input)
+        try:
+            vec = EmbeddingService().encode(text_val)
+            audit_input = SemanticPayload(text_val, vec)
+        except Exception as e:
+            self.pipeline.logger.warning(
+                f"Error codificando audit_input al espacio semántico: {e}. "
+                "Se enviará el texto sin embedding."
+            )
+            audit_input = text_val  # fallback: al menos el texto
 
         result = self.pipeline.execute(
             audit_input=audit_input,
             context_input=context_input,
-            context_axioms=context_axioms,
+            context_policies=context_policies,
             epsilon_override=epsilon_override,
             trace_input=trace_input,
             client_id=client_id,
         )
-        return result["canonical_state"]
+        return result
 
-    def process_dict(self, data: dict[str, Any]) -> CanonicalStateDTO:
+    def process_dict(self, data: dict[str, Any]) -> dict[str, Any]:
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
         audit_input = data.get(self.config.input_field_audit, data.get("text", ""))
         context_input = data.get(self.config.input_field_context, data.get("context_input", []))
-        context_axioms = data.get(self.config.input_field_axioms, data.get("context_axioms", []))
+        context_policies = data.get(self.config.input_field_policies, data.get("context_policies", []))
         epsilon_override = data.get("epsilon_override", None)
         trace_input = data.get("trace_input", "")
         client_id = data.get("client_id", None)
@@ -110,7 +158,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         return self.process_interaction(
             audit_input=audit_input,
             context_input=context_input if isinstance(context_input, list) else [],
-            context_axioms=context_axioms if isinstance(context_axioms, list) else [],
+            context_policies=context_policies if isinstance(context_policies, list) else [],
             epsilon_override=epsilon_override,
             trace_input=str(trace_input) if trace_input is not None else "",
             client_id=str(client_id) if client_id is not None else None,
@@ -174,7 +222,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
             self._log_or_seal_failure(snapshot)
             return False
 
-        expected_weights = list(self.config.dissonance_weights)
+        expected_weights = list(self.config._normalized_weights)
 
         d_0 = float(algebraic.get("d_0", 0.0))
         d_1 = float(algebraic.get("d_1", 0.0))

@@ -19,7 +19,7 @@ from .custody import (
     CustodialTraceManager,
 )
 from .deviation import DissonanceCalculator
-from .dse import AxiomExtractor
+from .dse import PolicyExtractor
 from .exceptions import AlignmentBreach, InvariantStateBreach, HardHaltException
 from .graph import PropertyGraph
 from .manifold import ManifoldConstructor
@@ -40,7 +40,7 @@ __all__ = [
     # Deviation
     "DissonanceCalculator",
     # DSE
-    "AxiomExtractor",
+    "PolicyExtractor",
     # Exceptions
     "AlignmentBreach",
     "InvariantStateBreach",

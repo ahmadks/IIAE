@@ -10,7 +10,7 @@ from idicoc_notary_core.kernel.custody.merkle_dag import (
     MerkleDAG,
 )
 from idicoc_notary_core.kernel.deviation.dqe import DissonanceCalculator
-from idicoc_notary_core.kernel.dse.dse import AxiomExtractor
+from idicoc_notary_core.kernel.dse.dse import PolicyExtractor
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.kernel.manifold.cmc import ManifoldConstructor
 from idicoc_notary_core.kernel.pipeline.kernel import CustodialKernel
@@ -49,7 +49,7 @@ class IDICOCPipeline:
         self.aem = AuditEntropyModule()
         self._aem_lock = threading.Lock()
 
-        self.anchor = SourceAnchor(np.zeros(1, dtype=float))
+        self.anchor = SourceAnchor()
 
         # Selección dinámica y configurable de backend de almacenamiento para CTM
         backend_type = getattr(self.config, "ctm_storage_backend", "file")
@@ -63,16 +63,19 @@ class IDICOCPipeline:
                 )
             elif backend_type_lower == "postgres":
                 from .persistence.postgres_backend import PostgresCTMStorage
+
                 uri = getattr(self.config, "ctm_postgres_uri", None)
                 kwargs = getattr(self.config, "ctm_storage_kwargs", {})
                 ctm_storage = PostgresCTMStorage(connection_uri=uri, **kwargs)
             elif backend_type_lower == "dynamodb":
                 from .persistence.dynamodb_backend import DynamoDBStorage
+
                 table = getattr(self.config, "ctm_dynamodb_table", None)
                 kwargs = getattr(self.config, "ctm_storage_kwargs", {})
                 ctm_storage = DynamoDBStorage(table_name=table, **kwargs)
             elif backend_type_lower == "qldb":
                 from .persistence.qldb_backend import QLDBCTMStorage
+
                 ledger = getattr(self.config, "ctm_qldb_ledger", None)
                 kwargs = getattr(self.config, "ctm_storage_kwargs", {})
                 ctm_storage = QLDBCTMStorage(ledger_name=ledger, **kwargs)
@@ -89,15 +92,13 @@ class IDICOCPipeline:
         self.isg = InvariantStateGenerator(
             anchor=self.anchor,
             registry=self.registry,
-            delta_fp=self.config.isg_delta_fp,
             config=self.config,
         )
         self.verifier = InvariantVerifier(self.anchor)
-        self.dse = AxiomExtractor(self.graph, self.config)
+        self.dse = PolicyExtractor(self.graph, self.config)
         self.dissonance_strategy = self._create_dissonance_strategy()
         self.dqe = DissonanceCalculator(
             strategy=self.dissonance_strategy,
-            delta_fp=self.config.isg_delta_fp,
         )
         self.cmc = ManifoldConstructor(dqe=self.dqe)
         self.ctm = CustodialTraceManager(
@@ -113,7 +114,6 @@ class IDICOCPipeline:
         genesis_metadata: dict[str, Any] = {
             "instance_name": self.config.instance_name,
             "ctm_mode": self.config.ctm_mode,
-            "delta_fp": self.config.isg_delta_fp,
             "rigidity_epsilon": self.config.rigidity_epsilon,
             "lambda_weights": [
                 self.dqe.lambda_0,
@@ -133,26 +133,35 @@ class IDICOCPipeline:
         )
 
         self.kernel_client = (
-            KernelCustodyClient(ctm=self.ctm)
-            if self.config.ctm_mode == "full"
-            else None
+            KernelCustodyClient(ctm=self.ctm) if self.config.ctm_mode == "full" else None
         )
-        
+
         # Inicializar Write-Ahead Logger para resiliencia Enterprise
         import os
-        wal_path = getattr(self.config, "ctm_wal_path", None)
+
+        wal_path = self.config.ctm_wal_path
         if not wal_path:
-            wal_path = os.path.join(os.path.dirname(self.config.ctm_nodes_path or "."), "ctm_wal.log")
+            wal_path = os.path.join(
+                os.path.dirname(self.config.ctm_nodes_path or "."), "ctm_wal.log"
+            )
         from .persistence.ctm_wal import WriteAheadLogger
+
         self.wal = WriteAheadLogger(wal_path)
-        
-        # Recuperación automática al arranque
+
+        # Reconciliación automática al arranque
         pending_txs = self.wal.recover_pending_transactions()
         if pending_txs:
             self.logger.warning(
                 f"Se detectaron {len(pending_txs)} transacciones pendientes de confirmación en el WAL local. "
-                "Requiere reconciliación manual o resincronización automatizada."
+                "Iniciando reconciliación automática..."
             )
+            try:
+                reconciled = self.reconcile_wal()
+                self.logger.info(
+                    f"Reconciliación del WAL completada: {reconciled}/{len(pending_txs)} transacciones recuperadas."
+                )
+            except Exception as e:
+                self.logger.error(f"Error durante la reconciliación del WAL: {e}")
 
         self._initialized = False
         self.initialize()
@@ -161,20 +170,20 @@ class IDICOCPipeline:
         return self.config.dissonance_strategy(config=self.config)
 
     def initialize(self) -> None:
-        self._load_initial_axioms()
+        self._load_initial_policies()
         self._initialized = True
 
-    def _load_initial_axioms(self) -> None:
-        """Carga y procesa axiomas estáticos, usando caché si está disponible."""
-        if not self.config.axiom_loader:
+    def _load_initial_policies(self) -> None:
+        """Carga y procesa politicas estáticos, usando caché si está disponible."""
+        if not self.config.policy_loader:
             return
 
         # 1. Intentar recuperar desde caché
         tenant_id = self.config.client_id
-        axioms_data = self.config.axiom_loader.load_axioms()
-        
+        policies_data = self.config.policy_loader.load_policies()
+
         # Calcular hash canónico de los datos
-        content_hash = sha256_hex(canonical_json(axioms_data))
+        content_hash = sha256_hex(canonical_json(policies_data))
         cache_key = f"property_graph:{tenant_id}:{content_hash}"
 
         if self.graph_cache:
@@ -194,31 +203,35 @@ class IDICOCPipeline:
 
         # 2. Si no hay caché o fue invalidada, construimos el grafo
         from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
         embed_service = EmbeddingService()
 
         # Crear nuevo grafo
         self.graph = PropertyGraph(embedding_signature=self.config.embedding_signature)
 
-        for idx, axiom_dict in enumerate(axioms_data):
-            axiom_id = axiom_dict.get("axiom_id") or axiom_dict.get("id") or f"axiom_loaded_{idx}"
-            
+        for idx, policy_dict in enumerate(policies_data):
+            policy_id = (
+                policy_dict.get("policy_id") or policy_dict.get("id") or f"policy_loaded_{idx}"
+            )
+
             # Precomputar embedding
-            if "embedding" not in axiom_dict:
-                text_to_embed = axiom_dict.get("text") or axiom_dict.get("description") or str(axiom_dict)
+            if "embedding" not in policy_dict:
+                text_to_embed = (
+                    policy_dict.get("text") or policy_dict.get("description") or str(policy_dict)
+                )
                 try:
                     vec = embed_service.encode(
-                        text_to_embed, 
-                        model_name=self.config.semantic_embedding_model, 
-                        normalize_embeddings=self.config.embedding_normalize
+                        text_to_embed,
+                        model_name=self.config.semantic_embedding_model,
                     )
-                    axiom_dict["embedding"] = vec.tolist()
+                    policy_dict["embedding"] = vec.tolist()
                 except Exception as e:
-                    self.logger.warning(f"No se pudo precomputar embedding para {axiom_id}: {e}")
+                    self.logger.warning(f"No se pudo precomputar embedding para {policy_id}: {e}")
 
-            self.graph.add_axiom(axiom_id, axiom_dict)
-            
+            self.graph.add_policy(policy_id, policy_dict)
+
         self.graph.detect_conflicts()
-        self.logger.info(f"Loaded {len(axioms_data)} static axioms into the PropertyGraph.")
+        self.logger.info(f"Loaded {len(policies_data)} static policies into the PropertyGraph.")
 
         # 3. Guardar en caché si está habilitada
         if self.graph_cache:
@@ -229,30 +242,132 @@ class IDICOCPipeline:
         self,
         audit_input: Any,
         context_input: Optional[List[str]] = None,
-        context_axioms: Optional[List[str]] = None,
+        context_policies: Optional[List[str | Dict[str, Any]]] = None,
         epsilon_override: float | None = None,
         trace_input: str = "",
         client_id: str | None = None,
     ) -> Dict[str, Any]:
-        epsilon_used = epsilon_override if epsilon_override is not None else self.config.rigidity_epsilon
+        epsilon_used = (
+            epsilon_override if epsilon_override is not None else self.config.rigidity_epsilon
+        )
         timestamp = datetime.now(timezone.utc).isoformat()
 
         # 1. Validación de entrada mínima
         if audit_input is None or (isinstance(audit_input, str) and not audit_input.strip()):
             return self._build_fallback_result(
-                "empty_input", "Entrada vacía o nula", epsilon_used, trace_input, client_id, context_axioms, context_input
+                "empty_input",
+                "Entrada vacía o nula",
+                epsilon_used,
+                trace_input,
+                client_id,
+                context_policies,
+                context_input,
             )
 
+        added_dynamic_ids = []
         try:
             context_chunks = context_input or []
-            all_axioms = list(context_axioms) if context_axioms else []
+            all_policies = list(context_policies) if context_policies else []
+
+            # Inyectar temporalmente politicas de contexto dinámicos al PropertyGraph
+            if context_policies:
+                from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
+                embed_service = EmbeddingService()
+
+                for idx, ax_item in enumerate(context_policies):
+                    if not ax_item:
+                        continue
+
+                    if isinstance(ax_item, dict):
+                        policy_dict = dict(ax_item)
+                        policy_id = (
+                            policy_dict.get("id")
+                            or policy_dict.get("policy_id")
+                            or f"dynamic_policy_{idx}"
+                        )
+                    elif isinstance(ax_item, str):
+                        parts = [p.strip() for p in ax_item.split("|")]
+                        if not parts or not parts[0]:
+                            continue
+
+                        has_id = len(parts) >= 6 and "=" not in parts[0]
+                        if has_id:
+                            policy_id = parts[0]
+                            text = parts[1]
+                            policy_type = parts[2] if len(parts) > 2 else "fact"
+                            polarity = parts[3] if len(parts) > 3 else "affirmative"
+                            hardness = parts[4] if len(parts) > 4 else "soft"
+                            try:
+                                priority = int(parts[5]) if len(parts) > 5 else 1
+                            except ValueError:
+                                priority = 1
+                            extra_parts = parts[6:]
+                        else:
+                            policy_id = f"dynamic_policy_{idx}"
+                            text = parts[0]
+                            policy_type = parts[1] if len(parts) > 1 else "fact"
+                            polarity = parts[2] if len(parts) > 2 else "affirmative"
+                            hardness = parts[3] if len(parts) > 3 else "soft"
+                            try:
+                                priority = int(parts[4]) if len(parts) > 4 else 1
+                            except ValueError:
+                                priority = 1
+                            extra_parts = parts[5:]
+
+                        policy_dict: dict[str, Any] = {
+                            "id": policy_id,
+                            "policy_id": policy_id,
+                            "text": text,
+                            "policy_type": policy_type,
+                            "polarity": polarity,
+                            "hardness": hardness,
+                            "priority": priority,
+                            "source_text": text,
+                        }
+                        # Parse key=value metadata
+                        for ep in extra_parts:
+                            if "=" in ep:
+                                k, v = ep.split("=", 1)
+                                k = k.strip()
+                                v = v.strip().strip("'\"")
+                                if v.isdigit():
+                                    policy_dict[k] = int(v)
+                                else:
+                                    try:
+                                        policy_dict[k] = float(v)
+                                    except ValueError:
+                                        policy_dict[k] = v
+                    else:
+                        continue
+
+                    if "embedding" not in policy_dict:
+                        raw_text = (
+                            policy_dict.get("text") or policy_dict.get("description") or policy_dict
+                        )
+                        text_to_embed = str(raw_text)
+                        try:
+                            vec = embed_service.encode(
+                                text_to_embed,
+                                model_name=self.config.semantic_embedding_model,
+                            )
+                            policy_dict["embedding"] = vec.tolist()
+                        except Exception as e:
+                            self.logger.warning(
+                                f"No se pudo precomputar embedding para dynamic policy {policy_id}: {e}"
+                            )
+
+                    self.graph.add_policy(policy_id, policy_dict)
+                    added_dynamic_ids.append(policy_id)
+
+                self.graph.detect_conflicts()
 
             # 2. ISG
             V_hat = self.isg.generate(audit_input)
 
             # 3. DSE (Solo lectura)
             # El PropertyGraph es inmutable en tiempo de ejecución.
-            # Los axiomas fijos ya se cargaron. El contexto dinámico se pasará
+            # Los politicas fijos ya se cargaron. El contexto dinámico se pasará
             # a la estrategia para su evaluación temporal pero no se guardará en el grafo.
 
             # 4. Cálculo de Disonancia
@@ -260,7 +375,9 @@ class IDICOCPipeline:
             manifold = self.cmc.build(V_hat, self.graph, epsilon_used)
 
             # 5. DQE
-            D_s = self.dqe.compute_dissonance(audit_input, V_hat, self.graph)
+            D_s = self.dqe.compute_dissonance(
+                audit_input, V_hat, self.graph, context_input=context_input
+            )
 
             admitted = False
             correction_flag = False
@@ -272,8 +389,12 @@ class IDICOCPipeline:
                 y_corrected = audit_input
                 correction_flag = False
             else:
-                y_corrected = self.dqe.project_to_manifold(audit_input, manifold, V_hat, self.graph)
-                D_s_corrected = self.dqe.compute_dissonance(y_corrected, V_hat, self.graph)
+                y_corrected = self.dqe.project_to_manifold(
+                    audit_input, manifold, V_hat, self.graph, context_input=context_input
+                )
+                D_s_corrected = self.dqe.compute_dissonance(
+                    y_corrected, V_hat, self.graph, context_input=context_input
+                )
                 if D_s_corrected <= epsilon_used:
                     admitted = True
                     correction_flag = True
@@ -284,7 +405,9 @@ class IDICOCPipeline:
             # Convertir ndarrays a listas de forma segura para toda la orquestación
             if isinstance(y_corrected, np.ndarray):
                 y_corrected = y_corrected.tolist()
-            elif hasattr(y_corrected, "distribution") and isinstance(y_corrected.distribution, np.ndarray):
+            elif hasattr(y_corrected, "distribution") and isinstance(
+                y_corrected.distribution, np.ndarray
+            ):
                 y_corrected = y_corrected.distribution.tolist()
 
             # 6. AEM (Hebra segura mediante Lock de exclusión mutua)
@@ -293,8 +416,10 @@ class IDICOCPipeline:
                 "d_f": D_f,
                 "epsilon": epsilon_used,
                 "correction_flag": correction_flag,
-                "violated_axioms": [],
-                "audit_input": str(audit_input) if isinstance(audit_input, np.ndarray) else audit_input,
+                "violated_policies": [],
+                "audit_input": (
+                    str(audit_input) if isinstance(audit_input, np.ndarray) else audit_input
+                ),
                 "timestamp": timestamp,
             }
             with self._aem_lock:
@@ -312,9 +437,23 @@ class IDICOCPipeline:
             invariant_hash = sha256_hex(canonical_json(v_hat_payload))
             graph_hash = sha256_hex(canonical_json(self.graph.nodes))
 
-            from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+            from idicoc_notary_core.audit.graph.property_graph_evaluator import (
+                PropertyGraphEvaluator,
+            )
+
             evaluator = PropertyGraphEvaluator(self.graph)
             d_logic = evaluator.evaluate(y_corrected)
+
+            d_context = 0.0
+            contradictory_contexts = []
+            if context_input and hasattr(
+                self.dissonance_strategy, "_compute_context_contradiction"
+            ):
+                d_context, contradictory_contexts = (
+                    self.dissonance_strategy._compute_context_contradiction(
+                        y_corrected, context_input
+                    )
+                )
 
             metadata = {
                 "timestamp": timestamp,
@@ -322,7 +461,6 @@ class IDICOCPipeline:
                 "d_f": D_f,
                 "epsilon_used": epsilon_used,
                 "epsilon": epsilon_used,
-                "delta_fp": self.config.isg_delta_fp,
                 "correction_flag": correction_flag,
                 "admission_metrics": {
                     "admitted": admitted,
@@ -342,22 +480,27 @@ class IDICOCPipeline:
                 },
                 "algebraic_components": {
                     "d_0": 0.0,
-                    "d_1": getattr(self.dissonance_strategy, "_d_inv_from_pair", lambda a, b: 0.0)(y_corrected, V_hat),
+                    "d_1": getattr(self.dissonance_strategy, "_d_inv_from_pair", lambda a, b: 0.0)(
+                        y_corrected, V_hat
+                    ),
                     "d_2": d_logic,
                     "d_3": evaluator.compute_temporal(y_corrected),
                     "d_4": 0.0,
                     "d_5": 0.0,
                     "d_6": 0.0,
-                }
+                },
+                "d_context": d_context,
+                "contradictory_contexts": contradictory_contexts,
+                "S_i": (1.0 - D_s) * epsilon_used,
             }
             metadata.update(self.config.extra_metadata)
-            
+
             payload_data = y_corrected if admitted else "[REJECTED]"
 
             canonical_state = CanonicalStateDTO(
                 data=payload_data,
                 metadata=metadata,
-                source_axioms=all_axioms,
+                source_policies=all_policies,
             )
 
             kernel_result: dict[str, Any] = {"status": "uncommitted"}
@@ -366,16 +509,16 @@ class IDICOCPipeline:
             if self.config.ctm_mode == "full":
                 # Generar ID de transacción único
                 tx_id = f"tx_{invariant_hash}_{int(datetime.now(timezone.utc).timestamp())}"
-                
+
                 # Payload de seguridad del WAL
                 wal_payload = {
                     "canonical_state": y_corrected,
                     "dissonance": D_s,
                     "invariant_state_hash": invariant_hash,
                     "property_graph_hash": graph_hash,
-                    "timestamp": timestamp
+                    "timestamp": timestamp,
                 }
-                
+
                 # Escribir al WAL local antes de interactuar con DB/Red síncrona
                 self.wal.write(tx_id, wal_payload)
 
@@ -404,14 +547,13 @@ class IDICOCPipeline:
                             dissonance=D_s,
                             fact_dissonance=0.0,
                             epsilon=epsilon_used,
-                            delta_fp=self.config.isg_delta_fp,
                             correction_flag=correction_flag,
                             source=self.config.instance_name,
                             metadata=metadata,
                         )
                     else:
                         receipt = kernel_result
-                    
+
                     # Sellar confirmación de éxito en el WAL local
                     self.wal.mark_completed(tx_id)
 
@@ -426,6 +568,11 @@ class IDICOCPipeline:
                 kernel_result = {"status": "disabled"}
                 receipt = {"status": "disabled"}
 
+            if added_dynamic_ids:
+                for ax_id in added_dynamic_ids:
+                    self.graph.nodes.pop(ax_id, None)
+                self.graph.detect_conflicts()
+
             return {
                 "canonical_state": canonical_state,
                 "output": y_corrected if admitted else audit_input,
@@ -435,10 +582,29 @@ class IDICOCPipeline:
             }
 
         except Exception as exc:
-            return self._build_fallback_result("failed", str(exc), epsilon_used, trace_input, client_id, context_axioms, context_input)
+            if added_dynamic_ids:
+                for ax_id in added_dynamic_ids:
+                    self.graph.nodes.pop(ax_id, None)
+                self.graph.detect_conflicts()
+            return self._build_fallback_result(
+                "failed",
+                str(exc),
+                epsilon_used,
+                trace_input,
+                client_id,
+                context_policies,
+                context_input,
+            )
 
     def _build_fallback_result(
-        self, status: str, reason: str, epsilon_used: float, trace_input: str, client_id: str | None, context_axioms: Optional[List[str]], context_input: Optional[List[str]]
+        self,
+        status: str,
+        reason: str,
+        epsilon_used: float,
+        trace_input: str,
+        client_id: str | None,
+        context_policies: Optional[List[str | Dict[str, Any]]],
+        context_input: Optional[List[str]],
     ) -> Dict[str, Any]:
         """Genera una respuesta segura de fallback en caso de error crónico o entrada inválida."""
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -448,7 +614,6 @@ class IDICOCPipeline:
             "d_f": 1.0,
             "epsilon_used": epsilon_used,
             "epsilon": epsilon_used,
-            "delta_fp": self.config.isg_delta_fp,
             "correction_flag": False,
             "admission_metrics": {"admitted": False, "error": reason},
             "audit_metrics": {"error": reason},
@@ -472,7 +637,7 @@ class IDICOCPipeline:
         fallback_state = CanonicalStateDTO(
             data=f"[ERROR] {reason}",
             metadata=fallback_metadata,
-            source_axioms=context_axioms or [],
+            source_policies=context_policies or [],
         )
         return {
             "canonical_state": fallback_state,
@@ -481,3 +646,43 @@ class IDICOCPipeline:
             "audit_receipt": {"status": "uncommitted", "error": reason},
             "context_chunks": context_input or [],
         }
+
+    def reconcile_wal(self) -> int:
+        """
+        Intenta reconciliar (re-commit) las transacciones pendientes en el WAL local.
+        """
+        pending_txs = self.wal.recover_pending_transactions()
+        if not pending_txs:
+            return 0
+
+        success_count = 0
+        for tx_id, payload in pending_txs.items():
+            try:
+                canonical_state = payload.get("canonical_state")
+                dissonance = payload.get("dissonance", 0.0)
+                invariant_state_hash = payload.get("invariant_state_hash", "")
+                property_graph_hash = payload.get("property_graph_hash", "")
+                timestamp = payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+
+                self.ctm.commit(
+                    canonical_state=canonical_state,
+                    dissonance=dissonance,
+                    epsilon=self.config.rigidity_epsilon,
+                    property_graph=self.graph,
+                    timestamp=timestamp,
+                    invariant_state_hash=invariant_state_hash,
+                    property_graph_hash=property_graph_hash,
+                    aem_counters={
+                        "total_signals": 1,
+                        "valid_signals": 1,
+                        "rejected_signals": 0,
+                    },
+                )
+
+                self.wal.mark_completed(tx_id)
+                success_count += 1
+                self.logger.info(f"Transacción {tx_id} reconciliada y confirmada con éxito.")
+            except Exception as e:
+                self.logger.error(f"Fallo al reconciliar la transacción {tx_id}: {e}")
+
+        return success_count

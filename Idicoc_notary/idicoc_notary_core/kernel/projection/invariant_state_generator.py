@@ -58,54 +58,43 @@ class CanonicalState:
 
 
 class InvariantStateGenerator:
-    """MAII‑ISG — Canonical Invariant State Generator (ontología monaxiomática).
+    """MAII-ISG — Canonical Invariant State Generator.
 
-    ===========================================================================
+    Convierte el input del sistema en su estado canónico V_hat. El ISG
+    obtiene una representación numérica del input y la preserva como estado
+    canónico. No se normaliza ni se escala el vector en esta etapa, de modo
+    que la magnitud informativa de la señal se conserva.
 
-    El InvariantStateGenerator se encarga simplemente de convertir el texto del usuario
-    en un vector matemático fijo (un array de números que representa su significado).
-    Además, para garantizar que el sistema sea estable, si el vector resultante está
-    muy cerca del "estado de referencia" (SourceAnchor) por debajo de un umbral (delta_fp),
-    lo colapsa (fuerza) a que sea exactamente igual al de referencia. Esto evita pequeñas
-    desviaciones acumuladas (ruido de coma flotante o sutiles variaciones semánticas).
-    ===========================================================================
+    K no entra como referencia numérica. El ISG no compara contra K.
 
     Attributes:
-        _anchor (SourceAnchor): Estado K inmutable de la coálgebra terminal de referencia.
-        _registry (ProjectionRegistry): Registro centralizado de proyecciones previas.
-        delta_fp (float): Umbral de tolerancia de punto fijo para colapso de estados.
-        require_embedding_model (bool): Si es True, exige disponibilidad de modelo sin fallback.
-        config (AuditConfig, optional): Configuración global inyectada del auditor.
+        _anchor (SourceAnchor): Marcador estructural de K (sin valor numérico).
+        _registry (ProjectionRegistry): Registro de proyecciones previas.
+        config (AuditConfig, optional): Configuración global del auditor.
 
     Raises:
-        InvariantStateBreach: Si falla la proyección canónica o el modelo estricto es inaccesible.
+        InvariantStateBreach: Si falla la proyección canónica.
 
     Examples:
         >>> from idicoc_notary_core.kernel.projection.invariant_state_generator import InvariantStateGenerator
         >>> from idicoc_notary_core.kernel.source.anchor import SourceAnchor
         >>> from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
-        >>> import numpy as np
-        >>> anchor = SourceAnchor(np.array([1.0, 0.0]))
+        >>> anchor = SourceAnchor()
         >>> registry = ProjectionRegistry()
-        >>> isg = InvariantStateGenerator(anchor, registry, delta_fp=0.15)
-        >>> # Generación con un vector similar (distancia coseno < 0.15) provoca colapso a la referencia:
-        >>> state = isg.generate(np.array([0.99, 0.01]))
-        >>> print(state.measure_vector)
-        [1. 0.]
+        >>> isg = InvariantStateGenerator(anchor, registry)
     """
 
     def __init__(
         self,
         anchor: Any,
         registry: ProjectionRegistry,
-        delta_fp: float = 0.15,
         require_embedding_model: bool = False,
         config: Any = None,
     ):
         import threading
+
         self._anchor = anchor  # k (coálgebra terminal)
-        self._registry = registry  # registro de proyecciones previas (no axiomas)
-        self.delta_fp = delta_fp
+        self._registry = registry  # registro de proyecciones previas (no politicas)
         self.require_embedding_model = require_embedding_model
         self.config = config
         self.logger = get_logger("kernel.isg")
@@ -114,7 +103,7 @@ class InvariantStateGenerator:
 
     def generate(self, admitted_input: Any) -> CanonicalState:
         """
-        Construye el estado canónico V_hat del ISG aplicando el Axioma de Unicidad.
+        Construye el estado canónico V_hat del ISG aplicando el Policya de Unicidad.
         """
         try:
             v_hat = self._project_to_invariant(admitted_input)
@@ -152,56 +141,13 @@ class InvariantStateGenerator:
         if hasattr(data, "data") and not isinstance(data, np.ndarray):
             return self._project_to_invariant(data.data)
 
-        # Obtener la representación de la coálgebra terminal K
-        anchor_val = getattr(
-            self._anchor, "terminal_state", getattr(self._anchor, "identity", None)
-        )
+        if hasattr(data, "distribution") and not isinstance(data, np.ndarray):
+            return self._project_to_invariant(data.distribution)
 
-        # Caso especial para mock de tests (ej: DummyAnchor donde identity es string)
-        if isinstance(anchor_val, str):
-            is_collapsed = False
-            dist = 1.0
-            if isinstance(data, str):
-                normalized = self._normalize_text(data)
-                normalized_anchor = self._normalize_text(anchor_val)
-                if normalized == normalized_anchor:
-                    dist = 0.0
-                elif normalized_anchor in normalized or normalized in normalized_anchor:
-                    dist = 0.5
-                else:
-                    dist = 1.0
-
-                if dist < self.delta_fp:
-                    vector = anchor_val
-                    is_collapsed = True
-                else:
-                    vector = data
-            else:
-                vector = data
-
-            try:
-                from idicoc_notary_core.utils.hashing import sha256_hex, canonical_json
-
-                state_hash = sha256_hex(canonical_json(vector))
-            except Exception:
-                state_hash = ""
-
-            self._registry.register_projection(
-                {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "original_input_type": type(data).__name__,
-                    "distance_to_anchor": dist,
-                    "delta_fp": self.delta_fp,
-                    "collapsed_to_terminal_anchor": is_collapsed,
-                    "canonical_state_hash": state_hash,
-                }
-            )
-            return vector
-
-        # Caso topológico estándar (SourceAnchor numérico real)
+        # ── Caso topológico estándar: input numérico/vectorial ───────────────
         vector = None
         is_collapsed = False
-        dist = 1.0
+        dist = 0.0
 
         if isinstance(data, np.ndarray):
             vector = np.asarray(data, dtype=float)
@@ -210,9 +156,6 @@ class InvariantStateGenerator:
         ):
             vector = np.asarray(data, dtype=float)
         elif isinstance(data, str):
-            # Nota de Diseño (Trade-off): Normalizar a minúsculas y espacios simples
-            # incrementa la robustez sintáctica inicial a costa de perder sutiles matices
-            # de puntuación/capitalización originales del transformer.
             normalized = self._normalize_text(data)
             vector = self._text_to_vector(normalized)
         elif isinstance(data, (dict, list)):
@@ -221,20 +164,10 @@ class InvariantStateGenerator:
         else:
             vector = self._text_to_vector(repr(data))
 
-        anchor_vector = np.asarray(anchor_val, dtype=float)
-        if vector is not None:
-            if vector.shape != anchor_vector.shape:
-                if vector.shape[0] < anchor_vector.shape[0]:
-                    padded = np.zeros_like(anchor_vector)
-                    padded[: vector.shape[0]] = vector
-                    vector = padded
-                else:
-                    vector = vector[: anchor_vector.shape[0]]
-
-            dist = self._cosine_distance(vector, anchor_vector)
-            if dist < self.delta_fp:
-                vector = anchor_vector
-                is_collapsed = True
+        # No se normaliza el embedding en esta etapa. La magnitud del vector
+        # se conserva de forma íntegra para respetar la semántica de la señal.
+        dist = 0.0
+        is_collapsed = False
 
         try:
             from idicoc_notary_core.utils.hashing import sha256_hex, canonical_json
@@ -249,9 +182,8 @@ class InvariantStateGenerator:
             {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "original_input_type": type(data).__name__,
-                "distance_to_anchor": dist,
-                "delta_fp": self.delta_fp,
-                "collapsed_to_terminal_anchor": is_collapsed,
+                "structural_deviation": dist,
+                "collapsed_to_stable_form": is_collapsed,
                 "canonical_state_hash": state_hash,
             }
         )
@@ -259,14 +191,10 @@ class InvariantStateGenerator:
         return vector
 
     def _text_to_vector(self, text: str) -> np.ndarray:
-        anchor_val = getattr(
-            self._anchor, "terminal_state", getattr(self._anchor, "identity", np.zeros(1))
-        )
-        if isinstance(anchor_val, str):
-            dim = len(anchor_val)
-        else:
-            dim = getattr(anchor_val, "shape", [1])[0]
+        """Convierte texto a vector mediante embedding.
 
+        No depende del anchor — K no tiene dimensión.
+        """
         model_name = "sentence-transformers/all-MiniLM-L6-v2"
         if getattr(self.config, "semantic_embedding_model", None) is not None:
             model_name = self.config.semantic_embedding_model
@@ -285,15 +213,19 @@ class InvariantStateGenerator:
             from idicoc_notary_core.utils.string_utils import StringUtils
 
             max_chunks = getattr(self.config, "embedding_max_chunks", 10)
-            vector = StringUtils.embed_text(text, model_name=model_name, max_chunks=max_chunks)
+            vector = StringUtils.embed_text(
+                text,
+                model_name=model_name,
+                max_chunks=max_chunks,
+            )
             return vector
         except InvariantStateBreach:
             raise
         except Exception as exc:
             self.logger.error(
                 f"Degradación del servicio de embeddings detectada: {exc}. "
-                "Activando fallback numérico determinista offline (MAII-ISG) para garantizar continuidad.",
-                exc_info=exc
+                "Activando fallback numérico determinista offline (MAII-ISG).",
+                exc_info=exc,
             )
             with self._fallback_lock:
                 self._fallback_count += 1
@@ -304,26 +236,26 @@ class InvariantStateGenerator:
                     invalid_state=text,
                     origin="MAII-ISG._text_to_vector",
                 )
-            # Fallback robusto determinista
+            # Fallback determinista — usar la dimensión del modelo si está disponible.
+            dim = self._get_embedding_dim()
             vector = np.zeros(dim, dtype=float)
             for ch in text[:1000]:
                 vector[ord(ch) % dim] += 1.0
-            norm = np.linalg.norm(vector)
-            if norm > 0:
-                vector /= norm
             return vector
 
-    def _cosine_distance(self, a: np.ndarray, b: np.ndarray) -> float:
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
-        if norm_a == 0 or norm_b == 0:
-            self.logger.warning(
-                "Intento de cálculo de distancia coseno con un vector nulo (norma cero)."
-            )
-            return 1.0
-        dot_product = np.dot(a, b)
-        cosine_similarity = dot_product / (norm_a * norm_b)
-        return float(1.0 - cosine_similarity)
+    def _get_embedding_dim(self) -> int:
+        model_name = getattr(
+            self.config, "semantic_embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+        )
+        try:
+            from idicoc_notary_core.utils.string_utils import StringUtils
+
+            model = StringUtils.get_embedding_model(model_name)
+            if model is not None and hasattr(model, "get_sentence_embedding_dimension"):
+                return int(model.get_sentence_embedding_dimension())
+        except Exception:
+            pass
+        return 384
 
     def _normalize_text(self, text: str) -> str:
         return " ".join(text.lower().strip().split())

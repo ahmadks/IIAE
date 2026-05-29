@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
+from idicoc_notary_core.audit.dse.structural_strategy import StructuralDissonanceStrategy
 
 
 class MockAuditInput:
@@ -31,6 +32,7 @@ def _build_logic_service(compute_return):
     mock_strategy_instance.compute.return_value = compute_return
     mock_strategy_instance.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
     mock_strategy_instance._d_inv_from_pair = MagicMock(return_value=0.0)
+    mock_strategy_instance._compute_context_contradiction = MagicMock(return_value=(0.0, []))
 
     mock_strategy_class = MagicMock(return_value=mock_strategy_instance)
     mock_strategy_class.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
@@ -57,9 +59,9 @@ def logic_service():
                 "d_logic": 0.05,
                 "d_logic_geom": 0.05,
                 "d_logic_semantic": 0.05,
-                "max_axiom_distance": 0.0,
+                "max_policy_distance": 0.0,
                 "max_context_distance": 0.02,
-                "violated_axioms": [],
+                "violated_policies": [],
                 "contradictory_contexts": [],
                 "support_found": True,
                 "terminality_violation": False,
@@ -85,7 +87,7 @@ def test_logic_service_with_compatible_distribution(logic_service):
         "Distribution constraint: must maintain entropy ≥ 1.0",
         "Balance requirement: all mass must be accounted for",
     ]
-    context_axioms = [
+    context_policies = [
         "The measure must lie in the probability simplex.",
         "No negative weights are allowed.",
     ]
@@ -94,7 +96,7 @@ def test_logic_service_with_compatible_distribution(logic_service):
         canonical_state = logic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,
-            context_axioms=context_axioms,
+            context_policies=context_policies,
             epsilon_override=None,
             trace_input="test_trace_logic_compatible",
             client_id="test_client_logic",
@@ -123,10 +125,10 @@ def test_logic_service_with_compatible_distribution(logic_service):
     compliance = logic_service.verify_compliance(canonical_state)
     assert compliance is True
 
-    # No violated axioms expected
+    # No violated policies expected
     audit_metrics = metadata.get("audit_metrics", {})
-    violated_axioms = audit_metrics.get("violated_axioms", [])
-    assert len(violated_axioms) == 0
+    violated_policies = audit_metrics.get("violated_policies", [])
+    assert len(violated_policies) == 0
 
 
 def test_logic_service_with_incompatible_distribution():
@@ -144,9 +146,9 @@ def test_logic_service_with_incompatible_distribution():
                 "d_logic": 0.85,
                 "d_logic_geom": 0.85,
                 "d_logic_semantic": 0.85,
-                "max_axiom_distance": 0.9,
+                "max_policy_distance": 0.9,
                 "max_context_distance": 0.70,
-                "violated_axioms": ["The measure must lie in the probability simplex."],
+                "violated_policies": ["The measure must lie in the probability simplex."],
                 "contradictory_contexts": [
                     "Distribution constraint: mass escapes simplex"
                 ],
@@ -168,7 +170,7 @@ def test_logic_service_with_incompatible_distribution():
         "Distribution constraint: must be in probability simplex",
         "All weights must be non-negative",
     ]
-    context_axioms = [
+    context_policies = [
         "The measure must lie in the probability simplex.",
         "No negative weights are allowed.",
     ]
@@ -177,7 +179,7 @@ def test_logic_service_with_incompatible_distribution():
         canonical_state = logic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,
-            context_axioms=context_axioms,
+            context_policies=context_policies,
         )
 
     metadata = canonical_state.metadata
@@ -193,7 +195,7 @@ def test_logic_service_with_incompatible_distribution():
     compliance = logic_service.verify_compliance(canonical_state, tolerance=0.0)
     assert compliance is False
 
-    # Violated axioms should be recorded
+    # Violated policies should be recorded
     audit_metrics = metadata.get("audit_metrics", {})
 def test_logic_service_terminality_error():
     """
@@ -214,9 +216,9 @@ def test_logic_service_terminality_error():
                 "terminality_violation": False,
                 "terminality_error": True,
                 "terminality_error_message": "dimension mismatch",
-                "max_axiom_distance": 0.0,
+                "max_policy_distance": 0.0,
                 "max_context_distance": 0.0,
-                "violated_axioms": [],
+                "violated_policies": [],
                 "contradictory_contexts": [],
                 "support_found": False,
                 "algebraic_components": {"d_0": 0.0, "d_1": 0.0, "d_2": 1.0, "d_3": 0.0, "d_4": 0.0, "d_5": 0.0, "d_6": 0.0},
@@ -232,7 +234,7 @@ def test_logic_service_terminality_error():
     canonical_state = logic_service.process_interaction(
         audit_input=audit_input,
         context_input=["Anchor dimensionality: 2"],
-        context_axioms=[],
+        context_policies=[],
     )
 
     metadata = canonical_state.metadata
@@ -260,9 +262,9 @@ def test_logic_service_with_partial_dissonance():
                 "d_logic": epsilon_val + 0.02,
                 "d_logic_geom": epsilon_val + 0.02,
                 "d_logic_semantic": epsilon_val + 0.02,
-                "max_axiom_distance": 0.05,
+                "max_policy_distance": 0.05,
                 "max_context_distance": 0.08,
-                "violated_axioms": [],
+                "violated_policies": [],
                 "contradictory_contexts": [],
                 "support_found": False,
                 "terminality_violation": False,
@@ -277,7 +279,7 @@ def test_logic_service_with_partial_dissonance():
     canonical_state = logic_service.process_interaction(
         audit_input=audit_input,
         context_input=["Entropy constraint"],
-        context_axioms=[],
+        context_policies=[],
         epsilon_override=epsilon_val,
     )
 
@@ -302,7 +304,7 @@ def test_logic_service_lambda_composition():
             {
                 "d_logic": 0.03,
                 "max_context_distance": 0.01,
-                "violated_axioms": [],
+                "violated_policies": [],
                 "algebraic_components": {"d_0": 0.0, "d_1": 0.0, "d_2": 0.03, "d_3": 0.0, "d_4": 0.0, "d_5": 0.0, "d_6": 0.0},
             },
         )
@@ -313,8 +315,82 @@ def test_logic_service_lambda_composition():
     canonical_state = logic_service.process_interaction(
         audit_input=audit_input,
         context_input=[],
-        context_axioms=[],
+        context_policies=[],
     )
 
     metadata = canonical_state.metadata
     # No longer checking lambda_weights here
+
+
+# =============================================================================
+# ADDITIONAL TESTS: SIGNAL SIZE & FREQUENCY LIMITS
+# =============================================================================
+
+def test_logic_signal_extreme_size_handling():
+    """
+    Escenario 3: Límites de tamaño de la señal (dimensión).
+    Prueba cómo la estrategia maneja tamaños de entrada extremos (muy pequeños o muy grandes)
+    mediante padding o truncamiento dinámico para alinearse al ancla de 4D.
+    """
+    config = AuditConfig()
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
+
+    # 1. Señal muy pequeña (dimensión 1)
+    small_signal = MockAuditInput(np.array([1.0]))
+    D_s_small, _, _, _, metrics_small = strategy.compute(
+        audit_input=small_signal,
+        context_input=[],
+        context_policies=[],
+    )
+    # Se debe haber autopaddeado a 4D ([1.0, 0.0, 0.0, 0.0])
+    assert metrics_small["reference_count"] == 4
+    # EMD de [1.0, 0.0, 0.0, 0.0] a [0.25, 0.25, 0.25, 0.25] es exactamente 1.5
+    assert metrics_small["d_1"] > 0.5
+
+    # 2. Señal muy grande (dimensión 6)
+    large_signal = MockAuditInput(np.array([0.1, 0.2, 0.3, 0.4, 0.05, 0.05]))
+    D_s_large, _, _, _, metrics_large = strategy.compute(
+        audit_input=large_signal,
+        context_input=[],
+        context_policies=[],
+    )
+    # Se debe haber truncado a 4D ([0.1, 0.2, 0.3, 0.4] normalizado)
+    assert metrics_large["reference_count"] == 4
+    assert np.isfinite(D_s_large)
+
+
+def test_logic_signal_frequency_impulses():
+    """
+    Escenario 4: Frecuencia de la señal (impulsos vs distribución uniforme).
+    Evalúa señales con picos de alta frecuencia (un solo bin con toda la masa)
+    frente a señales de baja frecuencia/uniformes, verificando los límites de EMD
+    y la detección matemática de colapso de frecuencia.
+    """
+    config = AuditConfig()
+    strategy = StructuralDissonanceStrategy(config, lambda_1=1.0)
+
+    # 1. Impulso puro (alta frecuencia/entropía baja/colapso en un punto)
+    high_freq_signal = MockAuditInput(np.array([0.0, 0.0, 1.0, 0.0]))
+    _, _, _, correction_high, metrics_high = strategy.compute(
+        audit_input=high_freq_signal,
+        context_input=[],
+        context_policies=[],
+    )
+    # EMD de [0.0, 0.0, 1.0, 0.0] a [0.25, 0.25, 0.25, 0.25]
+    # Cumsum: [0.0, 0.0, 1.0, 1.0] vs [0.25, 0.50, 0.75, 1.00]
+    # Diferencias: 0.25 + 0.50 + 0.25 + 0.0 = 1.0
+    assert metrics_high["d_1"] > 0.2
+    # Al ser un impulso concentrado, supera el umbral de rigidez base y requiere corrección
+    assert correction_high is True
+
+    # 2. Distribución casi uniforme (baja frecuencia/baja disonancia)
+    low_freq_signal = MockAuditInput(np.array([0.24, 0.26, 0.25, 0.25]))
+    _, _, _, correction_low, metrics_low = strategy.compute(
+        audit_input=low_freq_signal,
+        context_input=[],
+        context_policies=[],
+    )
+    # Disonancia muy baja
+    assert metrics_low["d_1"] < 0.05
+    assert correction_low is False
+

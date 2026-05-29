@@ -1,11 +1,11 @@
 from typing import Any, Dict, List, Protocol
 
-class AxiomLoader(Protocol):
-    """Interfaz para la carga de axiomas externos al sistema."""
+class PolicyLoader(Protocol):
+    """Interfaz para la carga de politicas externos al sistema."""
 
-    def load_axioms(self) -> List[Dict[str, Any]]:
+    def load_policies(self) -> List[Dict[str, Any]]:
         """
-        Carga y devuelve una lista de diccionarios que representan axiomas.
+        Carga y devuelve una lista de diccionarios que representan politicas.
         Cada diccionario debe tener las claves requeridas por el PropertyGraph.
         """
         ...

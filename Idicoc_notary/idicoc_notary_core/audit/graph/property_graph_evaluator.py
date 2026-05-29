@@ -1,6 +1,7 @@
 from typing import Any, Set, Optional, Dict, List
 from datetime import datetime, timezone
 import math
+import re
 
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 
@@ -13,6 +14,7 @@ class PropertyGraphEvaluator:
     def __init__(self, graph: PropertyGraph):
         self.graph = graph
 
+
     # ──────────────────────────────────────────────────────────────────────────
     # evaluate(y) — dissonancia lógica
     # ──────────────────────────────────────────────────────────────────────────
@@ -20,10 +22,10 @@ class PropertyGraphEvaluator:
     def evaluate(self, y: Any) -> float:
         """
         Evalúa la disonancia lógica de un estado candidato ``y`` contra los
-        axiomas no-temporales activos en el grafo.
+        politicas no-temporales activos en el grafo.
         """
-        axioms = [ax for ax in self.graph.nodes.values() if ax.get("axiom_type") != "temporal"]
-        if not axioms:
+        policies = [ax for ax in self.graph.nodes.values() if ax.get("policy_type") != "temporal"]
+        if not policies:
             return 0.0
 
         y_tokens = self._tokenize(self._to_str(y))
@@ -32,9 +34,9 @@ class PropertyGraphEvaluator:
         total_weight = 0.0
         weighted_penalty = 0.0
 
-        for ax in axioms:
+        for ax in policies:
             raw_penalty = self._logical_penalty(y_tokens, y_vec, ax)
-            weight = self._axiom_weight(ax)
+            weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
 
@@ -49,12 +51,12 @@ class PropertyGraphEvaluator:
     def compute_temporal(self, y: Any) -> float:
         """
         Evalúa la disonancia temporal del estado candidato ``y`` contra los
-        axiomas con ``axiom_type == 'temporal'`` activos en el grafo.
+        politicas con ``policy_type == 'temporal'`` activos en el grafo.
         """
-        temporal_axioms = [
-            ax for ax in self.graph.nodes.values() if ax.get("axiom_type") == "temporal"
+        temporal_policies = [
+            ax for ax in self.graph.nodes.values() if ax.get("policy_type") == "temporal"
         ]
-        if not temporal_axioms:
+        if not temporal_policies:
             return 0.0
 
         now = datetime.now(timezone.utc)
@@ -62,9 +64,9 @@ class PropertyGraphEvaluator:
         total_weight = 0.0
         weighted_penalty = 0.0
 
-        for ax in temporal_axioms:
+        for ax in temporal_policies:
             raw_penalty = self._temporal_penalty(ax, now)
-            weight = self._axiom_weight(ax)
+            weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
 
@@ -97,12 +99,12 @@ class PropertyGraphEvaluator:
         return {t for t in tokens if t}
 
     @staticmethod
-    def _axiom_text(axiom: Dict[str, Any]) -> str:
+    def _policy_text(policy: Dict[str, Any]) -> str:
         parts = [
-            str(axiom.get("source_text", "")),
-            str(axiom.get("subject", "")),
-            str(axiom.get("predicate", "")),
-            str(axiom.get("object", "")),
+            str(policy.get("source_text", "")),
+            str(policy.get("subject", "")),
+            str(policy.get("predicate", "")),
+            str(policy.get("object", "")),
         ]
         return " ".join(p for p in parts if p and p != "None")
 
@@ -110,7 +112,12 @@ class PropertyGraphEvaluator:
     def _to_vec(y: Any) -> Optional[list]:
         try:
             import numpy as np
+            import re
             candidate = getattr(y, "measure_vector", getattr(y, "distribution", y))
+            if isinstance(candidate, str):
+                nums = [float(m.group(0)) for m in re.finditer(r"[-+]?[0-9]*\.?[0-9]+", candidate)]
+                if nums:
+                    return nums
             arr = np.asarray(candidate, dtype=float)
             if arr.ndim == 1 and arr.size > 0:
                 return arr.tolist()
@@ -140,34 +147,61 @@ class PropertyGraphEvaluator:
         union = len(set_a | set_b)
         return intersection / union if union > 0 else 0.0
 
-    def _logical_penalty(self, y_tokens: Set[str], y_vec: Optional[list], axiom: Dict[str, Any]) -> float:
-        polarity = axiom.get("polarity", "affirmative")
-        ax_embedding: Optional[list] = axiom.get("embedding")
 
-        if ax_embedding is not None and y_vec is not None:
-            dist = self._cosine_distance(y_vec, ax_embedding)
-            similarity = 1.0 - dist
-        else:
-            ax_tokens = self._tokenize(self._axiom_text(axiom))
-            if not ax_tokens:
-                return 0.0
-            similarity = self._jaccard(y_tokens, ax_tokens)
-
+    def _evaluate_regex(self, ax: dict, y_tokens: Set[str]) -> float:
+        """Evaluate regex policies on string representations."""
+        import re
+        text_y = " ".join(y_tokens)
+        pattern = ax.get("pattern", ax.get("text", ""))
+        
+        if not pattern:
+            return 0.0
+            
+        match = re.search(pattern, text_y)
+        
+        polarity = ax.get("polarity", "affirmative")
         if polarity == "affirmative":
-            return 1.0 - similarity
+            return 0.0 if match else 1.0
         else:
-            return similarity
+            return 1.0 if match else 0.0
 
-    def _temporal_penalty(self, axiom: Dict[str, Any], now: datetime) -> float:
-        valid_from = self._parse_dt(axiom.get("valid_from"))
-        valid_until = self._parse_dt(axiom.get("valid_until"))
+    def _logical_penalty(self, y_tokens: Set[str], y_vec: Optional[list], policy: Dict[str, Any]) -> float:
+        """
+        Evaluate logical constraints (policies) against output y.
+        Policies are evaluated based on their 'policy_type'.
+        """
+        a_type = policy.get("policy_type", "fact")
+        polarity = policy.get("polarity", "affirmative")
+        
+        if a_type == "regex":
+            return self._evaluate_regex(policy, y_tokens)
+        else:
+            # Semantic / default evaluation
+            ax_embedding: Optional[list] = policy.get("embedding")
+            if ax_embedding is not None and y_vec is not None:
+                dist = self._cosine_distance(y_vec, ax_embedding)
+                similarity = 1.0 - dist
+            else:
+                ax_tokens = self._tokenize(self._policy_text(policy))
+                if not ax_tokens:
+                    return 0.0
+                similarity = self._jaccard(y_tokens, ax_tokens)
+
+            if polarity == "affirmative":
+                return 1.0 - similarity
+            else:
+                return similarity
+
+    def _temporal_penalty(self, policy: Dict[str, Any], now: datetime) -> float:
+        valid_from = self._parse_dt(policy.get("valid_from"))
+        valid_until = self._parse_dt(policy.get("valid_until"))
         ttl_val = None
 
-        if valid_until is None and axiom.get("ttl_seconds") is not None:
-            base = valid_from or self._parse_dt(axiom.get("timestamp"))
+        if valid_until is None and policy.get("ttl_seconds") is not None:
+            base = valid_from or self._parse_dt(policy.get("timestamp"))
             if base is not None:
                 try:
-                    ttl_val = float(axiom["ttl_seconds"])
+                    ttl_val = float(policy["ttl_seconds"])
                     from datetime import timedelta
                     valid_until = base + timedelta(seconds=ttl_val)
                 except (ValueError, TypeError):
@@ -214,7 +248,7 @@ class PropertyGraphEvaluator:
         return None
 
     @staticmethod
-    def _axiom_weight(axiom: Dict[str, Any]) -> float:
-        priority = max(1, min(10, int(axiom.get("priority", 1))))
-        hardness_mult = 2.0 if axiom.get("hardness") == "hard" else 1.0
+    def _policy_weight(policy: Dict[str, Any]) -> float:
+        priority = max(1, min(10, int(policy.get("priority", 1))))
+        hardness_mult = 2.0 if policy.get("hardness") == "hard" else 1.0
         return (priority / 10.0) * hardness_mult

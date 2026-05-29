@@ -297,7 +297,7 @@ class CustodialTraceManager:
             "parent_hashes": node.parent_hashes,
             "timestamp": node.timestamp,
             "canonical_state": node.payload.get("payload", {}).get("canonical_state"),
-            "axiom_hashes": self._extract_axiom_hashes(node.payload),
+            "policy_hashes": self._extract_policy_hashes(node.payload),
             "dissonance": node.payload.get("payload", {}).get("dissonance"),
             "epsilon": node.payload.get("payload", {}).get("epsilon"),
             "invariant_state_hash": node.invariant_state_hash,
@@ -306,7 +306,7 @@ class CustodialTraceManager:
         }
 
     @staticmethod
-    def _extract_axiom_hashes(payload: Dict[str, Any]) -> list[str]:
+    def _extract_policy_hashes(payload: Dict[str, Any]) -> list[str]:
         payload_body = payload.get("payload", {})
         if not isinstance(payload_body, dict):
             return []

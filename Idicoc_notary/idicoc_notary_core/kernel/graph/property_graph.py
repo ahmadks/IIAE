@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Set
 
 
 class PropertyGraph:
-    """Estructura de grafo de propiedades para axiomas y reglas en el núcleo."""
+    """Estructura de grafo de propiedades para politicas y reglas en el núcleo."""
 
     def __init__(self, embedding_signature: Optional[str] = None) -> None:
         self.embedding_signature = embedding_signature
@@ -18,26 +18,26 @@ class PropertyGraph:
     # API pública — gestión del grafo
     # ──────────────────────────────────────────────────────────────────────────
 
-    def add_axiom(self, identifier: str, axiom: Dict[str, Any]) -> None:
-        """Añade un axioma identificado al grafo."""
-        self.nodes[identifier] = axiom
+    def add_policy(self, identifier: str, policy: Dict[str, Any]) -> None:
+        """Añade un policya identificado al grafo."""
+        self.nodes[identifier] = policy
 
     def add_edge(self, source: str, target: str, relation: str) -> None:
-        """Añade una arista entre dos axiomas."""
+        """Añade una arista entre dos politicas."""
         self.edges.append({"source": source, "target": target, "relation": relation})
 
     def detect_conflicts(self) -> List[Dict[str, Any]]:
-        """Detecta conflictos entre axiomas (comprueba polarity en mismo sujeto/objeto)."""
+        """Detecta conflictos entre politicas (comprueba polarity en mismo sujeto/objeto)."""
         conflicts = []
         nodes_list = list(self.nodes.items())
-        for i, (id1, axiom1) in enumerate(nodes_list):
-            for id2, axiom2 in nodes_list[i + 1:]:
+        for i, (id1, policy1) in enumerate(nodes_list):
+            for id2, policy2 in nodes_list[i + 1:]:
                 if (
-                    axiom1.get("subject") == axiom2.get("subject")
-                    and axiom1.get("object") == axiom2.get("object")
-                    and axiom1.get("polarity") != axiom2.get("polarity")
+                    policy1.get("subject") == policy2.get("subject")
+                    and policy1.get("object") == policy2.get("object")
+                    and policy1.get("polarity") != policy2.get("polarity")
                 ):
-                    conflicts.append({"axiom1": id1, "axiom2": id2, "reason": "opposite_polarity"})
+                    conflicts.append({"policy1": id1, "policy2": id2, "reason": "opposite_polarity"})
         self._conflicts = conflicts
         return conflicts
 
@@ -45,16 +45,16 @@ class PropertyGraph:
         """Validación estructural básica."""
         return len(self._conflicts) == 0
 
-    def get_active_axioms(self) -> List[Dict[str, Any]]:
-        """Retorna todos los axiomas activos."""
+    def get_active_policies(self) -> List[Dict[str, Any]]:
+        """Retorna todos los politicas activos."""
         return list(self.nodes.values())
 
     def get_conflicts(self) -> List[Dict[str, Any]]:
         """Retorna los últimos conflictos detectados."""
         return self._conflicts
 
-    def compute_axiom_density(self) -> float:
-        """Calcula la densidad de axiomas en el grafo."""
+    def compute_policy_density(self) -> float:
+        """Calcula la densidad de politicas en el grafo."""
         if not self.nodes:
             return 0.0
         num_nodes = len(self.nodes)
@@ -80,8 +80,8 @@ class PropertyGraph:
         Los arrays de numpy (si existen) se convierten a listas.
         """
         nodes_dict = {}
-        for nid, axiom in self.nodes.items():
-            ax_copy = dict(axiom)
+        for nid, policy in self.nodes.items():
+            ax_copy = dict(policy)
             # Asegurarse de que el embedding es lista de floats (si estaba como numpy)
             if "embedding" in ax_copy and hasattr(ax_copy["embedding"], "tolist"):
                 ax_copy["embedding"] = ax_copy["embedding"].tolist()

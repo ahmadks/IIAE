@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional, Literal
 from datetime import datetime, timezone
 
-from idicoc_utils.hashing import sha256_hex
+try:
+    from idicoc_utils.hashing import sha256_hex
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary")))
+    from idicoc_notary_core.utils.hashing import sha256_hex
 
 # ---------------------------------------------------------------------------
 # TYPE DEFINITIONS

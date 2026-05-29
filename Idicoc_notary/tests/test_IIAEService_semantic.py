@@ -18,7 +18,10 @@ def _build_semantic_service(compute_return):
         mock_strategy_instance.compute_dissonance.side_effect = compute_return[0]
     else:
         mock_strategy_instance.compute_dissonance.return_value = compute_return[0]
+    mock_strategy_instance.project_to_manifold.return_value = compute_return[2]
+    mock_strategy_instance.project.return_value = compute_return[2]
     mock_strategy_instance._d_inv_from_pair = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=0.0)
+    mock_strategy_instance._compute_context_contradiction = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=(0.0, []))
     mock_strategy_instance.lambda_weights = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
     mock_strategy_class.lambda_weights = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
     mock_strategy_class.return_value = mock_strategy_instance
@@ -42,7 +45,7 @@ def semantic_service():
             {
                 "d_logic": 0.1,
                 "max_context_distance": 0.0,
-                "violated_axioms": [],
+                "violated_policies": [],
                 "contradictory_contexts": [],
             },
         )
@@ -59,13 +62,13 @@ def test_semantic_service_with_similar_inputs(semantic_service):
         "The account balance is 120000.00 euros.",
     ]
     audit_input = "Execute a transfer of 50000.00 euros, which is within the limit."
-    axiom_input = ["Amount must not exceed the transaction limit."]
+    policy_input = ["Amount must not exceed the transaction limit."]
 
     with patch("idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate", return_value=0.1):
         canonical_state = semantic_service.process_interaction(
             audit_input=audit_input,
             context_input=context_input,
-            context_axioms=axiom_input,
+            context_policies=policy_input,
             epsilon_override=None,
             trace_input="test_trace_structural",
             client_id="test_client_structural",
@@ -96,14 +99,14 @@ def test_semantic_service_with_similar_inputs(semantic_service):
     compliance = semantic_service.verify_compliance(canonical_state)
     assert compliance is True
 
-    # No violated axioms
+    # No violated policies
     audit_metrics = metadata.get("audit_metrics", {})
-    violated_axioms = audit_metrics.get("violated_axioms", [])
-    assert len(violated_axioms) == 0
+    violated_policies = audit_metrics.get("violated_policies", [])
+    assert len(violated_policies) == 0
 
 
 def test_semantic_service_with_violation():
-    """Test a semantic violation where audit_input contradicts context/axioms."""
+    """Test a semantic violation where audit_input contradicts context/policies."""
     semantic_service = _build_semantic_service(
         (
             [0.8, 0.05],
@@ -113,7 +116,7 @@ def test_semantic_service_with_violation():
             {
                 "d_logic": 0.8,
                 "max_context_distance": 0.6,
-                "violated_axioms": ["Amount must not exceed the transaction limit."],
+                "violated_policies": ["Amount must not exceed the transaction limit."],
                 "contradictory_contexts": [
                     "Transfer 60000.00 euros, exceeding the limit."
                 ],
@@ -126,12 +129,12 @@ def test_semantic_service_with_violation():
         "Customer balance is 120000.00 euros.",
     ]
     audit_input = "Transfer 60000.00 euros, exceeding the limit."
-    axiom_input = ["Amount must not exceed the transaction limit."]
+    policy_input = ["Amount must not exceed the transaction limit."]
 
     canonical_state = semantic_service.process_interaction(
         audit_input=audit_input,
         context_input=context_input,
-        context_axioms=axiom_input,
+        context_policies=policy_input,
     )
 
     metadata = canonical_state.metadata
@@ -144,3 +147,99 @@ def test_semantic_service_with_violation():
 
     compliance = semantic_service.verify_compliance(canonical_state, tolerance=0.0)
     assert compliance is False
+
+
+# =============================================================================
+# ADDITIONAL TESTS: OUT OF CONTEXT / LIMIT SCENARIOS
+# =============================================================================
+
+def test_semantic_out_of_context_and_policies():
+    """
+    Escenario 1: Frases que no están ni en el contexto ni en los politicas.
+    Esto debe generar una disonancia alta o activar alertas dado que el input
+    es totalmente ajeno a las bases establecidas.
+    """
+    service = _build_semantic_service(
+        (
+            0.95,  # D_s alto
+            0.85,  # D_f
+            "[RECONSTRUCTION] Text totally unrelated to established domain.",
+            True,  # Requiere corrección
+            {
+                "d_logic": 0.95,
+                "max_context_distance": 0.85,
+                "violated_policies": ["Outside established domain"],
+                "contradictory_contexts": ["No overlapping context found"],
+            },
+        )
+    )
+
+    context_input = [
+        "The system only processes financial transactions in euros.",
+    ]
+    policy_input = ["Currency must be EUR."]
+    # Frase totalmente ajena (fuera de contexto y politicas)
+    audit_input = "The temperature in Tokyo is 25 degrees Celsius and it is sunny."
+
+    canonical_state = service.process_interaction(
+        audit_input=audit_input,
+        context_input=context_input,
+        context_policies=policy_input,
+    )
+
+    assert canonical_state is not None
+    metadata = canonical_state.metadata
+    assert metadata["d_s"] == 0.95
+    # Al no poder ser corregido dentro del límite de rigidez (0.1), se rechaza y correction_flag es False
+    assert metadata["correction_flag"] is False
+    assert metadata["admission_breach"] is True
+
+    # Al ser totalmente ajena, no cumple con los límites de cumplimiento
+    compliance = service.verify_compliance(canonical_state)
+    assert compliance is False
+
+
+def test_semantic_satisfies_policies_but_missing_from_context():
+    """
+    Escenario 2: Frases que cumplen los politicas lógicos pero no están en el contexto de la sesión.
+    La disonancia de politicas debe ser baja, pero la distancia al contexto debe ser moderada/alta.
+    """
+    service = _build_semantic_service(
+        (
+            0.35,  # D_s moderado
+            0.35,  # D_f
+            "Correct but out-of-context statement.",
+            False,  # No requiere corrección rigurosa si se tolera
+            {
+                "d_logic": 0.35,
+                "max_context_distance": 0.35,
+                "violated_policies": [],  # Cumple los politicas
+                "contradictory_contexts": ["Not present in active session context"],
+            },
+        )
+    )
+
+    context_input = [
+        "The user is authenticated as an administrator.",
+    ]
+    policy_input = ["Amount must be a positive number."]
+    
+    # El input cumple el policya (el monto 100 es positivo) pero no está relacionado con el contexto de administración
+    audit_input = "Request transfer of 100.00 EUR."
+
+    with patch("idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate", return_value=0.35):
+        canonical_state = service.process_interaction(
+            audit_input=audit_input,
+            context_input=context_input,
+            context_policies=policy_input,
+        )
+
+    metadata = canonical_state.metadata
+    assert metadata["d_s"] == 0.35
+    assert len(metadata["audit_metrics"].get("violated_policies", [])) == 0
+    assert metadata["correction_flag"] is False
+
+    # Debería cumplir si la tolerancia cubre el límite moderado
+    compliance = service.verify_compliance(canonical_state, tolerance=0.4)
+    assert compliance is True
+

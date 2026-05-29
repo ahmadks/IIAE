@@ -14,3 +14,6 @@ iiae_idicoc-dse.egg-info
 output/
 ctm_root.txt
 Idicoc_notary/tests/results/
+Idicoc_notary/Idicoc_notary/tests/results/
+Idicoc_notary/Idicoc_notary/tests/results/ctm_wal.log
+Idicoc-demo-ui/ctm_nodes.json

@@ -1,5 +1,5 @@
-from .base import AxiomLoader
-from .file_loader import FileAxiomLoader
-from .inline_loader import InlineAxiomLoader
+from .base import PolicyLoader
+from .file_loader import FilePolicyLoader
+from .inline_loader import InlinePolicyLoader
 
-__all__ = ["AxiomLoader", "FileAxiomLoader", "InlineAxiomLoader"]
+__all__ = ["PolicyLoader", "FilePolicyLoader", "InlinePolicyLoader"]

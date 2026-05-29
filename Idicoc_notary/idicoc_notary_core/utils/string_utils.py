@@ -1,19 +1,26 @@
 from typing import Any
 import numpy as np
 
+
 class StringUtils:
     """Utilidades para manejo de cadenas y embeddings de texto."""
-    
+
     _embedding_model = None
 
     @classmethod
     def get_embedding_model(cls, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> Any:
         """Carga y devuelve el modelo de embeddings usando el servicio central."""
         from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
         return EmbeddingService().get_embedder(model_name)
 
     @classmethod
-    def embed_text(cls, text: str, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", max_chunks: int = 10) -> np.ndarray:
+    def embed_text(
+        cls,
+        text: str,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        max_chunks: int = 10,
+    ) -> np.ndarray:
         """Convierte texto a un vector usando el modelo de embeddings.
 
         Parameters:
@@ -22,10 +29,10 @@ class StringUtils:
             max_chunks (int): Límite máximo de chunks permitidos para proteger los recursos.
 
         Returns:
-            np.ndarray: Vector numérico L2 normalizado que representa el texto.
+            np.ndarray: Vector numérico que representa el texto.
         """
         model = cls.get_embedding_model(model_name)
-        
+
         if model is not None:
             max_len = getattr(model, "max_seq_length", 512)
             if max_len is None:
@@ -35,7 +42,7 @@ class StringUtils:
             tokenizer = getattr(model, "tokenizer", None)
             tokens = []
             has_exceeded = False
-            
+
             if tokenizer is not None:
                 try:
                     tokens = tokenizer.encode(text, add_special_tokens=False)
@@ -53,6 +60,7 @@ class StringUtils:
             if has_exceeded:
                 import warnings
                 import logging
+
                 num_tokens = len(tokens) if tokens else int(len(text) / 4)
                 warn_msg = (
                     f"WARNING: El texto de entrada supera el límite de tokens del modelo de embeddings "
@@ -95,47 +103,69 @@ class StringUtils:
                 # 3. Obtener embeddings individuales y promediar
                 chunk_embeddings = []
                 for chunk in chunks:
-                    emb = model.encode(chunk, normalize_embeddings=True)
+                    emb = model.encode(chunk)
                     chunk_embeddings.append(np.asarray(emb, dtype=float))
 
                 if chunk_embeddings:
                     aggregated = np.mean(chunk_embeddings, axis=0)
-                    norm = np.linalg.norm(aggregated)
-                    if norm > 0:
+                    # Normalizar resultado agregado a norma unidad para coherencia
+                    norm = float(np.linalg.norm(aggregated))
+                    if norm > 1e-12:
                         aggregated = aggregated / norm
                     return aggregated
 
-            # Codificación directa normalizada estándar si no supera el límite
-            embedding = model.encode(text, normalize_embeddings=True)
-            return np.asarray(embedding, dtype=float)
-        
+            # Codificación directa; normalizar salida a norma unidad para coherencia
+            embedding = model.encode(text)
+            embedding = np.asarray(embedding, dtype=float)
+            norm = float(np.linalg.norm(embedding))
+            if norm > 1e-12:
+                embedding = embedding / norm
+            return embedding
+
         # Fallback pseudo-determinista si el modelo no está disponible
         import hashlib
-        h = hashlib.sha256(text.encode('utf-8')).digest()
-        fallback = np.zeros(384, dtype=float)
-        for i in range(min(384, len(h))):
+
+        h = hashlib.sha256(text.encode("utf-8")).digest()
+        dim = cls.get_embedding_dimension(model_name)
+        fallback = np.zeros(dim, dtype=float)
+        for i in range(min(dim, len(h))):
             fallback[i] = float(h[i]) / 255.0
-        
-        # Normalizar
-        norm = np.linalg.norm(fallback)
-        if norm > 0:
-            fallback = fallback / norm
-            
+
         return fallback
 
     @classmethod
-    def to_vector(cls, y: Any, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", max_chunks: int = 10) -> np.ndarray:
+    def get_embedding_dimension(
+        cls, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    ) -> int:
+        """Devuelve la dimensión de salida del modelo de embeddings si es disponible."""
+        model = cls.get_embedding_model(model_name)
+        try:
+            if model is not None and hasattr(model, "get_sentence_embedding_dimension"):
+                return int(model.get_sentence_embedding_dimension())
+        except Exception:
+            pass
+        return 384
+
+    @classmethod
+    def to_vector(
+        cls,
+        y: Any,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        max_chunks: int = 10,
+    ) -> np.ndarray:
         """Convierte cualquier entrada a un vector numérico (ndarray)."""
         if isinstance(y, str):
             return cls.embed_text(y, model_name, max_chunks=max_chunks)
-        
+
         # Si ya es un array o lista, devolverlo como ndarray
         try:
-            arr = np.asarray(getattr(y, "distribution", getattr(y, "measure_vector", y)), dtype=float)
+            arr = np.asarray(
+                getattr(y, "distribution", getattr(y, "measure_vector", y)), dtype=float
+            )
             if arr.ndim == 1 and arr.size > 0:
                 return arr
         except Exception:
             pass
-            
+
         # Fallback final
         return cls.embed_text(str(y), model_name, max_chunks=max_chunks)

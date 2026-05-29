@@ -86,7 +86,7 @@ class CustodialKernel:
             # Actualizar epsilon dinámicamente
             self.epsilon = self.cmc.update_epsilon(
                 current_eps=self.epsilon,
-                axiom_density=updated_graph.compute_axiom_density(),
+                policy_density=updated_graph.compute_policy_density(),
                 dissonance_variance=self._compute_recent_variance(),
             )
 

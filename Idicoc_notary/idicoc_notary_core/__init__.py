@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from .audit import (
     AuditConfig,
-    AxiomLoader,
-    FileAxiomLoader,
-    InlineAxiomLoader,
+    PolicyLoader,
+    FilePolicyLoader,
+    InlinePolicyLoader,
     GraphCache,
     NoOpGraphCache,
     RedisGraphCache,
@@ -21,9 +21,9 @@ from .audit import (
 
 __all__ = [
     "AuditConfig",
-    "AxiomLoader",
-    "FileAxiomLoader",
-    "InlineAxiomLoader",
+    "PolicyLoader",
+    "FilePolicyLoader",
+    "InlinePolicyLoader",
     "GraphCache",
     "NoOpGraphCache",
     "RedisGraphCache",

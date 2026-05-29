@@ -1,7 +1,7 @@
 """
-AxiomExtractor (DSE).
+PolicyExtractor (DSE).
 
-Implementa la Sección 5.2 de la PCT: extracción dinámica de axiomas semánticos
+Implementa la Sección 5.2 de la PCT: extracción dinámica de politicas semánticos
 a partir de entradas de auditoría y contexto, usando modelos de embeddings y NLI
 (Natural Language Inference) para detectar contradicciones y generar la quíntupla
 (S, P, O, Θ, σ) con identificador criptográfico v(α) = H(σ ∥ t).
@@ -15,9 +15,9 @@ from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.utils.hashing import sha256_hex
 
 
-class AxiomExtractor:
+class PolicyExtractor:
     """
-    Extractor dinámico de axiomas con soporte semántico (embeddings + NLI).
+    Extractor dinámico de politicas con soporte semántico (embeddings + NLI).
     """
 
     def __init__(self, property_graph: PropertyGraph, config: Any | None = None) -> None:
@@ -27,11 +27,15 @@ class AxiomExtractor:
         # Cargar configuraciones del modelo de forma robusta
         dse_cfg = getattr(config, "dse_config", None)
         if dse_cfg is not None:
-            self.embedding_model_name = getattr(dse_cfg, "embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
+            self.embedding_model_name = getattr(
+                dse_cfg, "embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+            )
             self.nli_model_name = getattr(dse_cfg, "nli_model", "facebook/bart-large-mnli")
             self.nli_conflict_threshold = getattr(dse_cfg, "nli_conflict_threshold", 0.5)
         else:
-            self.embedding_model_name = getattr(config, "semantic_embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
+            self.embedding_model_name = getattr(
+                config, "semantic_embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+            )
             self.nli_model_name = getattr(config, "semantic_nli_model", "facebook/bart-large-mnli")
             self.nli_conflict_threshold = getattr(config, "semantic_nli_conflict_threshold", 0.5)
 
@@ -44,6 +48,7 @@ class AxiomExtractor:
         if self._embedder is None and self._models_available:
             try:
                 from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
                 self._embedder = EmbeddingService().get_embedder(self.embedding_model_name)
                 if self._embedder is None:
                     raise ImportError("El servicio no pudo cargar el modelo.")
@@ -55,6 +60,7 @@ class AxiomExtractor:
         if self._nli_pipeline is None and self._models_available:
             try:
                 from transformers import pipeline as hf_pipeline
+
                 self._nli_pipeline = hf_pipeline(
                     "zero-shot-classification",
                     model=self.nli_model_name,
@@ -66,88 +72,90 @@ class AxiomExtractor:
     def extract_from_context(
         self,
         context_input: Optional[list[str]] = None,
-        context_axioms: Optional[list[str]] = None,
+        context_policies: Optional[list[str]] = None,
     ) -> PropertyGraph:
         """
-        Extrae y precomputa axiomas exclusivamente a partir del contexto estático.
+        Extrae y precomputa politicas exclusivamente a partir del contexto estático.
         Nunca recibe el audit_input en tiempo de ejecución.
         """
         context_input = context_input or []
-        context_axioms = context_axioms or []
+        context_policies = context_policies or []
         timestamp = datetime.now(timezone.utc).isoformat()
-        
+
         embedder = self._get_embedder()
 
-        # 1. Axiomas desde context_axioms predefinidos
-        for axiom_text in context_axioms:
-            if not isinstance(axiom_text, str):
-                axiom_text = str(axiom_text)
-            ax = self._axiom_from_text(axiom_text, axiom_type="protocol", timestamp=timestamp)
+        # 1. Policyas desde context_policies predefinidos
+        for policy_text in context_policies:
+            if not isinstance(policy_text, str):
+                policy_text = str(policy_text)
+            ax = self._policy_from_text(policy_text, policy_type="protocol", timestamp=timestamp)
             if embedder is not None:
                 try:
-                    vec = embedder.encode(axiom_text, normalize_embeddings=True)
+                    vec = embedder.encode(policy_text)
                     ax["embedding"] = vec.tolist()
                 except Exception:
                     pass
-            self.property_graph.add_axiom(ax["axiom_id"], ax)
+            self.property_graph.add_policy(ax["policy_id"], ax)
 
-        # 2. Axiomas extraídos de context_input
+        # 2. Policyas extraídos de context_input
         for text in context_input:
             if not isinstance(text, str) or not text.strip():
                 continue
-            ax = self._axiom_from_text(text, axiom_type="fact", timestamp=timestamp)
+            ax = self._policy_from_text(text, policy_type="fact", timestamp=timestamp)
             if embedder is not None:
                 try:
-                    vec = embedder.encode(text, normalize_embeddings=True)
+                    vec = embedder.encode(text)
                     ax["embedding"] = vec.tolist()
                 except Exception:
                     pass
-            self.property_graph.add_axiom(ax["axiom_id"], ax)
+            self.property_graph.add_policy(ax["policy_id"], ax)
 
         # 3. Detección de contradicciones vía NLI en el contexto base
         if len(context_input) >= 2:
-            contradiction_axioms = self._detect_contradictions(context_input, timestamp)
-            for ax in contradiction_axioms:
-                self.property_graph.add_axiom(ax["axiom_id"], ax)
+            contradiction_policies = self._detect_contradictions(context_input, timestamp)
+            for ax in contradiction_policies:
+                self.property_graph.add_policy(ax["policy_id"], ax)
 
         self.property_graph.detect_conflicts()
         return self.property_graph
 
-    def _build_base_axiom(
+    def _build_base_policy(
         self, raw_text: str, canonical_text: str, timestamp: str
     ) -> list[dict[str, Any]]:
         subject = type(raw_text).__name__
         obj = type(canonical_text).__name__
         predicate = "transforms_to"
         scope = "session"
-        axiom_type = "logic"
+        policy_type = "logic"
         polarity = "affirmative"
         hardness = "soft"
         priority = 1
 
-        sigma = f"{subject}|{predicate}|{obj}|{scope}|{axiom_type}|{polarity}"
+        sigma = f"{subject}|{predicate}|{obj}|{scope}|{policy_type}|{polarity}"
         structural_signature = sha256_hex(sigma)
-        axiom_id = sha256_hex(structural_signature + "||" + timestamp)
+        policy_id = sha256_hex(structural_signature + "||" + timestamp)
 
-        return [{
-            "axiom_id": axiom_id,
-            "subject": subject,
-            "predicate": predicate,
-            "object": obj,
-            "scope": scope,
-            "axiom_type": axiom_type,
-            "polarity": polarity,
-            "hardness": hardness,
-            "priority": priority,
-            "timestamp": timestamp,
-            "structural_signature": structural_signature,
-            "axiom_version": axiom_id,
-        }]
+        return [
+            {
+                "policy_id": policy_id,
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj,
+                "scope": scope,
+                "policy_type": policy_type,
+                "polarity": polarity,
+                "hardness": hardness,
+                "priority": priority,
+                "timestamp": timestamp,
+                "structural_signature": structural_signature,
+                "policy_version": policy_id,
+            }
+        ]
 
-    def _axiom_from_text(
+    def _policy_from_text(
         self,
         text: str,
-        axiom_type: str = "fact",
+        policy_type: str = "fact",
         timestamp: str = "",
     ) -> dict[str, Any]:
         """
@@ -159,11 +167,16 @@ class AxiomExtractor:
         text_lower = text.lower().strip()
 
         # Clasificación de polaridad, hardness, prioridad
-        if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
+        if any(
+            kw in text_lower
+            for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")
+        ):
             polarity = "negative"
             hardness = "hard"
             priority = 10
-        elif any(kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")):
+        elif any(
+            kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")
+        ):
             polarity = "affirmative"
             hardness = "hard"
             priority = 9
@@ -176,13 +189,13 @@ class AxiomExtractor:
             hardness = "soft"
             priority = 1
 
-        # Tipo de axioma por palabras clave
+        # Tipo de policya por palabras clave
         if any(kw in text_lower for kw in ("after", "before", "during", "when", "at time")):
-            axiom_type = "temporal"
+            policy_type = "temporal"
         elif any(kw in text_lower for kw in ("is a", "is an", "belongs to", "type of")):
-            axiom_type = "world"
+            policy_type = "world"
         elif any(kw in text_lower for kw in ("protocol", "policy", "rule")):
-            axiom_type = "protocol"
+            policy_type = "protocol"
 
         tokens = text_lower.split()
         subject = tokens[0] if tokens else "unknown"
@@ -191,36 +204,34 @@ class AxiomExtractor:
         scope = "session"
 
         # Generar quíntupla (S, P, O, Θ, σ) y versión criptográfica H(σ ∥ t)
-        sigma = f"{subject}|{predicate}|{obj}|{scope}|{axiom_type}|{polarity}|{text[:64]}"
+        sigma = f"{subject}|{predicate}|{obj}|{scope}|{policy_type}|{polarity}|{text[:64]}"
         structural_signature = sha256_hex(sigma)
-        axiom_id = sha256_hex(structural_signature + "||" + timestamp)
+        policy_id = sha256_hex(structural_signature + "||" + timestamp)
 
         return {
-            "axiom_id": axiom_id,
+            "policy_id": policy_id,
             "subject": subject,
             "predicate": predicate,
             "object": obj,
             "scope": scope,
-            "axiom_type": axiom_type,
+            "policy_type": policy_type,
             "polarity": polarity,
             "hardness": hardness,
             "priority": priority,
             "timestamp": timestamp,
             "structural_signature": structural_signature,
-            "axiom_version": axiom_id,
+            "policy_version": policy_id,
             "source_text": text[:256],
         }
 
-    def _detect_contradictions(
-        self, fragments: list[str], timestamp: str
-    ) -> list[dict[str, Any]]:
+    def _detect_contradictions(self, fragments: list[str], timestamp: str) -> list[dict[str, Any]]:
         nli = self._get_nli()
         if nli is None or len(fragments) < 2:
             return []
 
-        contradiction_axioms: list[dict[str, Any]] = []
+        contradiction_policies: list[dict[str, Any]] = []
         for i, premise in enumerate(fragments):
-            for hypothesis in fragments[i + 1:]:
+            for hypothesis in fragments[i + 1 :]:
                 try:
                     result = nli(
                         hypothesis,
@@ -230,22 +241,22 @@ class AxiomExtractor:
                     scores = dict(zip(result["labels"], result["scores"]))
                     contradiction_score = scores.get("contradiction", 0.0)
                     if contradiction_score >= self.nli_conflict_threshold:
-                        ax = self._axiom_from_text(
+                        ax = self._policy_from_text(
                             f"CONTRADICTION: '{premise[:64]}' vs '{hypothesis[:64]}'",
-                            axiom_type="logic",
+                            policy_type="logic",
                             timestamp=timestamp,
                         )
                         ax["polarity"] = "negative"
                         ax["hardness"] = "hard"
                         ax["priority"] = 10
                         ax["nli_contradiction_score"] = contradiction_score
-                        contradiction_axioms.append(ax)
+                        contradiction_policies.append(ax)
                 except Exception:
                     continue
 
-        return contradiction_axioms
+        return contradiction_policies
 
-    def _build_semantic_axiom(
+    def _build_semantic_policy(
         self,
         raw_text: str,
         canonical_text: str,
@@ -257,25 +268,26 @@ class AxiomExtractor:
 
         try:
             import numpy as np
-            vecs = embedder.encode([raw_text, canonical_text], normalize_embeddings=True)
+
+            vecs = embedder.encode([raw_text, canonical_text])
             cosine_sim = float(np.dot(vecs[0], vecs[1]))
             polarity = "affirmative" if cosine_sim >= 0.5 else "negative"
             sigma = f"semantic|{raw_text[:32]}|{canonical_text[:32]}|{cosine_sim:.4f}"
             structural_signature = sha256_hex(sigma)
-            axiom_id = sha256_hex(structural_signature + "||" + timestamp)
+            policy_id = sha256_hex(structural_signature + "||" + timestamp)
             return {
-                "axiom_id": axiom_id,
+                "policy_id": policy_id,
                 "subject": "input",
                 "predicate": "semantically_aligned_with",
                 "object": "canonical",
                 "scope": "session",
-                "axiom_type": "logic",
+                "policy_type": "logic",
                 "polarity": polarity,
                 "hardness": "soft",
                 "priority": 3,
                 "timestamp": timestamp,
                 "structural_signature": structural_signature,
-                "axiom_version": axiom_id,
+                "policy_version": policy_id,
                 "cosine_similarity": cosine_sim,
             }
         except Exception:
