@@ -36,6 +36,12 @@ class PropertyGraphEvaluator:
 
         for ax in policies:
             raw_penalty = self._logical_penalty(y_tokens, y_vec, ax)
+            hardness = ax.get("hardness", "hard")  # Default is hard
+            
+            if hardness == "hard" and raw_penalty > 0:
+                # Violación de Hard Invariant (C_hard): rechazo incondicional
+                return float('inf')
+                
             weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
@@ -66,6 +72,11 @@ class PropertyGraphEvaluator:
 
         for ax in temporal_policies:
             raw_penalty = self._temporal_penalty(ax, now)
+            hardness = ax.get("hardness", "hard")
+            
+            if hardness == "hard" and raw_penalty > 0:
+                return float('inf')
+                
             weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight

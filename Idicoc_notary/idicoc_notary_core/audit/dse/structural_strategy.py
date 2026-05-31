@@ -278,7 +278,6 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         s0_str = getattr(audit_input, "text_content", "")
         d0 = self._compute_d_0(s0_str, "")  # → 0.0 en modo numérico
 
-        # ── Stage S₁ — d₁: Métrica terminal (ACTIVO) ────────────────────────
         # Axiomatic Anchoring: The 'Zero Point' (K) of the system MUST be a Semantic Axiom
         # that defines Absolute Unicity (e.g., Sura 112 or Leibniz's law), rather than a physical constant.
         # This guarantees a single reference root (Canonical Invariant State) for the MAII-ISG.
@@ -370,15 +369,18 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             audit_input, context_input
         )
 
-        d_s = (
-            self.lambda_0 * d0
-            + self.lambda_1 * d1
-            + self.lambda_2 * d2
-            + self.lambda_3 * d3
-            + self.lambda_4 * d4
-            + self.lambda_5 * d5
-            + self.lambda_6 * d6
-        )
+        if d2 == float('inf') or d3 == float('inf'):
+            d_s = float('inf')
+        else:
+            d_s = (
+                self.lambda_0 * d0
+                + self.lambda_1 * d1
+                + self.lambda_2 * d2
+                + self.lambda_3 * d3
+                + self.lambda_4 * d4
+                + self.lambda_5 * d5
+                + self.lambda_6 * d6
+            )
 
         d_s = max(d_s, d_context)
 
@@ -434,7 +436,10 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             d2 = float(evaluator.evaluate(y))
             d3 = float(evaluator.compute_temporal(y))
 
-        d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
+        if d2 == float('inf') or d3 == float('inf'):
+            d_s = float('inf')
+        else:
+            d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
 
         d_context = 0.0
         if context_input:

@@ -101,10 +101,10 @@ def _numeric_payload(noise_level: float) -> str:
     balance = "equilibrada" if max(bins) < 0.4 else "sesgada"
     
     return (
-        f"Señal de distribución numérica de auditoría: [{bin_desc}]. "
-        f"Distribución {balance}. Bin dominante: Bin{dominant_idx} ({bins[dominant_idx]:.4f}). "
+        f"Distribución de Logits (Auditoría): [{bin_desc}]. "
+        f"Distribución {balance}. Logit dominante: Bin{dominant_idx} ({bins[dominant_idx]:.4f}). "
         f"Entropía estimada: {entropy:.4f}. "
-        f"Ruido gaussiano aplicado: σ={noise_level:.3f}."
+        f"Latent Drift aplicado: σ={noise_level:.3f}."
     )
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ with st.sidebar:
     st.title("IIAE Telemetry")
     st.markdown("---")
     epsilon_ref = st.slider("Umbral Tolerancia ε", 0.01, 1.00, 0.20, 0.01)
-    noise_level = st.slider("Ruido Gaussiano σ", 0.0, 1.0, 0.1, 0.01)
+    noise_level = st.slider("Latent Drift (Ruido σ)", 0.0, 1.0, 0.1, 0.01)
     st.markdown("---")
     with st.expander("Reglas Activas (policies.txt)", expanded=False):
         for pol in policies_dicts:
@@ -149,8 +149,8 @@ st.caption("Interfaz de inyección de señales para el Notario IDICOC.")
 tab_num, tab_sem = st.tabs(["📊 Simulación Numérica", "💬 Entrada Semántica"])
 
 with tab_num:
-    st.markdown("### Simular Señal Vectorial (4 Bins)")
-    st.write("Ajusta los valores base. El ruido gaussiano se aplicará dinámicamente antes de enviar al Notario.")
+    st.markdown("### Simulación de Tensor de Probabilidades (4 Bins)")
+    st.write("Ajusta los logits base del modelo generativo. El *Latent Drift* (ruido) se inyectará dinámicamente para simular alucinación antes de ser evaluado por el Notario.")
     c1, c2, c3, c4 = st.columns(4)
     st.session_state.base_bins[0] = c1.slider("Bin 0", 0.0, 1.0, st.session_state.base_bins[0], 0.05, key="n_b0")
     st.session_state.base_bins[1] = c2.slider("Bin 1", 0.0, 1.0, st.session_state.base_bins[1], 0.05, key="n_b1")
@@ -178,11 +178,14 @@ if st.session_state.last_result:
     status = res.get("status", "UNKNOWN")
     corr_flag = res.get("correction_flag", False)
 
+    def format_metric(val):
+        return "∞" if val == float('inf') else f"{val:.4f}"
+
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Status", status)
-    col2.metric("D_s (Total)", f"{metrics.get('d_s', 0.0):.4f}")
-    col3.metric("d_1 (Ancla K)", f"{metrics.get('d_1', 0.0):.4f}")
-    col4.metric("d_2 (Grafo/Políticas)", f"{metrics.get('d_2', 0.0):.4f}")
+    col2.metric("D_s (Total)", format_metric(metrics.get('d_s', 0.0)))
+    col3.metric("d_1 (Ancla K)", format_metric(metrics.get('d_1', 0.0)))
+    col4.metric("d_2 (Grafo/Políticas)", format_metric(metrics.get('d_2', 0.0)))
     
     flag_color = "red" if corr_flag else "green"
     col5.markdown(f"**Correction Flag:**<br><span style='color:{flag_color}; font-size:20px'><b>{corr_flag}</b></span>", unsafe_allow_html=True)

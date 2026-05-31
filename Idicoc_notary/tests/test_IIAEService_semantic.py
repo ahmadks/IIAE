@@ -105,16 +105,18 @@ def test_semantic_service_with_similar_inputs(semantic_service):
     assert len(violated_policies) == 0
 
 
+import math
+
 def test_semantic_service_with_violation():
     """Test a semantic violation where audit_input contradicts context/policies."""
     semantic_service = _build_semantic_service(
         (
-            [0.8, 0.05],
-            0.6,
+            [float('inf'), 0.05],
+            float('inf'),
             "[SNAPPING ACTIVE] La respuesta generada por el modelo comercial incurrió en una disonancia factual insostenible.",
             True,
             {
-                "d_logic": 0.8,
+                "d_logic": float('inf'),
                 "max_context_distance": 0.6,
                 "violated_policies": ["Amount must not exceed the transaction limit."],
                 "contradictory_contexts": [
@@ -140,7 +142,7 @@ def test_semantic_service_with_violation():
     metadata = canonical_state.metadata
     d_s = metadata["d_s"]
     epsilon = metadata["epsilon_used"]
-    assert d_s > epsilon
+    assert math.isinf(d_s)
     print(f"DEBUG: semantic_meta={metadata}")
     correction_flag = metadata.get("correction_flag", False)
     assert correction_flag is True
@@ -161,12 +163,12 @@ def test_semantic_out_of_context_and_policies():
     """
     service = _build_semantic_service(
         (
-            0.95,  # D_s alto
+            float('inf'),  # D_s infinito por violación dura
             0.85,  # D_f
             "[RECONSTRUCTION] Text totally unrelated to established domain.",
             True,  # Requiere corrección
             {
-                "d_logic": 0.95,
+                "d_logic": float('inf'),
                 "max_context_distance": 0.85,
                 "violated_policies": ["Outside established domain"],
                 "contradictory_contexts": ["No overlapping context found"],
@@ -189,7 +191,7 @@ def test_semantic_out_of_context_and_policies():
 
     assert canonical_state is not None
     metadata = canonical_state.metadata
-    assert metadata["d_s"] == 0.95
+    assert math.isinf(metadata["d_s"])
     # Al no poder ser corregido dentro del límite de rigidez (0.1), se rechaza y correction_flag es False
     assert metadata["correction_flag"] is False
     assert metadata["admission_breach"] is True

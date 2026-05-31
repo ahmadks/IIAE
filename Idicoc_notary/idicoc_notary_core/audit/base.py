@@ -30,7 +30,7 @@ class CanonicalStateDTO:
 
     data: Any
     metadata: dict[str, Any] = field(default_factory=dict)
-    source_policies: list[str] = field(default_factory=list)
+    source_policies: list[Any] = field(default_factory=list)
     integrity_hash: str = field(default="")
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

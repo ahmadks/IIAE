@@ -17,6 +17,36 @@ from .exceptions import WrapperInitializationError
 from .pipeline import IDICOCPipeline
 
 
+class CompatibleCanonicalState(CanonicalStateDTO):
+    """Subclase de CanonicalStateDTO compatible con el acceso de diccionario de la UI."""
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "canonical_state":
+            return self
+        if key == "source_policies":
+            return self.source_policies
+        if key == "metadata":
+            return self.metadata
+        if key == "status":
+            return "REJECTED" if self.metadata.get("admission_breach", False) else "ADMITTED"
+        if key == "correction_flag":
+            return self.metadata.get("correction_flag", False)
+        if key == "dissonance_metrics":
+            ac = self.metadata.get("algebraic_components", {})
+            return {
+                "d_s": self.metadata.get("d_s", 0.0),
+                "d_1": ac.get("d_1", 0.0),
+                "d_2": ac.get("d_2", 0.0),
+            }
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
 class IDICOCNotaryClient(IIAENotaryContract):
     """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
@@ -69,7 +99,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         epsilon_override: float | None = None,
         trace_input: str = "",
         client_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
@@ -142,7 +172,14 @@ class IDICOCNotaryClient(IIAENotaryContract):
             trace_input=trace_input,
             client_id=client_id,
         )
-        return result
+        canonical = result["canonical_state"]
+        return CompatibleCanonicalState(
+            data=canonical.data,
+            metadata=canonical.metadata,
+            source_policies=canonical.source_policies,
+            integrity_hash=canonical.integrity_hash,
+            timestamp=canonical.timestamp,
+        )
 
     def process_dict(self, data: dict[str, Any]) -> dict[str, Any]:
         if not self._initialized or self.pipeline is None:
