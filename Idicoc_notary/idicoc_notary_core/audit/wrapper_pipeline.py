@@ -118,21 +118,32 @@ class IDICOCNotaryClient(IIAENotaryContract):
 
         class SemanticPayload:
             """Payload unificado: texto legible + vector embedding."""
-            def __init__(self, text: str, vec: "np.ndarray"):
+
+            def __init__(
+                self, text: str, vec: "np.ndarray", source_text: str, payload_type: str = "semantic"
+            ):
                 self.text_content = text
                 self.distribution = vec
+                self.source_text = source_text
+                self.payload_type = payload_type
 
-        def _to_text(inp: Any) -> str:
+            def __repr__(self) -> str:
+                return (
+                    f"SemanticPayload(payload_type={self.payload_type!r}, "
+                    f"source_text={self.source_text!r})"
+                )
+
+        def _to_text(inp: Any) -> tuple[str, str]:
             """Serializa cualquier tipo de entrada a texto descriptivo en español."""
             # Ya es un string
             if isinstance(inp, str):
-                return inp
+                return inp, "semantic"
             # Dict con campo 'text'
             if isinstance(inp, dict) and "text" in inp:
-                return str(inp["text"])
+                return str(inp["text"]), "semantic"
             # Ya tiene text_content (SemanticPayload previo)
             if hasattr(inp, "text_content") and inp.text_content:
-                return str(inp.text_content)
+                return str(inp.text_content), getattr(inp, "payload_type", "semantic")
             # Array o lista numérica → descripción de distribución
             try:
                 arr = np.asarray(inp, dtype=float).flatten()
@@ -146,17 +157,23 @@ class IDICOCNotaryClient(IIAENotaryContract):
                     return (
                         f"Señal vectorial de auditoría [{arr.size}D]: [{desc}]. "
                         f"Distribución {balance}. Dimensión dominante: dim{dominant} "
-                        f"({float(dist[dominant]):.6f}). Entropía: {entropy:.6f}."
+                        f"({float(dist[dominant]):.6f}). Entropía: {entropy:.6f}.",
+                        "numeric",
                     )
             except (TypeError, ValueError):
                 pass
             # Fallback genérico
-            return f"Entrada de auditoría: {str(inp)}"
+            return f"Entrada de auditoría: {str(inp)}", "semantic"
 
-        text_val = _to_text(audit_input)
+        text_val, payload_type = _to_text(audit_input)
         try:
             vec = EmbeddingService().encode(text_val)
-            audit_input = SemanticPayload(text_val, vec)
+            audit_input = SemanticPayload(
+                text_val,
+                vec,
+                source_text=str(audit_input),
+                payload_type=payload_type,
+            )
         except Exception as e:
             self.pipeline.logger.warning(
                 f"Error codificando audit_input al espacio semántico: {e}. "
@@ -187,7 +204,9 @@ class IDICOCNotaryClient(IIAENotaryContract):
 
         audit_input = data.get(self.config.input_field_audit, data.get("text", ""))
         context_input = data.get(self.config.input_field_context, data.get("context_input", []))
-        context_policies = data.get(self.config.input_field_policies, data.get("context_policies", []))
+        context_policies = data.get(
+            self.config.input_field_policies, data.get("context_policies", [])
+        )
         epsilon_override = data.get("epsilon_override", None)
         trace_input = data.get("trace_input", "")
         client_id = data.get("client_id", None)

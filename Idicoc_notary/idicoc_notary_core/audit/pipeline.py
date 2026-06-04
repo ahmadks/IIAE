@@ -20,6 +20,7 @@ from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 from idicoc_notary_core.kernel.verification.verifier import InvariantVerifier
 from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
 from idicoc_notary_core.utils.logger import get_logger
+from idicoc_notary_core.audit.graph.loader.file_loader import split_policy_line
 
 from .base import CanonicalStateDTO
 from .persistence.file_backend import FileCTMStorage
@@ -287,7 +288,7 @@ class IDICOCPipeline:
                             or f"dynamic_policy_{idx}"
                         )
                     elif isinstance(ax_item, str):
-                        parts = [p.strip() for p in ax_item.split("|")]
+                        parts = split_policy_line(ax_item)
                         if not parts or not parts[0]:
                             continue
 
@@ -382,16 +383,19 @@ class IDICOCPipeline:
             admitted = False
             correction_flag = False
             y_corrected = audit_input
+            y_corrected_for_metrics = audit_input
             D_f = 0.0
 
             if D_s <= epsilon_used:
                 admitted = True
                 y_corrected = audit_input
                 correction_flag = False
+                y_corrected_for_metrics = audit_input
             else:
                 y_corrected = self.dqe.project_to_manifold(
                     audit_input, manifold, V_hat, self.graph, context_input=context_input
                 )
+                y_corrected_for_metrics = y_corrected
                 D_s_corrected = self.dqe.compute_dissonance(
                     y_corrected, V_hat, self.graph, context_input=context_input
                 )
@@ -408,7 +412,13 @@ class IDICOCPipeline:
             elif hasattr(y_corrected, "distribution") and isinstance(
                 y_corrected.distribution, np.ndarray
             ):
-                y_corrected = y_corrected.distribution.tolist()
+                # Preserve SemanticPayload-like structures when they contain readable text.
+                if not (
+                    hasattr(y_corrected, "source_text") and hasattr(y_corrected, "text_content")
+                ):
+                    y_corrected = y_corrected.distribution.tolist()
+
+            y_corrected_for_metrics = audit_input if admitted else y_corrected_for_metrics
 
             # 6. AEM (Hebra segura mediante Lock de exclusión mutua)
             aem_record = {
@@ -442,7 +452,7 @@ class IDICOCPipeline:
             )
 
             evaluator = PropertyGraphEvaluator(self.graph)
-            d_logic = evaluator.evaluate(y_corrected)
+            d_logic = evaluator.evaluate(y_corrected_for_metrics)
 
             d_context = 0.0
             contradictory_contexts = []
@@ -451,9 +461,34 @@ class IDICOCPipeline:
             ):
                 d_context, contradictory_contexts = (
                     self.dissonance_strategy._compute_context_contradiction(
-                        y_corrected, context_input
+                        y_corrected_for_metrics, context_input
                     )
                 )
+
+            def normalize_payload(item: Any) -> Any:
+                import numpy as np
+
+                if hasattr(item, "source_text") and hasattr(item, "distribution"):
+                    dist = getattr(item, "distribution", None)
+                    if hasattr(dist, "tolist"):
+                        try:
+                            dist = dist.tolist()
+                        except Exception:
+                            dist = str(dist)
+                    return {
+                        "payload_type": getattr(item, "payload_type", None),
+                        "source_text": getattr(item, "source_text", None),
+                        "text_content": getattr(item, "text_content", None),
+                        "distribution": dist,
+                    }
+                if isinstance(item, np.ndarray):
+                    return item.tolist()
+                if isinstance(item, (list, tuple)):
+                    return [normalize_payload(v) for v in item]
+                return item
+
+            payload_data = normalize_payload(y_corrected) if admitted else "[REJECTED]"
+            structural_repr = normalize_payload(audit_input if not correction_flag else y_corrected)
 
             metadata = {
                 "timestamp": timestamp,
@@ -464,7 +499,7 @@ class IDICOCPipeline:
                 "correction_flag": correction_flag,
                 "admission_metrics": {
                     "admitted": admitted,
-                    "structural": str(audit_input) if not correction_flag else y_corrected,
+                    "structural": structural_repr,
                 },
                 "audit_metrics": {"d_s": D_s, "d_logic": d_logic},
                 "admission_breach": not admitted,
@@ -481,10 +516,10 @@ class IDICOCPipeline:
                 "algebraic_components": {
                     "d_0": 0.0,
                     "d_1": getattr(self.dissonance_strategy, "_d_inv_from_pair", lambda a, b: 0.0)(
-                        y_corrected, V_hat
+                        y_corrected_for_metrics, V_hat
                     ),
                     "d_2": d_logic,
-                    "d_3": evaluator.compute_temporal(y_corrected),
+                    "d_3": evaluator.compute_temporal(y_corrected_for_metrics),
                     "d_4": 0.0,
                     "d_5": 0.0,
                     "d_6": 0.0,
@@ -494,8 +529,6 @@ class IDICOCPipeline:
                 "S_i": (1.0 - D_s) * epsilon_used,
             }
             metadata.update(self.config.extra_metadata)
-
-            payload_data = y_corrected if admitted else "[REJECTED]"
 
             canonical_state = CanonicalStateDTO(
                 data=payload_data,
@@ -512,7 +545,7 @@ class IDICOCPipeline:
 
                 # Payload de seguridad del WAL
                 wal_payload = {
-                    "canonical_state": y_corrected,
+                    "canonical_state": payload_data,
                     "dissonance": D_s,
                     "invariant_state_hash": invariant_hash,
                     "property_graph_hash": graph_hash,
@@ -524,7 +557,7 @@ class IDICOCPipeline:
 
                 try:
                     self.ctm.commit(
-                        canonical_state=y_corrected,
+                        canonical_state=payload_data,
                         dissonance=D_s,
                         epsilon=epsilon_used,
                         property_graph=self.graph,
@@ -543,7 +576,7 @@ class IDICOCPipeline:
                     }
                     if self.kernel_client:
                         receipt = self.kernel_client.commit(
-                            canonical_state=y_corrected,
+                            canonical_state=payload_data,
                             dissonance=D_s,
                             fact_dissonance=0.0,
                             epsilon=epsilon_used,

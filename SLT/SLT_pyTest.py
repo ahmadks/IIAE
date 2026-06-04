@@ -11,9 +11,9 @@ def test_appliance_ssppu_blackbox():
     """EPR=0.95 → sub-Standard-Zero → IIAE-COMPLIANT (BLACK-BOX), No Safe Harbor."""
     data = SettlementInput(
         nsp=500.0,
-        ssppu_cost=15.0,       # IIAE chip cost $15
-        eta_s=95.0,
-        eta_r=5.0,             # EPR = 0.95
+        ssppu_cost=15.0,  # IIAE chip cost $15
+        y_total=100.0,
+        y_valid=95.0,  # EPR = 0.95
         ds_score=0.3,
     )
     r = slt.calculate_settlement(data)
@@ -47,8 +47,8 @@ def test_electric_car_system_level():
     """System-Level with EPR=0.999, Ds=0 → IIAE-COMPLIANT (BLACK-BOX)."""
     data = SettlementInput(
         nsp=80_000.0,
-        eta_s=99.9,
-        eta_r=0.1,             # EPR ≈ 0.999
+        y_total=1000.0,
+        y_valid=999.0,  # EPR ≈ 0.999
         ds_score=0.0,
         system_critical=True,
         trace_id="CAR-MODELS-001",
@@ -79,8 +79,8 @@ def test_commercial_ai_hardware_anchored_zip():
     """Tier 1.2 + Hardware Anchoring + Ds=0 → FULL SAFE HARBOR."""
     data = SettlementInput(
         service_revenue=10_000_000.0,
-        eta_s=99.8,
-        eta_r=0.2,
+        y_total=1000.0,
+        y_valid=998.0,  # EPR ≈ 0.998
         ds_score=0.0,
         margin_t=0.20,
         tier_12_audit=True,
@@ -109,7 +109,6 @@ def test_commercial_ai_hardware_anchored_zip():
     assert r["status"]["tier_12_eligible"] is True
 
 
-
 # ===================================================================
 # DEMO 4: REVERSION RULE (Tier 1.2 declared, no audit)
 # ===================================================================
@@ -118,8 +117,8 @@ def test_reversion_rule():
     data = SettlementInput(
         service_revenue=5_000_000.0,
         nsp=50_000_000.0,
-        eta_s=99.5,
-        eta_r=0.5,
+        y_total=1000.0,
+        y_valid=995.0,
         ds_score=0.0,
         tier_12_audit=False,
     )
@@ -138,6 +137,7 @@ def test_reversion_rule():
     assert r["status"]["standard"] == "IIAE-COMPLIANT (BLACK-BOX)"
     assert r["status"]["safe_harbor"] == "UNAVAILABLE (SOLE LIABILITY)"
 
+
 # ===================================================================
 # DEMO 5: SOFTWARE-CERTIFIED (Tier 1.2, Auditable, No Hardware)
 # ===================================================================
@@ -145,8 +145,8 @@ def test_software_certified_limited_safe_harbor():
     """Tier 1.2 + Audit + No Hardware → LIMITED SAFE HARBOR."""
     data = SettlementInput(
         service_revenue=1_000_000.0,
-        eta_s=99.5,
-        eta_r=0.5,
+        y_total=1000.0,
+        y_valid=995.0,
         ds_score=0.02,
         margin_t=0.12,
         tier_12_audit=True,
@@ -176,6 +176,7 @@ def test_software_certified_limited_safe_harbor():
     assert r["status"]["hardware_anchored"] is False
     assert r["status"]["tier_12_eligible"] is True
 
+
 # ===================================================================
 # DEMO 6: ZIP VOLUNTARY (margin_t <= C)
 # ===================================================================
@@ -183,8 +184,8 @@ def test_zip_voluntary():
     """ZIP=0 si margin_t <= 0.01."""
     data = SettlementInput(
         service_revenue=5_000_000,
-        eta_s=99.9,
-        eta_r=0.1,
+        y_total=1000.0,
+        y_valid=999.0,
         ds_score=0.0,
         margin_t=0.01,
         tier_12_audit=True,
@@ -200,8 +201,8 @@ def test_zip_floor_waiver():
     """Sin floor si margen < 5%."""
     data = SettlementInput(
         service_revenue=1_000_000,
-        eta_s=99.9,
-        eta_r=0.1,
+        y_total=1000.0,
+        y_valid=999.0,
         ds_score=0.0,
         margin_t=0.04,
         tier_12_audit=True,
@@ -221,9 +222,9 @@ def test_safe_harbor_ds_requirement():
     """Tier 1.2 Hardware-Anchored exige Ds=0 para Full Safe Harbor."""
     data = SettlementInput(
         service_revenue=1_000_000,
-        eta_s=99.9,
-        eta_r=0.1,
-        ds_score=0.01,             # Ds > 0 → no Full Safe Harbor
+        y_total=1000.0,
+        y_valid=999.0,
+        ds_score=0.01,  # Ds > 0 → no Full Safe Harbor
         tier_12_audit=True,
         hardware_anchored=True,
     )
@@ -239,11 +240,12 @@ def test_system_level_rejects_ssppu():
     """System-Level + SSPPU → ValueError al calcular settlement."""
     data = SettlementInput(
         nsp=50_000,
-        ssppu_cost=100,           # ❌ SSPPU not allowed for critical-system
+        ssppu_cost=100,  # ❌ SSPPU not allowed for critical-system
         system_critical=True,
     )
     with pytest.raises(ValueError, match="SSPPU is not allowed"):
         slt.calculate_settlement(data)  # ← El error se lanza AQUÍ, no en el constructor
+
 
 # ===================================================================
 # DEMO 10: CTM SEAL STRUCTURE
@@ -252,8 +254,8 @@ def test_ctm_seal_structure():
     """CTM seal existe y tiene 64 caracteres (SHA-256)."""
     data = SettlementInput(
         nsp=1000,
-        eta_s=99,
-        eta_r=1,
+        y_total=100.0,
+        y_valid=99.0,
         ds_score=0.1,
         trace_id="TEST123",
     )
@@ -269,8 +271,8 @@ def test_hardware_anchored_flag_propagation():
     """El flag hardware_anchored se propaga correctamente al reporte."""
     data = SettlementInput(
         service_revenue=500_000,
-        eta_s=99.9,
-        eta_r=0.1,
+        y_total=1000.0,
+        y_valid=999.0,
         ds_score=0.0,
         tier_12_audit=True,
         hardware_anchored=True,

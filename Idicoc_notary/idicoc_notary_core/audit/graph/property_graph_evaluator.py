@@ -5,6 +5,7 @@ import re
 
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 
+
 class PropertyGraphEvaluator:
     """
     Separates evaluation logic from the PropertyGraph data structure.
@@ -13,7 +14,6 @@ class PropertyGraphEvaluator:
 
     def __init__(self, graph: PropertyGraph):
         self.graph = graph
-
 
     # ──────────────────────────────────────────────────────────────────────────
     # evaluate(y) — dissonancia lógica
@@ -35,13 +35,16 @@ class PropertyGraphEvaluator:
         weighted_penalty = 0.0
 
         for ax in policies:
-            raw_penalty = self._logical_penalty(y_tokens, y_vec, ax)
+            if not self._policy_matches_mode(ax, y):
+                continue
+
+            raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
             hardness = ax.get("hardness", "hard")  # Default is hard
-            
+
             if hardness == "hard" and raw_penalty > 0:
                 # Violación de Hard Invariant (C_hard): rechazo incondicional
-                return float('inf')
-                
+                return float("inf")
+
             weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
@@ -71,12 +74,15 @@ class PropertyGraphEvaluator:
         weighted_penalty = 0.0
 
         for ax in temporal_policies:
+            if not self._policy_matches_mode(ax, y):
+                continue
+
             raw_penalty = self._temporal_penalty(ax, now)
             hardness = ax.get("hardness", "hard")
-            
+
             if hardness == "hard" and raw_penalty > 0:
-                return float('inf')
-                
+                return float("inf")
+
             weight = self._policy_weight(ax)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
@@ -104,8 +110,44 @@ class PropertyGraphEvaluator:
         return str(y)
 
     @staticmethod
+    def _input_mode(y: Any) -> str:
+        if hasattr(y, "payload_type"):
+            return str(getattr(y, "payload_type") or "all").lower()
+        if isinstance(y, str):
+            return "semantic"
+        try:
+            import numpy as np
+
+            if isinstance(y, np.ndarray):
+                return "numeric"
+        except Exception:
+            pass
+
+        if isinstance(y, (list, tuple)):
+            return "numeric"
+        if hasattr(y, "distribution"):
+            return getattr(y, "payload_type", "numeric")
+        return "semantic"
+
+    @staticmethod
+    def _policy_mode(policy: Dict[str, Any]) -> str:
+        return str(policy.get("mode", "all")).lower()
+
+    def _policy_matches_mode(self, policy: Dict[str, Any], y: Any) -> bool:
+        policy_mode = self._policy_mode(policy)
+        if policy_mode == "all":
+            return True
+        input_mode = self._input_mode(y)
+        if input_mode == "semantic":
+            return policy_mode in ("semantic", "all")
+        if input_mode == "numeric":
+            return policy_mode in ("numeric", "all")
+        return True
+
+    @staticmethod
     def _tokenize(text: str) -> Set[str]:
         import re
+
         tokens = re.split(r"[\s,;:.!?()\[\]{}'\"]+", text.lower())
         return {t for t in tokens if t}
 
@@ -124,6 +166,7 @@ class PropertyGraphEvaluator:
         try:
             import numpy as np
             import re
+
             candidate = getattr(y, "measure_vector", getattr(y, "distribution", y))
             if isinstance(candidate, str):
                 nums = [float(m.group(0)) for m in re.finditer(r"[-+]?[0-9]*\.?[0-9]+", candidate)]
@@ -158,50 +201,54 @@ class PropertyGraphEvaluator:
         union = len(set_a | set_b)
         return intersection / union if union > 0 else 0.0
 
-
-    def _evaluate_regex(self, ax: dict, y_tokens: Set[str]) -> float:
+    def _evaluate_regex(self, ax: dict, y: Any) -> float:
         """Evaluate regex policies on string representations."""
         import re
-        text_y = " ".join(y_tokens)
+
+        text_y = self._to_str(y)
         pattern = ax.get("pattern", ax.get("text", ""))
-        
+
         if not pattern:
             return 0.0
-            
-        match = re.search(pattern, text_y)
-        
+        try:
+            match = re.search(pattern, text_y, re.IGNORECASE)
+        except re.error:
+            match = re.search(pattern, text_y)
+
         polarity = ax.get("polarity", "affirmative")
         if polarity == "affirmative":
             return 0.0 if match else 1.0
         else:
             return 1.0 if match else 0.0
 
-    def _logical_penalty(self, y_tokens: Set[str], y_vec: Optional[list], policy: Dict[str, Any]) -> float:
+    def _logical_penalty(
+        self, y: Any, y_tokens: Set[str], y_vec: Optional[list], policy: Dict[str, Any]
+    ) -> float:
         """
         Evaluate logical constraints (policies) against output y.
         Policies are evaluated based on their 'policy_type'.
         """
         a_type = policy.get("policy_type", "fact")
         polarity = policy.get("polarity", "affirmative")
-        
-        if a_type == "regex":
-            return self._evaluate_regex(policy, y_tokens)
-        else:
-            # Semantic / default evaluation
-            ax_embedding: Optional[list] = policy.get("embedding")
-            if ax_embedding is not None and y_vec is not None:
-                dist = self._cosine_distance(y_vec, ax_embedding)
-                similarity = 1.0 - dist
-            else:
-                ax_tokens = self._tokenize(self._policy_text(policy))
-                if not ax_tokens:
-                    return 0.0
-                similarity = self._jaccard(y_tokens, ax_tokens)
 
-            if polarity == "affirmative":
-                return 1.0 - similarity
-            else:
-                return similarity
+        if a_type in ("regex", "numeric"):
+            return self._evaluate_regex(policy, y)
+
+        # Semantic / default evaluation
+        ax_embedding: Optional[list] = policy.get("embedding")
+        if ax_embedding is not None and y_vec is not None:
+            dist = self._cosine_distance(y_vec, ax_embedding)
+            similarity = 1.0 - dist
+        else:
+            ax_tokens = self._tokenize(self._policy_text(policy))
+            if not ax_tokens:
+                return 0.0
+            similarity = self._jaccard(y_tokens, ax_tokens)
+
+        if polarity == "affirmative":
+            return 1.0 - similarity
+        else:
+            return similarity
 
     def _temporal_penalty(self, policy: Dict[str, Any], now: datetime) -> float:
         valid_from = self._parse_dt(policy.get("valid_from"))
@@ -214,6 +261,7 @@ class PropertyGraphEvaluator:
                 try:
                     ttl_val = float(policy["ttl_seconds"])
                     from datetime import timedelta
+
                     valid_until = base + timedelta(seconds=ttl_val)
                 except (ValueError, TypeError):
                     pass

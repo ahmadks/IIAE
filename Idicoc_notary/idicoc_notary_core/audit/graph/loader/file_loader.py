@@ -6,10 +6,23 @@ from idicoc_notary_core.utils.logger import get_logger
 
 logger = get_logger("audit.policy_loader.file_loader")
 
+
+def split_policy_line(line: str) -> List[str]:
+    """Split a policy line on unescaped delimiters while preserving regex values."""
+    parts = [p.strip() for p in line.split("|")]
+    if len(parts) <= 7:
+        return parts
+
+    for idx, part in enumerate(parts[6:], start=6):
+        if part.startswith("pattern="):
+            return parts[:idx] + ["|".join(parts[idx:])]
+    return parts
+
+
 class FilePolicyLoader:
     """
     Cargador de politicas desde un archivo (texto delimitado por '|' o JSON).
-    
+
     Formato delimitado:
     texto | tipo | polaridad | dureza | prioridad
     """
@@ -48,14 +61,14 @@ class FilePolicyLoader:
                     # Skip empty lines and comments
                     if not line or line.startswith("#"):
                         continue
-                    
-                    parts = [p.strip() for p in line.split("|")]
+
+                    parts = split_policy_line(line)
                     if not parts or not parts[0]:
                         continue
-                        
+
                     # Determinar si el formato tiene ID (al menos 6 campos y el primero no contiene '=')
                     has_id = len(parts) >= 6 and "=" not in parts[0]
-                    
+
                     if has_id:
                         policy_id = parts[0]
                         text = parts[1]
@@ -80,7 +93,7 @@ class FilePolicyLoader:
                         extra_parts = parts[5:]
 
                     timestamp = datetime.now(timezone.utc).isoformat()
-                    
+
                     policy: Dict[str, Any] = {
                         "text": text,
                         "policy_type": policy_type,
@@ -89,7 +102,7 @@ class FilePolicyLoader:
                         "priority": priority,
                         "timestamp": timestamp,
                         "source": f"file:{os.path.basename(self.file_path)}:{line_idx+1}",
-                        "source_text": text
+                        "source_text": text,
                     }
                     if policy_id:
                         policy["id"] = policy_id
@@ -112,5 +125,5 @@ class FilePolicyLoader:
                     policies.append(policy)
         except Exception as e:
             logger.error(f"Error reading text policy file {self.file_path}: {e}")
-            
+
         return policies

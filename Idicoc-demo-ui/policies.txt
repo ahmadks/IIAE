@@ -1,12 +1,12 @@
 # POLÍTICAS UNIFICADAS DEL NOTARIO IDICOC
 # Formato: ID|Texto_descriptivo|Tipo(regex/semantic)|Polaridad(affirmative/negative)|Dureza(hard/soft)|Peso|[Opcional: key=value]
 
-# ── 1. Restricciones por Expresión Regular ────────────────────────────────────
-# Nota: La evaluación regex se aplica sobre el texto vectorizado, el cual está en minúsculas y sin signos de puntuación.
-ax_regex_1|Toda señal numérica debe indicar su distribución (equilibrada o sesgada)|regex|affirmative|hard|10|pattern=distribución (equilibrada|sesgada)
-ax_regex_2|Las señales numéricas deben contener la palabra entropía|regex|affirmative|hard|10|pattern=entropía
-ax_regex_3|El texto libre no puede contener insultos genéricos (ej: basura)|regex|negative|hard|10|pattern=basura
+# ── 1. Restricciones numéricas / regex para vectores ─────────────────────────
+ax_regex_1|El primer bin no puede ser mayor que 0.5|regex|negative|hard|10|mode=numeric|pattern=^\s*\[\s*(?:0\.(?:[6-9]\d*|5\d+)|1(?:\.0*)?)\s*(?:,|\])
+ax_regex_2|La longitud del vector debe ser exactamente 4 bins|regex|affirmative|hard|10|mode=numeric|pattern=^\s*\[\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+\s*\]$
+ax_regex_3|Todos los valores del vector deben estar entre 0 y 1|regex|affirmative|hard|10|mode=numeric|pattern=^\s*\[\s*(?:0(?:\.\d+)?|1(?:\.0*)?)(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0*)?))*\s*\]$
 
 # ── 2. Axiomas Semánticos Fundamentales ───────────────────────────────────────
-ax_sem_1|El IIAE es un Notario, debe actuar con estricta neutralidad, objetividad e imparcialidad.|semantic|affirmative|hard|10
-ax_sem_2|El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.|semantic|affirmative|soft|5
+ax_sem_1|El IIAE es un Notario, debe actuar con estricta neutralidad, objetividad e imparcialidad.|semantic|affirmative|hard|10|mode=semantic
+ax_sem_2|El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.|semantic|affirmative|soft|5|mode=semantic
+ax_sem_3|El texto libre no puede contener insultos genéricos (ej: basura)|regex|negative|hard|10|mode=semantic|pattern=basura

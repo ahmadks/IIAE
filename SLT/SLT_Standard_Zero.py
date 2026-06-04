@@ -5,14 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Literal
 from datetime import datetime, timezone
-
-try:
-    from idicoc_utils.hashing import sha256_hex
-except ImportError:
-    import sys
-    import os
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary")))
-    from idicoc_notary_core.utils.hashing import sha256_hex
+from idicoc_notary_core.utils.hashing import sha256_hex
 
 # ---------------------------------------------------------------------------
 # TYPE DEFINITIONS
@@ -33,17 +26,20 @@ SafeHarborType = Literal[
 class SettlementInput:
     """Inputs for SLT settlement - Open Constitution of Invariance."""
 
-    nsp: Optional[float] = None           # Net Selling Price (Tier 1.1 / System-Level)
+    nsp: Optional[float] = None  # Net Selling Price (Tier 1.1 / System-Level)
     service_revenue: Optional[float] = None  # Integrity-Certified Revenue (Tier 1.2)
-    ssppu_cost: Optional[float] = None    # SSPPU (Tier 1.1 only, not for System-Level)
-    eta_s: float = 0.0                    # Segregated / Purged Entropy (AEM)
-    eta_r: float = 0.0                    # Residual Entropy
-    ds_score: float = 1.0                 # Dissonance Coefficient D_s ∈ [0, 1]
-    margin_t: float = 0.0                 # Integrity premium T (e.g., 0.12 = 12%)
-    system_critical: bool = False         # True → cars, robots, spacecraft (System-Level)
-    tier_12_audit: bool = False           # True → continuous CTM logs + EPR reporting
-    hardware_anchored: bool = False       # True → ePUF / HSS / Cloud-HSM with attestation
-    trace_id: Optional[str] = None        # External transaction ID
+    ssppu_cost: Optional[float] = None  # SSPPU (Tier 1.1 only, not for System-Level)
+
+    # AEM Accounting Counters
+    y_total: float = 1.0  # Total signals processed by DQE
+    y_valid: float = 1.0  # Signals validated/corrected by DQE
+
+    ds_score: float = 1.0  # Dissonance Coefficient D_s ∈ [0, 1]
+    margin_t: float = 0.0  # Integrity premium T (e.g., 0.12 = 12%)
+    system_critical: bool = False  # True → cars, robots, spacecraft (System-Level)
+    tier_12_audit: bool = False  # True → continuous CTM logs + EPR reporting
+    hardware_anchored: bool = False  # True → ePUF / HSS / Cloud-HSM with attestation
+    trace_id: Optional[str] = None  # External transaction ID
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +68,7 @@ class SLTStandardZeroEngine:
         self.C_FACTOR = 0.01
 
         # ZIP parameters (Service Fee on surplus integrity margin)
-        self.ZIP_RATE = 0.15   # 15% of surplus margin above C
+        self.ZIP_RATE = 0.15  # 15% of surplus margin above C
         self.ZIP_FLOOR = 0.05  # 5% floor on surplus margin (FRAND exception applies)
 
         # Standard-Zero EPR threshold (Annex A)
@@ -81,20 +77,21 @@ class SLTStandardZeroEngine:
     # -------------------------------------------------------------------
     # TECHNICAL METRICS
     # -------------------------------------------------------------------
-    def calculate_epr(self, eta_s: float, eta_r: float) -> float:
+    def calculate_epr(self, y_valid: float, y_total: float) -> float:
         """
-        Entropy Purge Rate (EPR) = ηs / (ηs + η_r).
-        Annex A: Technical measure of entropy purge by AEM.
+        Execution Purity Rate (EPR) = y_valid / y_total.
+        Annex A: Technical measure of structural fidelity counted passively by the AEM.
         """
-        total_entropy = eta_s + eta_r
-        if total_entropy <= 0:
+        if y_total <= 0:
             return 1.0  # Rest state → Standard-Zero baseline
-        return eta_s / total_entropy
+        return y_valid / y_total
 
     # -------------------------------------------------------------------
     # TIER & BASE SELECTION
     # -------------------------------------------------------------------
-    def _select_tier_and_base(self, data: SettlementInput) -> tuple[TierType, float, str]:
+    def _select_tier_and_base(
+        self, data: SettlementInput
+    ) -> tuple[TierType, float, str]:
         """
         Tier selection and royalty base according to Sec 2.1, 2.1.1, 2.1.2.
 
@@ -111,8 +108,7 @@ class SLTStandardZeroEngine:
                 )
             if data.ssppu_cost is not None:
                 raise ValueError(
-                    "SSPPU is not allowed for system implementations "
-                    "(Sec 2.1.2)."
+                    "SSPPU is not allowed for system implementations " "(Sec 2.1.2)."
                 )
             return "1.1 SYSTEM-LEVEL", float(data.nsp), "NSP-System"
 
@@ -154,7 +150,7 @@ class SLTStandardZeroEngine:
         - Computes Safe Harbor status based on certification and hardware anchoring.
         """
         # 1. ── TECHNICAL INTEGRITY METRICS (Annex A) ────────────────
-        epr = self.calculate_epr(data.eta_s, data.eta_r)
+        epr = self.calculate_epr(data.y_valid, data.y_total)
         is_standard_zero = epr >= self.STANDARD_ZERO_EPR
         ds_compliant = data.ds_score <= self.epsilon
 
@@ -181,7 +177,11 @@ class SLTStandardZeroEngine:
         # Applies only to Tier 1.2, with certification + Standard-Zero + T > C
         zip_contribution = 0.0
         zip_floor_applied = False
-        if tier == "1.2 INFRASTRUCTURE" and is_certified and data.margin_t > self.C_FACTOR:
+        if (
+            tier == "1.2 INFRASTRUCTURE"
+            and is_certified
+            and data.margin_t > self.C_FACTOR
+        ):
             surplus_margin = data.margin_t - self.C_FACTOR
             surplus_value = royalty_base * surplus_margin
             zip_raw = surplus_value * self.ZIP_RATE
@@ -216,9 +216,7 @@ class SLTStandardZeroEngine:
                     else "PENDING_Ds_STABILIZATION"
                 )
                 sh_reason = (
-                    "OPERATIONALLY_COMPLIANT"
-                    if is_sh
-                    else "DRIFT_ABOVE_THRESHOLD"
+                    "OPERATIONALLY_COMPLIANT" if is_sh else "DRIFT_ABOVE_THRESHOLD"
                 )
         elif is_certified:
             # Limited Safe Harbor: software-certified (no hardware anchoring)
@@ -292,9 +290,7 @@ class SLTStandardZeroEngine:
                 "ctm_block": seal_block,
                 "audit_ref": "WO2026/XXXXX_SLT_ANNEX_A",
                 "logic": "FIXED_C_WITH_TIER_REVERSION_AND_ZIP",
-                "claims_ref": (
-                    "1,19,23,8.5.1" if data.system_critical else "1,19"
-                ),
+                "claims_ref": ("1,19,23,8.5.1" if data.system_critical else "1,19"),
                 "governance": "MAII/MAO-Protocol-Compliant",
             },
         }
@@ -343,7 +339,7 @@ class SLTStandardZeroEngine:
 TIER APPLIED: {report['tier']}
 
 TECHNICAL METRICS (ANNEX A)
-  EPR Index:    {report['metrics']['epr']}   (ηS/(ηS+ηR))
+  EPR Index:    {report['metrics']['epr']}   (y_valid / y_total)
   Ds Score:     {report['metrics']['ds_score']}   (Dissonance Coefficient)
   C-Factor:     {report['metrics']['coeff_c']}   (FRAND Constant C = 0.01)
 
@@ -386,9 +382,9 @@ if __name__ == "__main__":
     print("=" * 70)
     d1 = SettlementInput(
         nsp=500.0,
-        ssppu_cost=15.0,   # IIAE chip cost $15 (SSPPU, Tier 1.1 only)
-        eta_s=95.0,
-        eta_r=5.0,         # EPR = 0.95 (sub-Standard-Zero, but still Compliant)
+        ssppu_cost=15.0,  # IIAE chip cost $15 (SSPPU, Tier 1.1 only)
+        y_total=100.0,
+        y_valid=95.0,  # EPR = 0.95 (sub-Standard-Zero, but still Compliant)
         ds_score=0.3,
     )
     r1 = slt.calculate_settlement(d1)
@@ -400,9 +396,9 @@ if __name__ == "__main__":
     print("=" * 70)
     d2 = SettlementInput(
         nsp=80_000.0,
-        eta_s=99.9,
-        eta_r=0.1,            # EPR ≈ 0.999 (Standard-Zero)
-        ds_score=0.0,         # Ds=0 required for ASIL-D / DO-178C
+        y_total=1000.0,
+        y_valid=999.0,  # EPR ≈ 0.999 (Standard-Zero)
+        ds_score=0.0,  # Ds=0 required for ASIL-D / DO-178C
         system_critical=True,
         trace_id="CAR-MODEL-SZ-001",
     )
@@ -415,12 +411,12 @@ if __name__ == "__main__":
     print("=" * 70)
     d3 = SettlementInput(
         service_revenue=10_000_000.0,  # $10M/month Integrity-Certified Revenue
-        eta_s=99.8,
-        eta_r=0.2,                    # EPR ≈ 0.998 (Standard-Zero)
-        ds_score=0.0,                 # Ds=0 → Full Safe Harbor possible
-        margin_t=0.20,                # 20% integrity premium (T)
-        tier_12_audit=True,           # Continuous CTM logs + EPR reporting
-        hardware_anchored=True,       # ePUF / Cloud-HSM attested
+        y_total=1000.0,
+        y_valid=998.0,  # EPR ≈ 0.998 (Standard-Zero)
+        ds_score=0.0,  # Ds=0 → Full Safe Harbor possible
+        margin_t=0.20,  # 20% integrity premium (T)
+        tier_12_audit=True,  # Continuous CTM logs + EPR reporting
+        hardware_anchored=True,  # ePUF / Cloud-HSM attested
         trace_id="GEMINI-2026-05",
     )
     r3 = slt.calculate_settlement(d3)
@@ -431,10 +427,10 @@ if __name__ == "__main__":
     print("DEMO 4: SPACEX STARSHIP - critical System (System-Level)")
     print("=" * 70)
     d4 = SettlementInput(
-        nsp=100_000_000.0,   # $100M per vehicle
-        eta_s=99.99,
-        eta_r=0.01,          # EPR ≈ 0.9999 (Standard-Zero)
-        ds_score=0.0,        # Ds=0 for mission-critical aerospace
+        nsp=100_000_000.0,  # $100M per vehicle
+        y_total=10000.0,
+        y_valid=9999.0,  # EPR ≈ 0.9999 (Standard-Zero)
+        ds_score=0.0,  # Ds=0 for mission-critical aerospace
         system_critical=True,
         trace_id="STARSHIP-SN42",
     )
@@ -446,12 +442,12 @@ if __name__ == "__main__":
     print("DEMO 5: REVERSION RULE - Tier 1.2 without audit → Tier 1.1")
     print("=" * 70)
     d5 = SettlementInput(
-        service_revenue=5_000_000.0,   # Intended Integrity Revenue
-        nsp=50_000_000.0,              # NSP used for reversion
-        eta_s=99.5,
-        eta_r=0.5,
+        service_revenue=5_000_000.0,  # Intended Integrity Revenue
+        nsp=50_000_000.0,  # NSP used for reversion
+        y_total=1000.0,
+        y_valid=995.0,
         ds_score=0.0,
-        tier_12_audit=False,           # No CTM logs → automatic reversion
+        tier_12_audit=False,  # No CTM logs → automatic reversion
         trace_id="AI-SERVICE-NO-AUDIT",
     )
     r5 = slt.calculate_settlement(d5)
@@ -463,11 +459,11 @@ if __name__ == "__main__":
     print("=" * 70)
     d6 = SettlementInput(
         service_revenue=1_000_000.0,
-        eta_s=99.5,
-        eta_r=0.5,             # EPR ≈ 0.995 (Standard-Zero)
-        ds_score=0.02,         # Ds <= epsilon → compliant
-        margin_t=0.12,         # 12% integrity premium
-        tier_12_audit=True,    # CTM logs active
+        y_total=1000.0,
+        y_valid=995.0,  # EPR ≈ 0.995 (Standard-Zero)
+        ds_score=0.02,  # Ds <= epsilon → compliant
+        margin_t=0.12,  # 12% integrity premium
+        tier_12_audit=True,  # CTM logs active
         hardware_anchored=False,  # Software-only
         trace_id="SAAS-CERTIFIED-001",
     )
