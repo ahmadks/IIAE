@@ -56,9 +56,6 @@ class AuditConfig:
 
     # Configuración de backends de persistencia avanzados para CTM
     ctm_storage_backend: Any = "file"
-    ctm_postgres_uri: str | None = None
-    ctm_dynamodb_table: str | None = None
-    ctm_qldb_ledger: str | None = None
     ctm_storage_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Pesos de disonancia para las 7 etapas de la especificación IDICOC-DSE (lambda_0..lambda_6)
@@ -115,11 +112,7 @@ class AuditConfig:
     ctm_mode: str = "full"
 
     # Hiperparámetros dinámicos para optimización SPSA
-    spsa_a: float = 0.1
-    spsa_c: float = 1e-4
-    spsa_alpha: float = 0.602
-    spsa_gamma: float = 0.101
-    spsa_decay_enabled: bool = True
+    # (mantenidos en documentación / defaults si se requieren en el futuro)
 
     # Sistema de inyección de politicas
     policy_loader: "PolicyLoader | None" = None
@@ -195,11 +188,33 @@ class AuditConfig:
 
             hf_token = os.getenv("HF_TOKEN")
             auth = hf_token if hf_token else True
+            force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+            
             print(f"[Fase 1 - Cold Loop] Cargando pipeline NLI: {self.semantic_nli_model}")
-            self.nli_pipeline = hf_pipeline(
-                "zero-shot-classification",
-                model=self.semantic_nli_model,
-            )
+            if force_update:
+                self.nli_pipeline = hf_pipeline(
+                    "zero-shot-classification",
+                    model=self.semantic_nli_model,
+                    token=auth,
+                    local_files_only=False,
+                )
+            else:
+                try:
+                    self.nli_pipeline = hf_pipeline(
+                        "zero-shot-classification",
+                        model=self.semantic_nli_model,
+                        token=auth,
+                        local_files_only=True,
+                    )
+                except Exception:
+                    # Fallback si no está en cache
+                    print(f"[Fase 1 - Cold Loop] NLI no encontrado en caché local. Descargando...")
+                    self.nli_pipeline = hf_pipeline(
+                        "zero-shot-classification",
+                        model=self.semantic_nli_model,
+                        token=auth,
+                        local_files_only=False,
+                    )
         except Exception as e:
             import warnings
 
@@ -289,14 +304,35 @@ class AuditConfig:
 
                     hf_token = os.getenv("HF_TOKEN")
                     auth_token = hf_token if hf_token else True
+                    force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+                    
                     print(
                         f"[Fase 1 - Cold Loop] Cargando tokenizador Llama: {self.llama_model_name}"
                     )
-                    self.llama_tokenizer = AutoTokenizer.from_pretrained(
-                        self.llama_model_name,
-                        cache_dir="models_cache",
-                        token=auth_token,
-                    )
+                    if force_update:
+                        self.llama_tokenizer = AutoTokenizer.from_pretrained(
+                            self.llama_model_name,
+                            cache_dir="models_cache",
+                            token=auth_token,
+                            local_files_only=False,
+                        )
+                    else:
+                        try:
+                            self.llama_tokenizer = AutoTokenizer.from_pretrained(
+                                self.llama_model_name,
+                                cache_dir="models_cache",
+                                token=auth_token,
+                                local_files_only=True,
+                            )
+                        except Exception:
+                            # Fallback si no está en cache
+                            print(f"[Fase 1 - Cold Loop] Tokenizador Llama no encontrado en caché local. Descargando...")
+                            self.llama_tokenizer = AutoTokenizer.from_pretrained(
+                                self.llama_model_name,
+                                cache_dir="models_cache",
+                                token=auth_token,
+                                local_files_only=False,
+                            )
                 except Exception as e:
                     import warnings
 
@@ -310,6 +346,7 @@ class AuditConfig:
 
             # Crear e inicializar InvariantSynthesizer
             from .graph.invariant_synthesizer import InvariantSynthesizer
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
 
             embedding_service = None
             try:

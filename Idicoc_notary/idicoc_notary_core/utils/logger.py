@@ -84,9 +84,7 @@ def _handler_azure() -> logging.Handler:
         ) from exc
     connection_string = os.getenv("AZURE_LOG_CONNECTION_STRING")
     if not connection_string:
-        raise ValueError(
-            "Set AZURE_LOG_CONNECTION_STRING when using log_destination=azure"
-        )
+        raise ValueError("Set AZURE_LOG_CONNECTION_STRING when using log_destination=azure")
     return AzureLogHandler(connection_string=connection_string)
 
 
@@ -125,12 +123,9 @@ def _handler_elastic() -> logging.Handler:
 
 def _handler_datadog() -> logging.Handler:
     try:
-        from datadog import api, initialize
-        from logging.handlers import HTTPHandler
+        from datadog import initialize
     except ImportError as exc:
-        raise ImportError(
-            "IIAE_LOG_DESTINATION=datadog requires: pip install datadog"
-        ) from exc
+        raise ImportError("IIAE_LOG_DESTINATION=datadog requires: pip install datadog") from exc
     api_key = os.getenv("DD_API_KEY")
     if not api_key:
         raise ValueError("Set DD_API_KEY when using log_destination=datadog")

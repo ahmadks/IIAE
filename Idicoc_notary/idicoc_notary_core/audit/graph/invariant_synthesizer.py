@@ -145,7 +145,6 @@ class InvariantSynthesizer:
 
         logger.info(f"[Phase 1 - Cold Loop] Compilando {len(policies)} políticas...")
 
-        total_tokens = 0
         hard_policies = sum(1 for p in policies if p.get("hardness") == "hard")
         soft_policies = len(policies) - hard_policies
 
@@ -156,7 +155,6 @@ class InvariantSynthesizer:
                 hardness_multiplier=hardness_multiplier,
             )
             self.compilation_log.append(result)
-            total_tokens += len(result.forbidden_tokens)
 
         logger.info(
             f"[Phase 1 - Cold Loop] Compilación completada. "
@@ -444,23 +442,9 @@ class InvariantSynthesizer:
         paraphrases = []
         words = text.lower().strip().split()
 
-        # Intentar usar NLTK wordnet si está disponible localmente
+        # NLTK optional synonym expansion removed to avoid hard dependency.
+        # Use the local SYNONYM_MAP deterministic mapping instead.
         nltk_synonyms = {}
-        try:
-            import nltk
-            from nltk.corpus import wordnet
-
-            for word in words:
-                syns = []
-                for syn in wordnet.synsets(word):
-                    for lemma in syn.lemmas():
-                        name = lemma.name().replace("_", " ")
-                        if name != word and name not in syns:
-                            syns.append(name)
-                if syns:
-                    nltk_synonyms[word] = syns[:3]
-        except Exception:
-            pass
 
         # Generar paráfrasis reemplazando palabras por sus sinónimos
         for idx, word in enumerate(words):

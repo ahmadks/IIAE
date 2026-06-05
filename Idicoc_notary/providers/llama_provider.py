@@ -20,9 +20,31 @@ class LlamaProvider(BaseLLMProvider):
         try:
             # Lazy import to avoid hard dependency
             from sentence_transformers import SentenceTransformer
+            import os
 
             if embedding_model_name:
-                self.embedding_provider = SentenceTransformer(embedding_model_name)
+                cache_dir = os.getenv("IIAE_CACHE_DIR", "models_cache")
+                force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+
+                if force_update:
+                    self.embedding_provider = SentenceTransformer(
+                        embedding_model_name,
+                        cache_folder=cache_dir,
+                        local_files_only=False,
+                    )
+                else:
+                    try:
+                        self.embedding_provider = SentenceTransformer(
+                            embedding_model_name,
+                            cache_folder=cache_dir,
+                            local_files_only=True,
+                        )
+                    except Exception:
+                        self.embedding_provider = SentenceTransformer(
+                            embedding_model_name,
+                            cache_folder=cache_dir,
+                            local_files_only=False,
+                        )
         except Exception:
             self.embedding_provider = None
 

@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
     from idicoc_notary_core.kernel.projection import CanonicalState
-    from idicoc_notary_core.kernel.source.anchor import SourceAnchor
+
+    # SourceAnchor not required for type-checking here; removed as unused
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class DissonanceEvaluationResult:
 class DissonanceStrategy(ABC):
     """
     Interfaz abstracta para estrategias de cálculo de disonancia.
-    
+
     Todas las implementaciones DEBEN devolver exactamente el mismo tipo de retorno
     con la misma estructura de métricas para garantizar compatibilidad con el pipeline.
     """
@@ -47,9 +48,9 @@ class DissonanceStrategy(ABC):
     ) -> DissonanceEvaluationResult:
         """
         Compute dissonance metrics for the given audit input.
-        
+
         TODAS las implementaciones deben devolver DissonanceEvaluationResult.
-        
+
         Returns:
             DissonanceEvaluationResult donde:
             - structural_dissonance_ds (float): Dissonancia estructural [0, 1]

@@ -47,8 +47,33 @@ class EmbeddingService:
                     self.logger.info(f"Cargando modelo de embeddings: {model_name}")
                     try:
                         from sentence_transformers import SentenceTransformer
+                        import os
 
-                        model = SentenceTransformer(model_name)
+                        cache_dir = os.getenv("IIAE_CACHE_DIR", "models_cache")
+                        force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+
+                        if force_update:
+                            model = SentenceTransformer(
+                                model_name,
+                                cache_folder=cache_dir,
+                                local_files_only=False,
+                            )
+                        else:
+                            try:
+                                model = SentenceTransformer(
+                                    model_name,
+                                    cache_folder=cache_dir,
+                                    local_files_only=True,
+                                )
+                            except Exception:
+                                # Fallback si no está en cache
+                                self.logger.info(f"Modelo {model_name} no encontrado en caché local. Iniciando descarga...")
+                                model = SentenceTransformer(
+                                    model_name,
+                                    cache_folder=cache_dir,
+                                    local_files_only=False,
+                                )
+
                         self._models[model_name] = model
                         self.logger.info(f"Modelo {model_name} cargado exitosamente.")
                     except ImportError:

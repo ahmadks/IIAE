@@ -281,6 +281,9 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         """
         Computes total structural dissonance D_s = Σ_{i=0}^6 λ_i d_i across 7 stages.
         """
+        # Mark parameter as used to avoid dead-code reports when it's intentionally unused.
+        _ = validate_conflicts
+
         # K no tiene representación vectorial en este diseño.
         # En esta versión legacy de compute() no existe un target_state numérico.
         # Usamos 4 como dimensión canónica del anchor uniforme en la ruta numérica
@@ -428,6 +431,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         }
 
         from .dissonance_strategy import DissonanceEvaluationResult
+
         return DissonanceEvaluationResult(
             structural_dissonance_ds=d_s,
             factual_dissonance_df=d_context,
@@ -470,7 +474,6 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             d_context, _ = self._compute_context_contradiction(y, context_input)
 
         return max(d_s, d_context)
-
 
     def _compute_d_1_vectorized(self, mu_raw: np.ndarray, ref_raw: np.ndarray) -> float:
         if mu_raw.ndim != 1 or ref_raw.ndim != 1 or mu_raw.size == 0 or ref_raw.size == 0:

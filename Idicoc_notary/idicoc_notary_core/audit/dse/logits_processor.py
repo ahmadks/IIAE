@@ -60,7 +60,7 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
         self.mask_tensor = torch.tensor(
             list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long
         )
-        self.mask = self.mask_tensor
+        # 'mask' alias removed to avoid unused attribute; use mask_tensor directly.
 
         # Audit logs and stats
         self.intercepts_log: list[Dict] = [] if audit_trace else None
@@ -71,7 +71,7 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
 
     def __call__(
         self,
-        input_ids: torch.LongTensor,
+        _input_ids: torch.LongTensor,
         scores: torch.FloatTensor,
     ) -> torch.FloatTensor:
         """
@@ -105,7 +105,7 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
     def process_logits(
         self,
         logits: np.ndarray | torch.Tensor,
-        input_ids: Any = None,
+        _input_ids: Any = None,
     ) -> Any:
         """
         Legacy/compatibility method for testing.
