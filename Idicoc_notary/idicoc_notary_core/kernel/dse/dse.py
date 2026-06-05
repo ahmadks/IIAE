@@ -206,11 +206,15 @@ class PolicyExtractor:
                     polarity = "affirmative"
                     hardness = "soft"
                     priority = 5
+                extraction_mode = "nli_deterministic"  # Polaridad certificada por oráculo NLI
             except Exception as e:
                 logger.error(f"[DSE] NLI polarity detection failed: {e}")
                 if getattr(self.config, "enable_hard_halt", False):
                     raise RuntimeError(f"NLI polarity detection failed: {e}") from e
-                # Fallback to simple deterministic rules if NLI execution fails
+                # Fallback to simple deterministic rules if NLI execution fails.
+                # ADVERTENCIA: Esta rama implica degradación heurística y debe quedar
+                # registrada en el Merkle DAG como 'regex_fallback' para trazabilidad forense.
+                extraction_mode = "regex_fallback"
                 if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
                     polarity = "negative"
                     hardness = "hard"
@@ -224,7 +228,10 @@ class PolicyExtractor:
                     hardness = "soft"
                     priority = 5
         else:
-            # Fallback if NLI model is offline / not loaded (to avoid crashing unit tests)
+            # NLI offline (tests, entorno sin modelos). Modo degradado por diseño.
+            # Se registra 'regex_fallback' para que el notario forense sepa que esta
+            # política no fue evaluada por el oráculo semántico.
+            extraction_mode = "regex_fallback"
             if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
                 polarity = "negative"
                 hardness = "hard"
@@ -275,6 +282,12 @@ class PolicyExtractor:
             "structural_signature": structural_signature,
             "policy_version": policy_id,
             "source_text": text[:256],
+            # Campo de trazabilidad forense: permite al auditor distinguir políticas
+            # certificadas por el oráculo NLI de aquellas derivadas por reglas heurísticas.
+            # Un valor 'regex_fallback' en el Merkle DAG es una señal de alerta para
+            # revisores ISO 42001 / ETSI de que esa política puede no capturar violaciones
+            # semánticas (solo léxicas).
+            "extraction_mode": extraction_mode,
         }
 
     def _detect_contradictions(self, fragments: list[str], timestamp: str) -> list[dict[str, Any]]:
@@ -325,7 +338,12 @@ class PolicyExtractor:
         try:
             import numpy as np
 
-            vecs = embedder.encode([raw_text, canonical_text])
+            vecs = np.asarray(embedder.encode([raw_text, canonical_text]), dtype=float)
+            # Normalización L2 explícita: garantiza que np.dot sea el coseno real,
+            # no el producto escalar bruto. Crítico si el modelo retorna vectores no
+            # normalizados (cuantización FP16, fine-tuning, o variantes de SentenceTransformers).
+            norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+            vecs = vecs / np.where(norms < 1e-12, 1.0, norms)
             cosine_sim = float(np.dot(vecs[0], vecs[1]))
             polarity = "affirmative" if cosine_sim >= 0.5 else "negative"
             sigma = f"semantic|{raw_text}|{canonical_text}|{cosine_sim:.4f}"
