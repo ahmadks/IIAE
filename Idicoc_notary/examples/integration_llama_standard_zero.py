@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
 from idicoc_notary_core.utils.logger import get_logger
+from idicoc_notary_core.utils.model_downloader import ensure_llama_downloaded
 
 logger = get_logger("example.integration")
 
@@ -64,6 +65,18 @@ def phase_1_cold_loop():
     policies_path = setup_policies()
 
     # Inicializar configuración (AQUÍ se ejecuta Fase 1)
+    print("\n[Fase 1] Asegurando el modelo Llama en cache local...")
+    try:
+        ensure_llama_downloaded(
+            model_name="meta-llama/Meta-Llama-3-8B-Instruct",
+            cache_dir="models_cache",
+        )
+    except Exception as exc:
+        print(f"[Fase 1] ⚠ No se pudo descargar Llama automáticamente: {exc}")
+        print(
+            "  Asegúrate de tener HF_TOKEN configurado o de descargar el modelo manualmente con tests/utils/download_models.py."
+        )
+
     print("\n[Fase 1] Inicializando AuditConfig...")
     config = AuditConfig(
         policy_file_path=policies_path,

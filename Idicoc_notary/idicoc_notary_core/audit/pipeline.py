@@ -490,7 +490,20 @@ class IDICOCPipeline:
                     return [normalize_payload(v) for v in item]
                 return item
 
-            payload_data = normalize_payload(y_corrected) if admitted else "[REJECTED]"
+            payload_data = normalize_payload(y_corrected)
+            if (
+                isinstance(payload_data, list)
+                and hasattr(audit_input, "source_text")
+                and hasattr(audit_input, "distribution")
+                and hasattr(audit_input, "text_content")
+            ):
+                payload_data = {
+                    "payload_type": getattr(audit_input, "payload_type", None),
+                    "source_text": getattr(audit_input, "source_text", None),
+                    "text_content": getattr(audit_input, "text_content", None),
+                    "distribution": payload_data,
+                }
+
             structural_repr = normalize_payload(audit_input if not correction_flag else y_corrected)
 
             metadata = {

@@ -10,7 +10,7 @@ Especificación: IDICOC Standard-Zero, Sección 3.2 (Contención Determinista)
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 import numpy as np
 from idicoc_notary_core.utils.logger import get_logger
 
@@ -99,9 +99,9 @@ class DeterministicMUXLogitsProcessor:
 
     def process_logits(
         self,
-        logits: np.ndarray,
-        input_ids: np.ndarray | None = None,
-    ) -> np.ndarray:
+        logits: np.ndarray | Any,
+        input_ids: np.ndarray | Any | None = None,
+    ) -> Any:
         """
         Aplica máscara O(1) a logits interceptados.
 
@@ -111,56 +111,116 @@ class DeterministicMUXLogitsProcessor:
         3. logits_masked = logits + máscara
 
         Args:
-            logits: Array [vocab_size] o [batch_size, vocab_size]
-            input_ids: Array de tokens previos (para auditoría)
+            logits: Array o tensor [vocab_size] o [batch_size, vocab_size]
+            input_ids: Array o tensor de tokens previos (para auditoría)
 
         Returns:
             Logits modificados
         """
         self.logits_processed_count += 1
 
-        # Manejar tanto arrays 1D como 2D
-        original_shape = logits.shape
-        if len(logits.shape) == 1:
-            logits = logits[np.newaxis, :]  # Agregar dimensión batch
+        use_torch = False
+        torch = None
+        try:
+            import torch
+
+            if hasattr(logits, "to") and hasattr(logits, "dtype"):
+                use_torch = True
+        except ImportError:
+            torch = None
+
+        if use_torch:
+            if logits.dim() == 1:
+                logits = logits.unsqueeze(0)
+                was_1d = True
+            else:
+                was_1d = False
+
+            batch_size, vocab_size = logits.shape
+            mask = torch.zeros_like(logits)
+
+            if self.forbidden_token_ids:
+                token_ids = torch.tensor(
+                    sorted(self.forbidden_token_ids),
+                    dtype=torch.long,
+                    device=logits.device,
+                )
+                valid = (token_ids >= 0) & (token_ids < vocab_size)
+                token_ids = token_ids[valid]
+                if token_ids.numel() > 0:
+                    mask[:, token_ids] = torch.tensor(
+                        -1e10, dtype=logits.dtype, device=logits.device
+                    )
+
+            logits_masked = logits + mask
+
+            if self.audit_trace and self.intercepts_log is not None:
+                max_before = float(torch.max(logits).detach().cpu().item())
+                max_after = float(torch.max(logits_masked).detach().cpu().item())
+                min_before = float(torch.min(logits).detach().cpu().item())
+                min_after = float(torch.min(logits_masked).detach().cpu().item())
+                intercept_record = {
+                    "iteration": self.intercepts_count,
+                    "vocab_size": vocab_size,
+                    "forbidden_count": len(self.forbidden_token_ids),
+                    "max_logit_before": max_before,
+                    "max_logit_after": max_after,
+                    "min_logit_before": min_before,
+                    "min_logit_after": min_after,
+                }
+
+                if (
+                    input_ids is not None
+                    and hasattr(input_ids, "shape")
+                    and len(input_ids.shape) > 0
+                ):
+                    last_token = input_ids[-1] if len(input_ids) > 0 else -1
+                    intercept_record["last_token_id"] = int(last_token)
+
+                self.intercepts_log.append(intercept_record)
+                self.intercepts_count += 1
+
+            if was_1d:
+                logits_masked = logits_masked[0]
+
+            return logits_masked
+
+        # Fallback numpy path for compatibility si torch no está disponible
+        if isinstance(logits, np.ndarray):
+            tensor_logits = logits
+        else:
+            tensor_logits = np.asarray(logits, dtype=float)
+
+        if tensor_logits.ndim == 1:
+            tensor_logits = tensor_logits[np.newaxis, :]
             was_1d = True
         else:
             was_1d = False
 
-        batch_size, vocab_size = logits.shape
-
-        # Crear máscara (O(n_forbidden) amortizado a O(1) con sets)
-        mask = np.zeros((batch_size, vocab_size), dtype=logits.dtype)
-
-        # Aplicar máscara a tokens prohibidos
+        batch_size, vocab_size = tensor_logits.shape
+        mask = np.zeros((batch_size, vocab_size), dtype=tensor_logits.dtype)
         for token_id in self.forbidden_token_ids:
             if 0 <= token_id < vocab_size:
-                mask[:, token_id] = -1e10  # Valor muy negativo (equivalente a -∞ en FP32)
+                mask[:, token_id] = -1e10
 
-        # Logits modificados
-        logits_masked = logits + mask
+        logits_masked = tensor_logits + mask
 
-        # Auditoría (si está habilitada)
         if self.audit_trace and self.intercepts_log is not None:
             intercept_record = {
                 "iteration": self.intercepts_count,
                 "vocab_size": vocab_size,
                 "forbidden_count": len(self.forbidden_token_ids),
-                "max_logit_before": float(np.max(logits)),
+                "max_logit_before": float(np.max(tensor_logits)),
                 "max_logit_after": float(np.max(logits_masked)),
-                "min_logit_before": float(np.min(logits)),
-                "min_logit_before": float(np.min(logits_masked)),
+                "min_logit_before": float(np.min(tensor_logits)),
+                "min_logit_after": float(np.min(logits_masked)),
             }
-
-            # Contar cuántos tokens prohibidos tienen probabilidad asignada
-            if input_ids is not None and len(input_ids.shape) > 0:
+            if input_ids is not None and hasattr(input_ids, "shape") and len(input_ids.shape) > 0:
                 last_token = input_ids[-1] if len(input_ids) > 0 else -1
                 intercept_record["last_token_id"] = int(last_token)
-
             self.intercepts_log.append(intercept_record)
             self.intercepts_count += 1
 
-        # Restaurar forma original
         if was_1d:
             logits_masked = logits_masked[0]
 

@@ -44,23 +44,25 @@ class ModelDownloader:
         from sentence_transformers import SentenceTransformer
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+        auth_token = self.token if self.token is not None else True
+
         print(f"[Phase 1 - Cold Loop] Downloading embedding model: {embedding_model_name}")
         SentenceTransformer(
             embedding_model_name,
             cache_folder=self.cache_dir,
-            token=self.token,
+            use_auth_token=auth_token,
         )
 
         print(f"[Phase 1 - Cold Loop] Downloading entailment model: {entailment_model_name}")
         AutoTokenizer.from_pretrained(
             entailment_model_name,
             cache_dir=self.cache_dir,
-            token=self.token,
+            use_auth_token=auth_token,
         )
         AutoModelForSequenceClassification.from_pretrained(
             entailment_model_name,
             cache_dir=self.cache_dir,
-            token=self.token,
+            use_auth_token=auth_token,
         )
 
         if include_llama:
@@ -79,11 +81,13 @@ class ModelDownloader:
         """
         from transformers import AutoTokenizer, AutoModelForCausalLM
 
+        auth_token = self.token if self.token is not None else True
+
         print(f"[Phase 1 - Invariant Synthesizer] Downloading Llama tokenizer: {model_name}")
         tokenizer = AutoTokenizer.from_pretrained(
             model_name,
             cache_dir=self.cache_dir,
-            token=self.token,
+            use_auth_token=auth_token,
         )
         print(f"[Phase 1 - Invariant Synthesizer] Tokenizer vocabulary size: {len(tokenizer)}")
 
@@ -91,7 +95,7 @@ class ModelDownloader:
         AutoModelForCausalLM.from_pretrained(
             model_name,
             cache_dir=self.cache_dir,
-            token=self.token,
+            use_auth_token=auth_token,
             device_map="auto" if _is_torch_available() else None,
         )
         print(f"[Phase 1 - Invariant Synthesizer] Llama model weights cached successfully.")

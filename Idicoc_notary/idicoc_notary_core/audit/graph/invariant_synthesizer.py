@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
+import re
+import numpy as np
 from idicoc_notary_core.utils.logger import get_logger
 
 logger = get_logger("audit.invariant_synthesizer")
@@ -200,37 +202,186 @@ class InvariantSynthesizer:
         priority: int,
     ) -> List[InvariantToken]:
         """Extrae tokens de concepto clave de una política."""
-        tokens = []
+        tokens: List[InvariantToken] = []
 
         try:
-            # Tokenizar directamente
-            token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+            concept_phrases = self._extract_concept_phrases(text)
+            if not concept_phrases:
+                concept_phrases = [text]
 
-            for token_id in token_ids:
-                # Evitar tokens especiales o muy raros
-                if token_id >= self.vocab_size or token_id < 0:
-                    continue
+            if self.embedding_service and len(concept_phrases) > 1:
+                concept_phrases = self._prioritize_semantic_concepts(text, concept_phrases)
 
-                # Decodificar para logging
-                try:
-                    token_text = self.tokenizer.decode([token_id])
-                except:
-                    token_text = f"<UNK:{token_id}>"
+            seen_token_ids: Set[int] = set()
+            for phrase in concept_phrases:
+                token_ids = self.tokenizer.encode(phrase, add_special_tokens=False)
+                for token_id in token_ids[:10]:
+                    if token_id in seen_token_ids:
+                        continue
+                    if token_id >= self.vocab_size or token_id < 0:
+                        continue
+                    seen_token_ids.add(token_id)
 
-                token = InvariantToken(
-                    token_id=token_id,
-                    token_text=token_text,
-                    source_policy=text[:50] + ("..." if len(text) > 50 else ""),
-                    policy_id=policy_id,
-                    hardness=hardness,
-                    priority=priority,
-                )
-                tokens.append(token)
+                    try:
+                        token_text = self.tokenizer.decode([token_id])
+                    except Exception:
+                        token_text = f"<UNK:{token_id}>"
+
+                    tokens.append(
+                        InvariantToken(
+                            token_id=token_id,
+                            token_text=token_text,
+                            source_policy=text[:50] + ("..." if len(text) > 50 else ""),
+                            policy_id=policy_id,
+                            hardness=hardness,
+                            priority=priority,
+                        )
+                    )
 
         except Exception as e:
             logger.warning(f"Error extrayendo tokens de '{text}': {e}")
 
         return tokens
+
+    def _extract_concept_phrases(self, text: str) -> List[str]:
+        """Extrae frases y conceptos relevantes de una política antes de tokenizar."""
+        normalized = text.strip()
+        if not normalized:
+            return []
+
+        phrases: List[str] = []
+        quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'|‘([^’]+)’|“([^”]+)”', text)
+        for group in quoted:
+            for match in group:
+                if match:
+                    phrases.append(match.strip())
+
+        tokens = re.findall(r"\b[\wáéíóúüñÁÉÍÓÚÜÑ']+\b", normalized, flags=re.UNICODE)
+        stopwords = {
+            "de",
+            "la",
+            "el",
+            "los",
+            "las",
+            "y",
+            "o",
+            "en",
+            "por",
+            "para",
+            "con",
+            "sin",
+            "al",
+            "del",
+            "a",
+            "un",
+            "una",
+            "unos",
+            "unas",
+            "se",
+            "su",
+            "sus",
+            "como",
+            "que",
+            "es",
+            "no",
+            "pero",
+            "más",
+            "menos",
+            "este",
+            "esta",
+            "estos",
+            "estas",
+            "también",
+            "muy",
+            "desde",
+            "hasta",
+            "entre",
+            "sobre",
+            "contra",
+            "durante",
+            "mediante",
+            "mientras",
+            "ni",
+            "ya",
+            "porque",
+            "cuando",
+            "quien",
+            "quienes",
+            "cual",
+            "cuales",
+            "donde",
+            "todo",
+            "todos",
+            "toda",
+            "todas",
+            "algo",
+            "alguna",
+            "algunas",
+            "algun",
+            "algunos",
+            "su",
+            "sus",
+            "tiene",
+            "tienen",
+            "ser",
+            "estar",
+            "hay",
+            "tener",
+            "hacer",
+            "puede",
+            "pueden",
+        }
+
+        content_words = [
+            w for w in (token.lower() for token in tokens) if w not in stopwords and len(w) > 2
+        ]
+        if content_words:
+            ngram_phrases: List[str] = []
+            for n in (3, 2, 1):
+                for i in range(len(content_words) - n + 1):
+                    ngram_phrases.append(" ".join(content_words[i : i + n]))
+            for concept in ngram_phrases:
+                if concept not in phrases:
+                    phrases.append(concept)
+
+        if not phrases and tokens:
+            phrases = [" ".join(content_words) or normalized]
+
+        unique_phrases: List[str] = []
+        for phrase in phrases:
+            phrase = phrase.strip()
+            if phrase and phrase not in unique_phrases:
+                unique_phrases.append(phrase)
+
+        return unique_phrases[:10]
+
+    def _prioritize_semantic_concepts(self, policy_text: str, phrases: List[str]) -> List[str]:
+        """Ordena conceptos por similitud semántica respecto a la política original."""
+        try:
+            policy_embedding = np.asarray(self.embedding_service.encode(policy_text), dtype=float)
+            candidate_embeddings = [
+                np.asarray(self.embedding_service.encode(p), dtype=float) for p in phrases
+            ]
+
+            def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+                if a.size == 0 or b.size == 0:
+                    return 0.0
+                norm_a = np.linalg.norm(a)
+                norm_b = np.linalg.norm(b)
+                if norm_a < 1e-12 or norm_b < 1e-12:
+                    return 0.0
+                return float(np.dot(a, b) / (norm_a * norm_b))
+
+            scored = sorted(
+                zip(phrases, candidate_embeddings),
+                key=lambda item: cosine_similarity(policy_embedding, item[1]),
+                reverse=True,
+            )
+            prioritized = [phrase for phrase, _ in scored[:8]]
+            return prioritized if prioritized else phrases
+        except Exception as e:
+            logger.warning(f"No se pudo priorizar conceptos semánticos: {e}")
+            return phrases
 
     def _generate_semantic_variants(
         self,

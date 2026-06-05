@@ -3,9 +3,15 @@ from __future__ import annotations
 from typing import Any
 from datetime import datetime, timezone
 from idicoc_notary_core.utils.hashing import sha256_hex
+from idicoc_notary_core.utils.logger import get_logger
 
-from idicoc_notary_core.kernel.exceptions.integrity_breach import HardHaltException, InvariantStateBreach
+from idicoc_notary_core.kernel.exceptions.integrity_breach import (
+    HardHaltException,
+    InvariantStateBreach,
+)
 from idicoc_notary_core.kernel.exceptions.alignment_breach import AlignmentBreach
+
+logger = get_logger("kernel.custodial")
 
 
 class CustodialKernel:
@@ -40,10 +46,7 @@ class CustodialKernel:
         self._dissonance_history: list[float] = []
 
         # Estado coálgebraico S
-        self.state_s: dict[str, list[Any]] = {
-            "buffers": [None] * 7,
-            "registers": [None] * 7
-        }
+        self.state_s: dict[str, list[Any]] = {"buffers": [None] * 7, "registers": [None] * 7}
 
     def process(
         self,
@@ -90,8 +93,13 @@ class CustodialKernel:
                 dissonance_variance=self._compute_recent_variance(),
             )
 
-            if dissonance > self.epsilon:
-                corrected_state = self.dqe.project_to_manifold(admitted, manifold, canonical_input, updated_graph)
+            if self._is_hardware_contained(admitted, canonical_state_obj, updated_graph):
+                logger.info("[Kernel] Hardware-contained signal detected: omitiendo proyección.")
+                corrected_state = admitted
+            elif dissonance > self.epsilon:
+                corrected_state = self.dqe.project_to_manifold(
+                    admitted, manifold, canonical_input, updated_graph
+                )
             else:
                 corrected_state = admitted
             self.state_s["buffers"][5] = corrected_state
@@ -106,7 +114,9 @@ class CustodialKernel:
             self.state_s["buffers"][6] = "VERIFIED"
 
             canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
-            invariant_state_hash = sha256_hex(repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", ""))
+            invariant_state_hash = sha256_hex(
+                repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", "")
+            )
             property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
 
             aem_counters = None
@@ -161,6 +171,42 @@ class CustodialKernel:
         mean = sum(window) / len(window)
         variance = sum((x - mean) ** 2 for x in window) / len(window)
         return variance
+
+    def _is_hardware_contained(
+        self,
+        admitted: Any,
+        canonical_state_obj: Any,
+        updated_graph: Any,
+    ) -> bool:
+        """Detecta señales ya contenidas por hardware para evitar proyecciones innecesarias."""
+
+        def _extract_flag(source: Any) -> bool:
+            if isinstance(source, dict):
+                return bool(source.get("hardware_contained", False))
+            if hasattr(source, "hardware_contained"):
+                return bool(getattr(source, "hardware_contained"))
+            if hasattr(source, "metadata"):
+                metadata = getattr(source, "metadata")
+                if isinstance(metadata, dict) and metadata.get("hardware_contained"):
+                    return True
+            if hasattr(source, "is_hardware_contained"):
+                attr = getattr(source, "is_hardware_contained")
+                if callable(attr):
+                    try:
+                        return bool(attr())
+                    except Exception:
+                        pass
+                else:
+                    return bool(attr)
+            return False
+
+        if _extract_flag(admitted):
+            return True
+        if _extract_flag(canonical_state_obj):
+            return True
+        if _extract_flag(updated_graph):
+            return True
+        return False
 
     def _halt(self) -> None:
         if self.enable_hard_halt:

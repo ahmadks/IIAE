@@ -259,12 +259,15 @@ class AuditConfig:
                 try:
                     from transformers import AutoTokenizer
 
+                    hf_token = os.getenv("HF_TOKEN")
+                    auth_token = hf_token if hf_token else True
                     print(
                         f"[Fase 1 - Cold Loop] Cargando tokenizador Llama: {self.llama_model_name}"
                     )
                     self.llama_tokenizer = AutoTokenizer.from_pretrained(
                         self.llama_model_name,
                         cache_dir="models_cache",
+                        use_auth_token=auth_token,
                     )
                 except Exception as e:
                     import warnings
