@@ -1,7 +1,7 @@
 """
 PolicyExtractor (DSE).
 
-Implementa la Sección 5.2 de la PCT: extracción dinámica de politicas semánticos
+Implementa la Sección 5.2 de la PCT: extracción dinámica de políticas semánticas
 a partir de entradas de auditoría y contexto, usando modelos de embeddings y NLI
 (Natural Language Inference) para detectar contradicciones y generar la quíntupla
 (S, P, O, Θ, σ) con identificador criptográfico v(α) = H(σ ∥ t).
@@ -13,6 +13,9 @@ from typing import Any, Optional
 
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.utils.hashing import sha256_hex
+from idicoc_notary_core.utils.logger import get_logger
+
+logger = get_logger("kernel.dse")
 
 
 class PolicyExtractor:
@@ -84,7 +87,7 @@ class PolicyExtractor:
         context_policies: Optional[list[str]] = None,
     ) -> PropertyGraph:
         """
-        Extrae y precomputa politicas exclusivamente a partir del contexto estático.
+        Extrae y precomputa políticas exclusivamente a partir del contexto estático.
         Nunca recibe el audit_input en tiempo de ejecución.
         """
         context_input = context_input or []
@@ -93,37 +96,37 @@ class PolicyExtractor:
 
         embedder = self._get_embedder()
 
-        # 1. Policyas desde context_policies predefinidos
+        # 1. Políticas desde context_policies predefinidos
         for policy_text in context_policies:
             if not isinstance(policy_text, str):
                 policy_text = str(policy_text)
-            ax = self._policy_from_text(policy_text, policy_type="protocol", timestamp=timestamp)
+            policy_dict = self._policy_from_text(policy_text, policy_type="protocol", timestamp=timestamp)
             if embedder is not None:
                 try:
                     vec = embedder.encode(policy_text)
-                    ax["embedding"] = vec.tolist()
+                    policy_dict["embedding"] = vec.tolist()
                 except Exception:
                     pass
-            self.property_graph.add_policy(ax["policy_id"], ax)
+            self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
-        # 2. Policyas extraídos de context_input
+        # 2. Políticas extraídas de context_input
         for text in context_input:
             if not isinstance(text, str) or not text.strip():
                 continue
-            ax = self._policy_from_text(text, policy_type="fact", timestamp=timestamp)
+            policy_dict = self._policy_from_text(text, policy_type="fact", timestamp=timestamp)
             if embedder is not None:
                 try:
                     vec = embedder.encode(text)
-                    ax["embedding"] = vec.tolist()
+                    policy_dict["embedding"] = vec.tolist()
                 except Exception:
                     pass
-            self.property_graph.add_policy(ax["policy_id"], ax)
+            self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
         # 3. Detección de contradicciones vía NLI en el contexto base
         if len(context_input) >= 2:
             contradiction_policies = self._detect_contradictions(context_input, timestamp)
-            for ax in contradiction_policies:
-                self.property_graph.add_policy(ax["policy_id"], ax)
+            for policy_dict in contradiction_policies:
+                self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
         self.property_graph.detect_conflicts()
         return self.property_graph
@@ -198,7 +201,7 @@ class PolicyExtractor:
             hardness = "soft"
             priority = 1
 
-        # Tipo de policya por palabras clave
+        # Tipo de política por palabras clave
         if any(kw in text_lower for kw in ("after", "before", "during", "when", "at time")):
             policy_type = "temporal"
         elif any(kw in text_lower for kw in ("is a", "is an", "belongs to", "type of")):
@@ -250,17 +253,20 @@ class PolicyExtractor:
                     scores = dict(zip(result["labels"], result["scores"]))
                     contradiction_score = scores.get("contradiction", 0.0)
                     if contradiction_score >= self.nli_conflict_threshold:
-                        ax = self._policy_from_text(
+                        policy_dict = self._policy_from_text(
                             f"CONTRADICTION: '{premise[:64]}' vs '{hypothesis[:64]}'",
                             policy_type="logic",
                             timestamp=timestamp,
                         )
-                        ax["polarity"] = "negative"
-                        ax["hardness"] = "hard"
-                        ax["priority"] = 10
-                        ax["nli_contradiction_score"] = contradiction_score
-                        contradiction_policies.append(ax)
-                except Exception:
+                        policy_dict["polarity"] = "negative"
+                        policy_dict["hardness"] = "hard"
+                        policy_dict["priority"] = 10
+                        policy_dict["nli_contradiction_score"] = contradiction_score
+                        contradiction_policies.append(policy_dict)
+                except Exception as e:
+                    logger.error(f"[DSE] Error in NLI contradiction detection: {e}", exc_info=True)
+                    if getattr(self.config, "enable_hard_halt", False):
+                        raise RuntimeError(f"Fallo crítico en NLI (oráculo de contradicciones): {e}") from e
                     continue
 
         return contradiction_policies
