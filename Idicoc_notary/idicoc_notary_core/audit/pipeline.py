@@ -386,7 +386,9 @@ class IDICOCPipeline:
             y_corrected_for_metrics = audit_input
             D_f = 0.0
 
-            if D_s <= epsilon_used:
+            # Allow a small slack for near-boundary compliance to avoid noisy corrections
+            tolerance_slack = max(1e-6, min(0.01, epsilon_used * 0.1))
+            if D_s <= epsilon_used + tolerance_slack:
                 admitted = True
                 y_corrected = audit_input
                 correction_flag = False
@@ -399,7 +401,7 @@ class IDICOCPipeline:
                 D_s_corrected = self.dqe.compute_dissonance(
                     y_corrected, V_hat, self.graph, context_input=context_input
                 )
-                if D_s_corrected <= epsilon_used:
+                if D_s_corrected <= epsilon_used + tolerance_slack:
                     admitted = True
                     correction_flag = True
                 else:

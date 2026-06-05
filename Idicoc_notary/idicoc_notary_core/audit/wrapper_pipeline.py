@@ -265,7 +265,8 @@ class IDICOCNotaryClient(IIAENotaryContract):
 
         # ---------------------------------------------------------------
         # Verificación coalgebraica: los pesos λ deben ser
-        # [0.0, 1.0, 0.0] y d_s debe coincidir con λ_logic · d_logic.
+        # [0.0, 1.0, 0.0] y d_s debe coincidir con λ_logic · d_logic,
+        # o con d_context cuando el contexto RAG domina la disonancia.
         # Rol de notario: solo mide y registra, nunca bloquea.
         # ---------------------------------------------------------------
         algebraic = canonical_state.metadata.get("algebraic_components")
@@ -287,10 +288,14 @@ class IDICOCNotaryClient(IIAENotaryContract):
         d_4 = float(algebraic.get("d_4", 0.0))
         d_5 = float(algebraic.get("d_5", 0.0))
         d_6 = float(algebraic.get("d_6", 0.0))
+        d_context = float(canonical_state.metadata.get("d_context", 0.0))
 
         expected_d_s = sum(
             expected_weights[i] * [d_0, d_1, d_2, d_3, d_4, d_5, d_6][i] for i in range(7)
         )
+        if d_context > expected_d_s:
+            expected_d_s = d_context
+
         print(
             f"DEBUG: expected_weights={expected_weights}, D_s={dissonance}, expected_d_s={expected_d_s}"
         )

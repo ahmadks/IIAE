@@ -155,11 +155,11 @@ class AuditConfig:
         """
         import os
 
-        # Configurar el proveedor de embeddings en el servicio central de forma inmediata si se proporciona
-        if self.embedding_provider is not None:
-            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+        from idicoc_notary_core.utils.embedding_service import EmbeddingService
 
-            EmbeddingService.set_provider(self.embedding_provider)
+        # Configurar el proveedor de embeddings en el servicio central de forma inmediata.
+        # Si no se especifica proveedor, esto borra cualquier proveedor previo compartido entre instancias.
+        EmbeddingService.set_provider(self.embedding_provider)
 
         # Asegurar que las rutas de persistencia relativas se resuelvan siempre respecto al directorio raíz del proyecto 'Idicoc_notary'
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

@@ -211,8 +211,26 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             )
             embedder = embed_service.get_embedder(model_name)
 
+            if embedder is None or not hasattr(embedder, "encode"):
+                return 0.0, []
+
+            def _encode_text(input_text: str) -> np.ndarray:
+                try:
+                    embedding = embedder.encode(input_text, convert_to_numpy=True)
+                except TypeError:
+                    try:
+                        embedding = embedder.encode(input_text, model_name=model_name)
+                    except TypeError:
+                        embedding = embedder.encode(input_text)
+
+                if isinstance(embedding, np.ndarray):
+                    return embedding.astype(float)
+                if isinstance(embedding, (list, tuple)):
+                    return np.asarray(embedding, dtype=float)
+                return np.asarray([embedding], dtype=float)
+
             # Encode audit_input text
-            audit_emb = embedder.encode(text_y, convert_to_numpy=True)
+            audit_emb = _encode_text(text_y)
 
             max_contradiction = 0.0
             contradictory_contexts = []
@@ -222,9 +240,16 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
                     continue
 
                 # Encode context rule
-                ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
+                try:
+                    ctx_emb = _encode_text(ctx)
+                except Exception:
+                    try:
+                        ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
+                    except TypeError:
+                        ctx_emb = embedder.encode(ctx)
 
                 # Compute cosine similarity
+                ctx_emb = np.asarray(ctx_emb, dtype=float)
                 similarity = np.dot(audit_emb, ctx_emb) / (
                     np.linalg.norm(audit_emb) * np.linalg.norm(ctx_emb) + 1e-12
                 )
@@ -239,6 +264,8 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
                 if contradiction_score > 0.4:
                     contradictory_contexts.append(ctx)
 
+            if not contradictory_contexts:
+                return 0.0, []
             return max_contradiction, contradictory_contexts
         except Exception:
             return 0.0, []
@@ -369,8 +396,8 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             audit_input, context_input
         )
 
-        if d2 == float('inf') or d3 == float('inf'):
-            d_s = float('inf')
+        if d2 == float("inf") or d3 == float("inf"):
+            d_s = float("inf")
         else:
             d_s = (
                 self.lambda_0 * d0
@@ -410,7 +437,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             "snapping_flag": False,
         }
 
-        return (d_s, 0.0, audit_input, not is_compliant, metrics)
+        return (d_s, d_context, audit_input, not is_compliant, metrics)
 
     def compute_dissonance(
         self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None
@@ -436,8 +463,8 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             d2 = float(evaluator.evaluate(y))
             d3 = float(evaluator.compute_temporal(y))
 
-        if d2 == float('inf') or d3 == float('inf'):
-            d_s = float('inf')
+        if d2 == float("inf") or d3 == float("inf"):
+            d_s = float("inf")
         else:
             d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
 

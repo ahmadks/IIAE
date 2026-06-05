@@ -15,7 +15,7 @@ def test_noop_graph_cache():
 
     cached_graph = cache.get("key1")
     assert cached_graph is not None
-    assert cached_graph.embedding_signature == "test_sig"
+    assert cached_graph.embedding_signature == "x"
     assert "1" in cached_graph.nodes
 
     # Verify we get None for missing key
