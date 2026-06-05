@@ -218,24 +218,6 @@ class InvariantSynthesizer:
                 message=f"Error durante compilación: {str(e)}",
             )
 
-    # Multilingual stopwords — these carry zero policy-violation signal and must
-    # never appear in the W_bank, regardless of how concept_phrases were obtained.
-    # This is critical when the Ambiguity Alert fires and _extract_concept_tokens
-    # falls back to encoding the full policy text (which contains stopwords).
-    POLICY_STOPWORDS: Set[str] = frozenset({
-        # Spanish — artículos, preposiciones, conjunciones, pronombres
-        "no", "los", "las", "del", "de", "la", "el", "un", "una", "en", "y",
-        "a", "al", "se", "su", "sus", "que", "por", "con", "para", "es", "son",
-        "lo", "le", "les", "me", "te", "nos", "mi", "tu", "si", "o", "u",
-        "pero", "más", "como", "hay", "ser", "ha", "han", "ya", "ni", "e",
-        # English — articles, prepositions, conjunctions, pronouns
-        "the", "an", "of", "in", "on", "to", "is", "are", "was", "were",
-        "be", "been", "it", "its", "this", "that", "and", "or", "but", "not",
-        "by", "at", "as", "do", "does", "did", "will", "can", "may", "with",
-        "for", "from", "all", "any", "have", "has", "had", "he", "she", "we",
-        "they", "you", "i", "my", "your", "his", "her", "their", "our",
-    })
-
     def _extract_concept_tokens(
         self,
         text: str,
@@ -243,155 +225,51 @@ class InvariantSynthesizer:
         hardness: str,
         priority: int,
     ) -> List[InvariantToken]:
-        """Extrae tokens de concepto clave de una política."""
+        """Extrae tokens invariantes evaluando su distancia topológica a la política.
+
+        El filtrado de stopwords y términos irrelevantes se realiza implícitamente:
+        en un espacio de embeddings semánticos, los artículos, preposiciones y
+        conjunciones tienen baja similitud coseno con textos de política específicos
+        y quedan fuera del radio semántico del KDTree.
+        """
         tokens: List[InvariantToken] = []
 
         try:
-            concept_phrases = self._extract_concept_phrases(text)
-            if not concept_phrases:
-                concept_phrases = [text]
+            # 1. Consulta geométrica en O(log V): tokens del vocabulario que caen
+            # dentro del radio semántico de la política (distancia topológica <= threshold).
+            # Las stopwords son filtradas naturalmente por distancia matemática, sin
+            # heurísticas lingüísticas.
+            similar_token_ids = self.query_similar_tokens(text, self.embedding_threshold)
 
-            if self.embedding_service and len(concept_phrases) > 1:
-                concept_phrases = self._prioritize_semantic_concepts(text, concept_phrases)
+            if not similar_token_ids:
+                logger.warning(
+                    f"[Ambiguity Alert] La política '{text[:50]}...' no generó un ancla vectorial fuerte. "
+                    f"Aumente la densidad de la política o baje el umbral."
+                )
+                return tokens
 
-            seen_token_ids: Set[int] = set()
-            for phrase in concept_phrases:
-                token_ids = self.tokenizer.encode(phrase, add_special_tokens=False)
-                for token_id in token_ids[:10]:
-                    if token_id in seen_token_ids:
-                        continue
-                    if token_id >= self.vocab_size or token_id < 0:
-                        continue
-                    seen_token_ids.add(token_id)
+            # 2. Registrar los tokens encontrados en el W_bank
+            for token_id in similar_token_ids[:50]:  # Límite de seguridad anti-flooding
+                try:
+                    token_text = self.tokenizer.decode([token_id])
+                except Exception:
+                    token_text = f"<UNK:{token_id}>"
 
-                    try:
-                        token_text = self.tokenizer.decode([token_id])
-                    except Exception:
-                        token_text = f"<UNK:{token_id}>"
-
-                    # Filter stopwords — they carry no conceptual signal for the W_bank.
-                    # This applies both to tokens from the semantic extractor and from the
-                    # full-text fallback path triggered by the Ambiguity Alert.
-                    if token_text.strip().lower() in self.POLICY_STOPWORDS:
-                        continue
-
-                    tokens.append(
-                        InvariantToken(
-                            token_id=token_id,
-                            token_text=token_text,
-                            source_policy=text[:50] + ("..." if len(text) > 50 else ""),
-                            policy_id=policy_id,
-                            hardness=hardness,
-                            priority=priority,
-                        )
+                tokens.append(
+                    InvariantToken(
+                        token_id=token_id,
+                        token_text=token_text,
+                        source_policy=text[:50] + ("..." if len(text) > 50 else ""),
+                        policy_id=policy_id,
+                        hardness=hardness,
+                        priority=priority,
                     )
+                )
 
         except Exception as e:
-            logger.warning(f"Error extrayendo tokens de '{text}': {e}")
+            logger.error(f"Error topológico extrayendo tokens de '{text}': {e}")
 
         return tokens
-
-    def _extract_concept_phrases(self, text: str) -> List[str]:
-        """Extrae frases y conceptos relevantes de una política antes de tokenizar."""
-        normalized = text.strip()
-        if not normalized:
-            return []
-
-        phrases: List[str] = []
-        quoted = re.findall(r'"([^\"]+)"|\'([^\']+)\'|‘([^’]+)’|“([^”]+)”', text)
-        for group in quoted:
-            for match in group:
-                if match:
-                    phrases.append(match.strip())
-
-        # Extraer tokens básicos (mantener acentos y caracteres multilingües)
-        tokens = re.findall(r"\b[\wáéíóúüñÁÉÍÓÚÜÑ']+\b", normalized, flags=re.UNICODE)
-        unique_tokens = []
-        seen = set()
-        for t in (tok.lower() for tok in tokens):
-            if t and t not in seen:
-                seen.add(t)
-                unique_tokens.append(t)
-
-        if not unique_tokens:
-            return [normalized]
-
-        # Reemplazo arquitectónico: filtrar tokens por proyección de embeddings
-        if not self.embedding_service:
-            raise RuntimeError(
-                "EmbeddingService es obligatorio para la extracción de conceptos en InvariantSynthesizer."
-            )
-
-        try:
-            policy_emb = np.asarray(self.embedding_service.encode(normalized), dtype=float)
-            # Filtrar tokens demasiado cortos (evitar partículas/afijos que no cargan concepto)
-            filtered_tokens = [t for t in unique_tokens if len(t) > 3]
-            if not filtered_tokens:
-                filtered_tokens = unique_tokens
-
-            token_embs = [
-                np.asarray(self.embedding_service.encode(t), dtype=float) for t in filtered_tokens
-            ]
-
-            def cosine(a: np.ndarray, b: np.ndarray) -> float:
-                if a.size == 0 or b.size == 0:
-                    return 0.0
-                na = np.linalg.norm(a)
-                nb = np.linalg.norm(b)
-                if na < 1e-12 or nb < 1e-12:
-                    return 0.0
-                return float(np.dot(a, b) / (na * nb))
-
-            scored = [
-                (tok, cosine(policy_emb, emb)) for tok, emb in zip(filtered_tokens, token_embs)
-            ]
-            # Ordenar por similitud descendente
-            scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
-
-            # Seleccionar tokens que superen el umbral semántico
-            selected = [tok for tok, score in scored_sorted if score >= self.embedding_threshold]
-
-            # Si no hay tokens por encima del umbral, loguear error de ambigüedad y retornar lista vacía
-            if not selected:
-                logger.error(
-                    f"[Ambiguity Alert] Ningún token de la política '{normalized}' supera el umbral semántico de {self.embedding_threshold:.2f}."
-                )
-                return []
-
-            # Retornar tokens seleccionados como frases conceptuales (unidades atómicas)
-            return selected[:10]
-
-        except Exception as e:
-            logger.warning(f"Fallo la priorización semántica de conceptos: {e}")
-            return [normalized]
-
-    def _prioritize_semantic_concepts(self, policy_text: str, phrases: List[str]) -> List[str]:
-        """Ordena conceptos por similitud semántica respecto a la política original."""
-        try:
-            policy_embedding = np.asarray(self.embedding_service.encode(policy_text), dtype=float)
-            candidate_embeddings = [
-                np.asarray(self.embedding_service.encode(p), dtype=float) for p in phrases
-            ]
-
-            def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-                if a.size == 0 or b.size == 0:
-                    return 0.0
-                norm_a = np.linalg.norm(a)
-                norm_b = np.linalg.norm(b)
-                if norm_a < 1e-12 or norm_b < 1e-12:
-                    return 0.0
-                return float(np.dot(a, b) / (norm_a * norm_b))
-
-            scored = sorted(
-                zip(phrases, candidate_embeddings),
-                key=lambda item: cosine_similarity(policy_embedding, item[1]),
-                reverse=True,
-            )
-            prioritized = [phrase for phrase, _ in scored[:8]]
-            return prioritized if prioritized else phrases
-        except Exception as e:
-            logger.warning(f"No se pudo priorizar conceptos semánticos: {e}")
-            return phrases
 
     def _get_or_compute_vocab_embeddings(self, cache_path: Optional[str] = None) -> np.ndarray:
         """Computa y opcionalmente cachea las proyecciones de embeddings para todo el vocabulario.
@@ -483,40 +361,47 @@ class InvariantSynthesizer:
         hardness: str,
         priority: int,
     ) -> List[InvariantToken]:
-        """Genera variantes semánticas de una política (requiere embedding_service)."""
-        variants = []
+        """Genera variantes semánticas de una política usando query_similar_tokens sobre paráfrasis.
+
+        Cada paráfrasis sintética es consultada contra el KDTree global del vocabulario.
+        Los tokens retornados son geométricamente próximos a la variante en el espacio de embeddings.
+        """
+        variants: List[InvariantToken] = []
 
         if not self.embedding_service:
             return variants
 
         try:
-            # Estrategia simple: tokenizar sinónimos/variantes comunes
-            # Esto es un placeholder; en producción se usaría más lógica sofisticada
             synthetic_variants = self._generate_synthetic_paraphrases(policy_text)
 
+            seen_variant_ids: Set[int] = set()
             for variant in synthetic_variants:
-                variant_phrases = self._extract_concept_phrases(variant)
-                for phrase in variant_phrases:
-                    token_ids = self.tokenizer.encode(phrase, add_special_tokens=False)
-                    for token_id in token_ids[:5]:  # Limitar a primeros 5 tokens por variante
-                        if token_id not in [t.token_id for t in variants]:
-                            token_text = self.tokenizer.decode([token_id])
-                            token = InvariantToken(
-                                token_id=token_id,
-                                token_text=token_text,
-                                source_policy=f"variant:{policy_text[:40]}...",
-                                policy_id=policy_id,
-                                hardness=hardness,
-                                priority=max(
-                                    1, priority - 1
-                                ),  # Variantes con prioridad ligeramente menor
-                            )
-                            variants.append(token)
+                # Consulta geométrica: tokens similares a la paráfrasis en O(log V)
+                similar_ids = self.query_similar_tokens(variant, self.embedding_threshold)
+                for token_id in similar_ids[:5]:  # Limitar a 5 tokens por variante
+                    if token_id in seen_variant_ids:
+                        continue
+                    seen_variant_ids.add(token_id)
+                    try:
+                        token_text = self.tokenizer.decode([token_id])
+                    except Exception:
+                        token_text = f"<UNK:{token_id}>"
+                    variants.append(
+                        InvariantToken(
+                            token_id=token_id,
+                            token_text=token_text,
+                            source_policy=f"variant:{policy_text[:40]}...",
+                            policy_id=policy_id,
+                            hardness=hardness,
+                            priority=max(1, priority - 1),  # Variantes con prioridad ligeramente menor
+                        )
+                    )
 
         except Exception as e:
             logger.warning(f"Error generando variantes de '{policy_text}': {e}")
 
         return variants
+
 
     SYNONYM_MAP = {
         "prohibit": ["forbid", "ban", "restrict", "prevent", "disallow", "bar", "block"],

@@ -1,24 +1,20 @@
 import os
+import sys
+from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
 
 def _ensure_cache_dir(cache_dir: str) -> None:
     os.makedirs(cache_dir, exist_ok=True)
 
 
 def _get_auth_token(token: Optional[str] = None) -> Optional[str | bool]:
+    """Retorna el token explícito, la variable de entorno o True para usar el login local."""
     if token is not None:
         return token
     env_token = os.getenv("HF_TOKEN")
     return env_token if env_token else True
-
-
-def _is_torch_available() -> bool:
-    """Verifica si torch está disponible para device_map."""
-    try:
-        import torch
-        return True
-    except ImportError:
-        return False
 
 
 def ensure_llama_downloaded(
@@ -27,54 +23,33 @@ def ensure_llama_downloaded(
     token: Optional[str] = None,
 ) -> None:
     """
-    Asegura que el modelo Llama esté disponible en caché.
-
-    Si el modelo no está descargado localmente, intenta descargarlo usando
-    las credenciales de Hugging Face disponibles localmente o la variable HF_TOKEN.
+    Asegura que el modelo Llama esté disponible en caché replicando el comando de terminal.
+    Implementa tolerancia a fallos Standard-Zero si la autenticación falla.
     """
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from huggingface_hub import snapshot_download
 
     auth_token = _get_auth_token(token)
     _ensure_cache_dir(cache_dir)
 
-    # Validar si ya está en caché localmente.
-    try:
-        AutoTokenizer.from_pretrained(
-            model_name,
-            cache_dir=cache_dir,
-            local_files_only=True,
-        )
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            cache_dir=cache_dir,
-            local_files_only=True,
-        )
-        return
-    except Exception:
-        pass
+    # Definir la ruta de destino local limpia basada en el nombre del modelo
+    folder_name = model_name.split("/")[-1]
+    local_target_dir = Path(cache_dir) / folder_name
 
-    # Descargar si no está presente.
-    print(f"[ModelDownloader] Descargando Llama: {model_name}")
+    print(f"[ModelDownloader] Verificando/Descargando Llama optimizado: {model_name}")
     try:
-        AutoTokenizer.from_pretrained(
-            model_name,
-            cache_dir=cache_dir,
+        # Se elimina 'local_dir_use_symlinks' para limpiar la advertencia del framework
+        snapshot_download(
+            repo_id=model_name,
+            local_dir=local_target_dir,
+            allow_patterns=["original/*"],
             token=auth_token,
         )
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            cache_dir=cache_dir,
-            token=auth_token,
-            device_map="auto" if _is_torch_available() else None,
-        )
+        print(f"[ModelDownloader] Llama gestionado correctamente en: {local_target_dir}")
     except Exception as exc:
-        raise RuntimeError(
-            f"No se pudo descargar Llama '{model_name}'. "
-            f"Asegúrate de tener acceso al repositorio, haber iniciado sesión en Hugging Face "
-            f"(huggingface-cli login) o de definir HF_TOKEN. Error original: {exc}"
-        ) from exc
-
-    print(f"[ModelDownloader] Llama descargado en {cache_dir}.")
+        # Caída suave (Fallback) de Standard-Zero para no bloquear el resto de las fases
+        print(f"\n[Standard-Zero Fallback] AVISO: No se pudo descargar Llama '{model_name}'.")
+        print(f"[Standard-Zero Fallback] Detalles del error: {exc}")
+        print("[Standard-Zero Fallback] Continuando ejecución del pipeline sin el modelo Llama.\n")
 
 
 class ModelDownloader:
@@ -100,7 +75,7 @@ class ModelDownloader:
         llama_model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
     ) -> None:
         """
-        Descarga modelos de embeddings, NLI y opcionalmente Llama.
+        Descarga modelos de embeddings, NLI y opcionalmente Llama de forma segura.
         """
         from sentence_transformers import SentenceTransformer
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -108,47 +83,52 @@ class ModelDownloader:
         auth_token = self.token if self.token is not None else True
 
         print(f"[Phase 1 - Cold Loop] Downloading embedding model: {embedding_model_name}")
-        SentenceTransformer(
-            embedding_model_name,
-            cache_folder=self.cache_dir,
-            token=auth_token,
-        )
+        try:
+            SentenceTransformer(
+                embedding_model_name,
+                cache_folder=self.cache_dir,
+                token=auth_token,
+            )
+        except Exception as e:
+            print(f"[ERROR] Error crítico descargando Embeddings: {e}")
 
         print(f"[Phase 1 - Cold Loop] Downloading entailment model: {entailment_model_name}")
-        AutoTokenizer.from_pretrained(
-            entailment_model_name,
-            cache_dir=self.cache_dir,
-            token=auth_token,
-        )
-        AutoModelForSequenceClassification.from_pretrained(
-            entailment_model_name,
-            cache_dir=self.cache_dir,
-            token=auth_token,
-        )
+        try:
+            AutoTokenizer.from_pretrained(
+                entailment_model_name,
+                cache_dir=self.cache_dir,
+                token=auth_token,
+            )
+            AutoModelForSequenceClassification.from_pretrained(
+                entailment_model_name,
+                cache_dir=self.cache_dir,
+                token=auth_token,
+            )
+        except Exception as e:
+            print(f"[ERROR] Error crítico descargando NLI/Entailment: {e}")
 
+        # Ejecución controlada de Llama
         if include_llama:
             self.download_llama(llama_model_name)
 
     def download_llama(self, model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct") -> None:
         """
-        Descarga modelo Llama para uso en compilación de políticas y generación (Fases 1 y 3).
+        Invoca la descarga optimizada de Llama con tolerancia a fallos.
         """
         ensure_llama_downloaded(model_name, self.cache_dir, self.token)
 
 
 if __name__ == "__main__":
-    import sys
-    from dotenv import load_dotenv
-
+    # Cargar variables del entorno (.env) antes de inicializar nada
     load_dotenv()
 
     downloader = ModelDownloader()
 
-    # Descargar solo modelos base por defecto
+    # Configuración de argumentos por defecto
     include_llama = "--with-llama" in sys.argv
     llama_model = "meta-llama/Meta-Llama-3-8B-Instruct"
 
-    # Permitir especificar modelo Llama personalizado
+    # Capturar modelo personalizado desde la terminal si se provee
     for i, arg in enumerate(sys.argv):
         if arg == "--llama-model" and i + 1 < len(sys.argv):
             llama_model = sys.argv[i + 1]
@@ -156,4 +136,4 @@ if __name__ == "__main__":
 
     print("[IIAE Standard-Zero] Iniciando descarga de modelos...")
     downloader.download_models(include_llama=include_llama, llama_model_name=llama_model)
-    print("[IIAE Standard-Zero] ¡Descargas completadas!")
+    print("[IIAE Standard-Zero] ¡Descargas completadas o gestionadas mediante Fallback!")
