@@ -187,8 +187,9 @@ if (send_button or user_input) and user_input.strip() and st.session_state.notar
 
     with st.spinner("🔍 Auditando entrada con IDICOC Notary (Fase 2)..."):
         try:
+            from idicoc_notary_core.audit import SemanticPayload
             audit_result = st.session_state.notary_client.process_interaction(
-                audit_input="",
+                audit_input=SemanticPayload(""),
                 context_input=st.session_state.context_input,
                 user_input=user_input,
                 epsilon_override=st.session_state.epsilon,

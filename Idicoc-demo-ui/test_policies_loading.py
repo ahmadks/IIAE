@@ -52,9 +52,13 @@ def test_numeric_vector_policy_accepts_first_bin_below_half():
     ]
     assert any(p["id"] == "ax_regex_1" for p in numeric_policies)
 
+    import numpy as np
+    from idicoc_notary_core.audit import SemanticPayload
+
     notary = build_demo_notary(numeric_policies)
+    lst = [0.3, 0.25, 0.2, 0.25]
     result = notary.process_interaction(
-        audit_input=[0.3, 0.25, 0.2, 0.25],
+        audit_input=SemanticPayload(text="numeric signal", vec=np.array(lst), source_text=str(lst), payload_type="numeric"),
         context_input=[],
         context_policies=numeric_policies,
     )
@@ -72,9 +76,13 @@ def test_numeric_vector_policy_rejects_first_bin_above_half():
         p for p in policies if p.get("mode", "all") in ("numeric", "all")
     ]
 
+    import numpy as np
+    from idicoc_notary_core.audit import SemanticPayload
+
     notary = build_demo_notary(numeric_policies)
+    lst = [0.6, 0.2, 0.1, 0.1]
     result = notary.process_interaction(
-        audit_input=[0.6, 0.2, 0.1, 0.1],
+        audit_input=SemanticPayload(text="numeric signal", vec=np.array(lst), source_text=str(lst), payload_type="numeric"),
         context_input=[],
         context_policies=numeric_policies,
     )

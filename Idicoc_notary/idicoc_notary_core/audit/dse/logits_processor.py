@@ -82,8 +82,10 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
         if self.mask_tensor.numel() > 0:
             # Enforce that mask is on the same device as scores
             if self.mask_tensor.device != scores.device:
-                self.mask_tensor = self.mask_tensor.to(scores.device)
-                self.mask = self.mask_tensor
+                raise RuntimeError(
+                    f"Device mismatch between MUX mask ({self.mask_tensor.device}) and logits ({scores.device}). "
+                    f"All device synchronization must occur before the hot loop to satisfy O(1) latency constraints."
+                )
             
             # Apply in-place -inf masking
             scores[:, self.mask_tensor] = -float('inf')

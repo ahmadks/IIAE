@@ -277,19 +277,9 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         context_policies: List[str],
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
-    ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
+    ) -> DissonanceEvaluationResult:
         """
         Computes total structural dissonance D_s = Σ_{i=0}^6 λ_i d_i across 7 stages.
-
-        Returns:
-            (D_s, d_context, audit_input, corrected_flag, metrics_dict)
-
-        where:
-        - D_s: Total dissonance score [0, 1]
-        - d_context: Semantic contradiction score from RAG context [0, 1]
-        - audit_input: Original input (never modified)
-        - corrected_flag: Always False (projection happens in IDICOCPipeline, not here)
-        - metrics_dict: Metadata including algebraic_components, contradictory_contexts
         """
         # K no tiene representación vectorial en este diseño.
         # En esta versión legacy de compute() no existe un target_state numérico.
@@ -437,7 +427,14 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             "snapping_flag": False,
         }
 
-        return (d_s, d_context, audit_input, not is_compliant, metrics)
+        from .dissonance_strategy import DissonanceEvaluationResult
+        return DissonanceEvaluationResult(
+            structural_dissonance_ds=d_s,
+            factual_dissonance_df=d_context,
+            corrected_output=audit_input,
+            correction_applied=not is_compliant,
+            metrics=metrics,
+        )
 
     def compute_dissonance(
         self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None

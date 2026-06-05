@@ -47,8 +47,9 @@ def test_semantic_service_with_similar_inputs():
     audit_input = "Execute a transfer of 50000.00 euros, which is within the limit."
     policy_input = ["Execute a transfer of 50000.00 euros, which is within the limit."]
 
+    from idicoc_notary_core.audit import SemanticPayload
     canonical_state = service.process_interaction(
-        audit_input=audit_input,
+        audit_input=SemanticPayload(audit_input),
         context_input=context_input,
         context_policies=policy_input,
     )
@@ -71,8 +72,9 @@ def test_semantic_service_with_hard_violation():
         "ax_violation|No transfer may exceed 50000.00 euros|regex|negative|hard|10|mode=semantic|pattern=60000\\.00"
     ]
 
+    from idicoc_notary_core.audit import SemanticPayload
     canonical_state = service.process_interaction(
-        audit_input=audit_input,
+        audit_input=SemanticPayload(audit_input),
         context_input=["The maximum allowed transaction amount is 50000.00 euros."],
         context_policies=policy_input,
     )
@@ -92,8 +94,9 @@ def test_semantic_service_with_context_and_policy_alignment():
     context_input = ["Approved transfers must remain below the 100.00 EUR ceiling."]
     policy_input = ["Confirmed transfer stays within the approved limit."]
 
+    from idicoc_notary_core.audit import SemanticPayload
     canonical_state = service.process_interaction(
-        audit_input=audit_input,
+        audit_input=SemanticPayload(audit_input),
         context_input=context_input,
         context_policies=policy_input,
     )

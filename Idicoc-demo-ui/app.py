@@ -84,8 +84,18 @@ def get_semantic_notary(eps: float):
 
 def _send_to_notary(payload, notary, policies):
     try:
+        from idicoc_notary_core.audit import SemanticPayload
+        if isinstance(payload, list):
+            sp = SemanticPayload(
+                text="numeric input",
+                vec=np.array(payload),
+                payload_type="numeric"
+            )
+        else:
+            sp = SemanticPayload(str(payload))
+
         res = notary.process_interaction(
-            audit_input=payload,
+            audit_input=sp,
             context_input=st.session_state.context_list,
             context_policies=policies,
         )

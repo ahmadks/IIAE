@@ -63,8 +63,16 @@ def test_logic_service_with_compatible_distribution(logic_service):
     audit_distribution = np.array([0.32, 0.34, 0.34])
     audit_input = MockAuditInput(audit_distribution)
 
+    from idicoc_notary_core.audit import SemanticPayload
+    lst = audit_input.distribution.tolist()
+    payload = SemanticPayload(
+        text="Mock numeric distribution input",
+        vec=audit_input.distribution,
+        source_text=str(lst),
+        payload_type="numeric"
+    )
     canonical_state = logic_service.process_interaction(
-        audit_input=audit_input,
+        audit_input=payload,
         context_input=[
             "Distribution constraint: must maintain entropy ≥ 1.0",
             "Balance requirement: all mass must be accounted for",
@@ -88,8 +96,16 @@ def test_logic_service_with_incompatible_distribution():
         "ax_negative|No negative weights are allowed|regex|negative|hard|10|mode=numeric|pattern=-"
     ]
 
+    from idicoc_notary_core.audit import SemanticPayload
+    lst = audit_input.distribution.tolist()
+    payload = SemanticPayload(
+        text="Incompatible numeric distribution input",
+        vec=audit_input.distribution,
+        source_text=str(lst),
+        payload_type="numeric"
+    )
     canonical_state = logic_service.process_interaction(
-        audit_input=audit_input,
+        audit_input=payload,
         context_input=[
             "Distribution constraint: must be in the probability simplex",
             "All weights must be non-negative",
@@ -109,8 +125,16 @@ def test_logic_service_with_partial_dissonance():
     logic_service = _build_logic_service()
     audit_distribution = np.array([0.35, 0.32, 0.33])
 
+    from idicoc_notary_core.audit import SemanticPayload
+    lst = audit_distribution.tolist()
+    payload = SemanticPayload(
+        text="Partial dissonance distribution input",
+        vec=audit_distribution,
+        source_text=str(lst),
+        payload_type="numeric"
+    )
     canonical_state = logic_service.process_interaction(
-        audit_input=MockAuditInput(audit_distribution),
+        audit_input=payload,
         context_input=["Entropy constraint"],
         context_policies=[],
         epsilon_override=0.1,
@@ -125,8 +149,17 @@ def test_logic_service_lambda_composition():
     """The service should still compute D_s correctly when no dynamic policies are present."""
     logic_service = _build_logic_service()
 
+    from idicoc_notary_core.audit import SemanticPayload
+    vec = np.array([0.33, 0.33, 0.34])
+    lst = vec.tolist()
+    payload = SemanticPayload(
+        text="Uniform-ish numeric distribution input",
+        vec=vec,
+        source_text=str(lst),
+        payload_type="numeric"
+    )
     canonical_state = logic_service.process_interaction(
-        audit_input=MockAuditInput(np.array([0.33, 0.33, 0.34])),
+        audit_input=payload,
         context_input=[],
         context_policies=[],
     )

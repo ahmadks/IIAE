@@ -6,6 +6,11 @@ import re
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 
 
+class DimensionalityMismatchError(ValueError):
+    """Excepción para discordancia de dimensiones en cálculo de distancias."""
+    pass
+
+
 class PropertyGraphEvaluator:
     """
     Separates evaluation logic from the PropertyGraph data structure.
@@ -182,9 +187,9 @@ class PropertyGraphEvaluator:
     @staticmethod
     def _cosine_distance(a: list, b: list) -> float:
         if len(a) != len(b):
-            n = max(len(a), len(b))
-            a = a + [0.0] * (n - len(a))
-            b = b + [0.0] * (n - len(b))
+            raise DimensionalityMismatchError(
+                f"Dimensionality mismatch between vectors: {len(a)} vs {len(b)}."
+            )
         dot = sum(x * z for x, z in zip(a, b))
         norm_a = math.sqrt(sum(x * x for x in a))
         norm_b = math.sqrt(sum(x * x for x in b))
@@ -192,14 +197,6 @@ class PropertyGraphEvaluator:
             return 1.0
         cosine_sim = dot / (norm_a * norm_b)
         return 1.0 - max(-1.0, min(1.0, cosine_sim))
-
-    @staticmethod
-    def _jaccard(set_a: Set[str], set_b: Set[str]) -> float:
-        if not set_a and not set_b:
-            return 1.0
-        intersection = len(set_a & set_b)
-        union = len(set_a | set_b)
-        return intersection / union if union > 0 else 0.0
 
     def _evaluate_regex(self, ax: dict, y: Any) -> float:
         """Evaluate regex policies on string representations."""
@@ -235,15 +232,30 @@ class PropertyGraphEvaluator:
             return self._evaluate_regex(policy, y)
 
         # Semantic / default evaluation
+        # Enforce strict semantic comparison via embeddings. If missing, generate on the fly.
         ax_embedding: Optional[list] = policy.get("embedding")
-        if ax_embedding is not None and y_vec is not None:
-            dist = self._cosine_distance(y_vec, ax_embedding)
-            similarity = 1.0 - dist
-        else:
-            ax_tokens = self._tokenize(self._policy_text(policy))
-            if not ax_tokens:
-                return 0.0
-            similarity = self._jaccard(y_tokens, ax_tokens)
+        if ax_embedding is None:
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+            try:
+                ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
+                policy["embedding"] = ax_embedding
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to generate embedding for policy text: '{self._policy_text(policy)}' due to: {e}"
+                ) from e
+
+        if y_vec is None:
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+            try:
+                y_text = self._to_str(y)
+                y_vec = EmbeddingService().encode(y_text).tolist()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to generate embedding for input text: '{y_text}' due to: {e}"
+                ) from e
+
+        dist = self._cosine_distance(y_vec, ax_embedding)
+        similarity = 1.0 - dist
 
         if polarity == "affirmative":
             return 1.0 - similarity

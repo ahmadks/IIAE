@@ -8,6 +8,7 @@ from idicoc_notary_core.utils.hashing import (
     canonical_json,
     hmac_sha256_hex,
     sha256_dict,
+    sha256_hex,
 )
 
 
@@ -47,7 +48,8 @@ class EnvHardwareSealer:
                 )
             return payload
 
-        payload_copy = dict(payload)
+        import copy
+        payload_copy = copy.deepcopy(payload)
         serialized = canonical_json(payload)
         signature = hmac_sha256_hex(self.key, serialized)
         payload_copy["hardware_evidence"] = {
@@ -209,9 +211,20 @@ class MerkleDAG:
 
 class CustodialTraceManager:
     def __init__(
-        self, dag: Optional[MerkleDAG] = None, storage_backend: Optional[CTMStorageBackend] = None
+        self,
+        dag: Optional[MerkleDAG] = None,
+        storage_backend: Optional[CTMStorageBackend] = None,
+        zkp_mode: bool = False,
     ):
         self._dag = dag or MerkleDAG(storage_backend=storage_backend)
+        self.zkp_mode = zkp_mode
+
+    def _hash_commitment(self, obj: Any) -> str:
+        serialized = self._safe_serialize(obj)
+        try:
+            return sha256_hex(canonical_json(serialized))
+        except Exception:
+            return sha256_hex(str(serialized))
 
     @property
     def root_hash(self) -> Optional[str]:
@@ -233,16 +246,22 @@ class CustodialTraceManager:
         property_graph_hash: Optional[str] = None,
         aem_counters: Optional[Dict[str, int]] = None,
     ) -> MerkleNode:
+        pg_val = getattr(property_graph, "nodes", property_graph)
+        if self.zkp_mode:
+            cs_payload = self._hash_commitment(canonical_state)
+            pg_payload = self._hash_commitment(pg_val)
+        else:
+            cs_payload = self._safe_serialize(canonical_state)
+            pg_payload = self._safe_serialize(pg_val)
+
         logical_payload = {
             "type": "COMMIT",
             "stage": "CTM",
             "timestamp": timestamp,
-            "canonical_state": self._safe_serialize(canonical_state),
+            "canonical_state": cs_payload,
             "dissonance": dissonance,
             "epsilon": epsilon,
-            "property_graph": self._safe_serialize(
-                getattr(property_graph, "nodes", property_graph)
-            ),
+            "property_graph": pg_payload,
         }
         if aem_counters is not None:
             logical_payload["aem_counters"] = aem_counters
@@ -257,11 +276,16 @@ class CustodialTraceManager:
         )
 
     def seal_failure(self, snapshot: Dict[str, Any], timestamp: str) -> MerkleNode:
+        if self.zkp_mode:
+            snapshot_payload = self._hash_commitment(snapshot)
+        else:
+            snapshot_payload = self._safe_serialize(snapshot)
+
         logical_payload = {
             "type": "FAILURE",
             "stage": "CTM",
             "timestamp": timestamp,
-            "snapshot": self._safe_serialize(snapshot),
+            "snapshot": snapshot_payload,
         }
         return self._dag.append(logical_payload, timestamp=timestamp)
 

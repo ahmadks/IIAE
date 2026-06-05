@@ -5,14 +5,26 @@ from typing import Any
 from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
 
 
-@dataclass
 class Manifold:
-    canonical_state_hash: str
-    epsilon: float
-    active_policies: list[dict[str, Any]]
-    canonical_state: Any
-    graph: Any
-    dqe: Any = None
+    def __init__(
+        self,
+        canonical_state_hash: str,
+        epsilon: float,
+        active_policies: list[dict[str, Any]],
+        canonical_state: Any,
+        graph: Any,
+        dqe: Any = None,
+    ) -> None:
+        self.canonical_state_hash = canonical_state_hash
+        self._epsilon = epsilon
+        self.active_policies = active_policies
+        self.canonical_state = canonical_state
+        self.graph = graph
+        self.dqe = dqe
+
+    @property
+    def epsilon(self) -> float:
+        return self._epsilon
 
     def contains(self, point: Any) -> bool:
         candidate = point
@@ -23,7 +35,7 @@ class Manifold:
             if candidate is None:
                 candidate = getattr(point, "measure_vector", point)
 
-        if hasattr(self, "dqe") and self.dqe is not None:
+        if self.dqe is not None:
             dissonance = self.dqe.compute_dissonance(candidate, self.canonical_state, self.graph)
             return dissonance <= self.epsilon
 
@@ -31,24 +43,10 @@ class Manifold:
 
 
 class ManifoldConstructor:
-    """Constructor de manifold simplificado con actualización dinámica de epsilon."""
+    """Constructor de manifold con constantes estáticas."""
 
     def __init__(self, dqe: Any | None = None):
         self.dqe = dqe
-
-    def compute_epsilon(self, policy_density: float, stability_factor: float) -> float:
-        base = 0.05 + 0.5 * policy_density * stability_factor
-        return min(1.0, max(0.0, base))
-
-    def update_epsilon(
-        self,
-        current_eps: float,
-        policy_density: float,
-        dissonance_variance: float = 0.0,
-        alpha: float = 0.1,
-    ) -> float:
-        target = self.compute_epsilon(policy_density, 1.0 - dissonance_variance)
-        return (1.0 - alpha) * current_eps + alpha * target
 
     def build(self, canonical_state: Any, graph: Any, epsilon: float) -> Manifold:
         representative = canonical_state

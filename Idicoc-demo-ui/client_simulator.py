@@ -109,8 +109,18 @@ def main():
                 audit_input = introduce_typo_noise(args.text, args.noise)
                 print(f"[>] Enviando texto semántico: '{audit_input}'")
 
+            from idicoc_notary_core.audit import SemanticPayload
+            if args.mode == "Numerico":
+                payload = SemanticPayload(
+                    text="numeric input",
+                    vec=np.array(audit_input),
+                    payload_type="numeric"
+                )
+            else:
+                payload = SemanticPayload(audit_input)
+
             result = client.process_interaction(
-                audit_input=audit_input,
+                audit_input=payload,
                 epsilon_override=args.epsilon,
                 trace_input="client_simulator_headless",
                 client_id="simulated_client",

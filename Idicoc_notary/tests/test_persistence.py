@@ -52,8 +52,9 @@ def test_pipeline_with_persistence():
         wrapper = IDICOCNotaryClient(config)
         
         # Process a valid interaction
+        from idicoc_notary_core.audit import SemanticPayload
         state = wrapper.process_interaction(
-            audit_input="test transaction 123",
+            audit_input=SemanticPayload("test transaction 123"),
             context_input=["test transaction 123"],
             context_policies=["test transaction 123"],
         )
@@ -83,7 +84,10 @@ def test_ctm_modes():
     wrapper_log = IDICOCNotaryClient(config_log)
     
     # Process interaction
-    state_log = wrapper_log.process_interaction("test log", ["test log"], ["test log"])
+    from idicoc_notary_core.audit import SemanticPayload
+    state_log = wrapper_log.process_interaction(
+        SemanticPayload("test log"), ["test log"], ["test log"]
+    )
     assert state_log.metadata["audit_metrics"] is not None
     
     assert wrapper_log.pipeline is not None

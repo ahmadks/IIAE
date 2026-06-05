@@ -47,6 +47,28 @@ class CompatibleCanonicalState(CanonicalStateDTO):
             return default
 
 
+class SemanticPayload:
+    """Payload unificado: texto legible + vector embedding."""
+
+    def __init__(
+        self, text: str, vec: Any = None, source_text: str = "", payload_type: str = "semantic"
+    ):
+        self.text_content = text
+        self.source_text = source_text or text
+        self.payload_type = payload_type
+        if vec is None:
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+            self.distribution = EmbeddingService().encode(text)
+        else:
+            self.distribution = vec
+
+    def __repr__(self) -> str:
+        return (
+            f"SemanticPayload(payload_type={self.payload_type!r}, "
+            f"source_text={self.source_text!r})"
+        )
+
+
 class IDICOCNotaryClient(IIAENotaryContract):
     """Wrapper minimalista que adapta la API pública al pipeline de negocio."""
 
@@ -113,7 +135,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
 
     def process_interaction(
         self,
-        audit_input: Any,
+        audit_input: SemanticPayload,
         context_input: list[str] | None = None,
         context_policies: list[str | dict[str, Any]] | None = None,
         user_input: str | None = None,
@@ -124,83 +146,8 @@ class IDICOCNotaryClient(IIAENotaryContract):
         if not self._initialized or self.pipeline is None:
             raise WrapperInitializationError("El wrapper no está inicializado.")
 
-        # ── Normalización Universal al Espacio Semántico ──────────────────────
-        # IDICOC opera SIEMPRE en un único espacio semántico unificado (384D).
-        # Cualquier entrada — string, ndarray, lista, dict, escalar — se convierte
-        # primero a una descripción textual y luego a un embedding vectorial.
-        # Esto garantiza coherencia dimensional con:
-        #   · El ancla K (Axioma de Unicidad, ~384D)
-        #   · Los embeddings de las políticas del PropertyGraph (~384D)
-        #   · Los embeddings del contexto RAG (~384D)
-        # La comparación d_1 (EMD a K), d_2 (Policy Graph) y d_3 (bisimulación)
-        # trabajan así en el mismo espacio de Hilbert, sin incompatibilidades.
-        import numpy as np
-        from idicoc_notary_core.utils.embedding_service import EmbeddingService
-
-        class SemanticPayload:
-            """Payload unificado: texto legible + vector embedding."""
-
-            def __init__(
-                self, text: str, vec: "np.ndarray", source_text: str, payload_type: str = "semantic"
-            ):
-                self.text_content = text
-                self.distribution = vec
-                self.source_text = source_text
-                self.payload_type = payload_type
-
-            def __repr__(self) -> str:
-                return (
-                    f"SemanticPayload(payload_type={self.payload_type!r}, "
-                    f"source_text={self.source_text!r})"
-                )
-
-        def _to_text(inp: Any) -> tuple[str, str]:
-            """Serializa cualquier tipo de entrada a texto descriptivo en español."""
-            # Ya es un string
-            if isinstance(inp, str):
-                return inp, "semantic"
-            # Dict con campo 'text'
-            if isinstance(inp, dict) and "text" in inp:
-                return str(inp["text"]), "semantic"
-            # Ya tiene text_content (SemanticPayload previo)
-            if hasattr(inp, "text_content") and inp.text_content:
-                return str(inp.text_content), getattr(inp, "payload_type", "semantic")
-            # Array o lista numérica → descripción de distribución
-            try:
-                arr = np.asarray(inp, dtype=float).flatten()
-                if arr.ndim == 1 and arr.size > 0:
-                    s = arr.sum()
-                    dist = arr / s if s > 1e-12 else arr
-                    dominant = int(np.argmax(dist))
-                    entropy = float(-np.sum(dist * np.log(dist + 1e-12)))
-                    desc = ", ".join(f"dim{i}={v:.6f}" for i, v in enumerate(dist))
-                    balance = "equilibrada" if float(dist.max()) < 0.4 else "sesgada"
-                    return (
-                        f"Señal vectorial de auditoría [{arr.size}D]: [{desc}]. "
-                        f"Distribución {balance}. Dimensión dominante: dim{dominant} "
-                        f"({float(dist[dominant]):.6f}). Entropía: {entropy:.6f}.",
-                        "numeric",
-                    )
-            except (TypeError, ValueError):
-                pass
-            # Fallback genérico
-            return f"Entrada de auditoría: {str(inp)}", "semantic"
-
-        text_val, payload_type = _to_text(audit_input)
-        try:
-            vec = EmbeddingService().encode(text_val)
-            audit_input = SemanticPayload(
-                text_val,
-                vec,
-                source_text=str(audit_input),
-                payload_type=payload_type,
-            )
-        except Exception as e:
-            self.pipeline.logger.warning(
-                f"Error codificando audit_input al espacio semántico: {e}. "
-                "Se enviará el texto sin embedding."
-            )
-            audit_input = text_val  # fallback: al menos el texto
+        if not isinstance(audit_input, SemanticPayload):
+            raise TypeError("audit_input must be an instance of SemanticPayload")
 
         result = self.pipeline.execute(
             audit_input=audit_input,
@@ -272,8 +219,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         if tolerance and tolerance > 0.0:
             umbral = tolerance
         else:
-            # Allow a small slack derived from correction_base_tolerance (capped at 0.1)
-            umbral = self.config.rigidity_epsilon + min(self.config.correction_base_tolerance, 0.1)
+            umbral = self.config.rigidity_epsilon
         dissonance = float(canonical_state.metadata.get("d_s", 0.0))
 
         if dissonance > umbral:

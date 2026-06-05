@@ -56,8 +56,9 @@ class LlamaChatbot:
         # Auditoría
         if self.notary:
             try:
+                from idicoc_notary_core.audit import SemanticPayload
                 audit_output = self.notary.process_interaction(
-                    audit_input="",
+                    audit_input=SemanticPayload(""),
                     context_input=context,
                     user_input=user_input,
                     epsilon_override=0.0,

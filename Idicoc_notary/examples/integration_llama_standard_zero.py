@@ -136,8 +136,9 @@ def phase_2_interaction(config: AuditConfig):
     # Procesar interacción
     print(f"\n[Fase 2] Procesando con wrapper_pipeline...")
 
+    from idicoc_notary_core.audit import SemanticPayload
     result = client.process_interaction(
-        audit_input="",  # Vacío en Fase 2
+        audit_input=SemanticPayload(""),  # Vacío en Fase 2
         context_input=context_input,
         context_policies=[],  # Ya compiladas en Fase 1
         user_input=user_input,  # ← NUEVO: instrucción explícita

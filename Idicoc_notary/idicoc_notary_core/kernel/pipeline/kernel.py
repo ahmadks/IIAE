@@ -1,6 +1,6 @@
 # idicoc_notary_core/kernel/pipeline/kernel.py
 from __future__ import annotations
-from typing import Any
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 from datetime import datetime, timezone
 from idicoc_notary_core.utils.hashing import sha256_hex
 from idicoc_notary_core.utils.logger import get_logger
@@ -14,6 +14,29 @@ from idicoc_notary_core.kernel.exceptions.alignment_breach import AlignmentBreac
 logger = get_logger("kernel.custodial")
 
 
+class CanonicalState(Protocol):
+    @property
+    def metadata(self) -> Dict[str, Any]: ...
+    @property
+    def measure_vector(self) -> Any: ...
+
+
+class DissonanceEngine(Protocol):
+    property_graph: Any | None = None
+    def compute_dissonance(self, y: Any, V_hat: Any, G_t: Any) -> float: ...
+
+
+class AuditEntropyModule(Protocol):
+    def get_counters(self) -> Tuple[int, int, int]: ...
+
+
+class CustodialTraceManager(Protocol):
+    @property
+    def root_hash(self) -> Optional[str]: ...
+    def commit(self, *args, **kwargs) -> Any: ...
+    def seal_failure(self, *args, **kwargs) -> Any: ...
+
+
 class CustodialKernel:
     """
     CustodialKernel — Motor coálgebraico del sistema.
@@ -22,14 +45,14 @@ class CustodialKernel:
 
     def __init__(
         self,
-        aem,
-        isg,
-        verifier,
-        ctm,
-        dse,
-        cmc,
-        dqe=None,
-        dissonance_strategy=None,
+        aem: AuditEntropyModule | None,
+        isg: Any,
+        verifier: Any,
+        ctm: CustodialTraceManager,
+        dse: DissonanceEngine | None,
+        cmc: Any,
+        dqe: DissonanceEngine | None = None,
+        dissonance_strategy: DissonanceEngine | None = None,
         epsilon: float = 0.0,
         enable_hard_halt: bool = False,
     ):
@@ -41,12 +64,22 @@ class CustodialKernel:
         self.cmc = cmc
         self._dqe = dqe
         self.dissonance_strategy = dissonance_strategy
-        self.epsilon = epsilon
+        self._epsilon = epsilon
         self.enable_hard_halt = enable_hard_halt
         self._dissonance_history: list[float] = []
 
         # Estado coálgebraico S
         self.state_s: dict[str, list[Any]] = {"buffers": [None] * 7, "registers": [None] * 7}
+
+    @property
+    def epsilon(self) -> float:
+        return self._epsilon
+
+    @epsilon.setter
+    def epsilon(self, value: float) -> None:
+        if hasattr(self, "_epsilon") and value != self._epsilon:
+            raise RuntimeError("Parameter mutation violates the Rigidity Theorem.")
+        self._epsilon = value
 
     @property
     def dqe(self) -> Any:
@@ -69,19 +102,40 @@ class CustodialKernel:
         self.state_s["buffers"][5] = admitted_input
 
         # 1. Bypass por hardware (MUX)
-        if getattr(admitted_input, "hardware_contained", False) or self._is_hardware_contained(
+        try:
+            is_hw = bool(admitted_input.hardware_contained)
+        except AttributeError:
+            is_hw = False
+
+        if is_hw or self._is_hardware_contained(
             admitted_input, canonical_state_obj, updated_graph
         ):
             logger.info("[Kernel] Señal contenida por MUX. Evaluando métrica de comportamiento...")
 
             # 2. Cálculo de Ds (Prueba de Equivalencia de Trazas)
             dissonance_engine = None
-            if hasattr(self, "dse") and self.dse is not None and hasattr(self.dse, "compute_dissonance"):
-                dissonance_engine = self.dse
-            elif hasattr(self, "dissonance_strategy") and self.dissonance_strategy is not None and hasattr(self.dissonance_strategy, "compute_dissonance"):
-                dissonance_engine = self.dissonance_strategy
-            elif hasattr(self, "dqe") and self.dqe is not None and hasattr(self.dqe, "compute_dissonance"):
-                dissonance_engine = self.dqe
+            try:
+                if self.dse is not None:
+                    _ = self.dse.compute_dissonance
+                    dissonance_engine = self.dse
+            except AttributeError:
+                pass
+
+            if dissonance_engine is None:
+                try:
+                    if self.dissonance_strategy is not None:
+                        _ = self.dissonance_strategy.compute_dissonance
+                        dissonance_engine = self.dissonance_strategy
+                except AttributeError:
+                    pass
+
+            if dissonance_engine is None:
+                try:
+                    if self.dqe is not None:
+                        _ = self.dqe.compute_dissonance
+                        dissonance_engine = self.dqe
+                except AttributeError:
+                    pass
 
             if dissonance_engine is not None:
                 import inspect
@@ -93,9 +147,13 @@ class CustodialKernel:
             else:
                 ds_metric = 0.0
 
-            if hasattr(canonical_state_obj, "metadata") and isinstance(canonical_state_obj.metadata, dict):
-                canonical_state_obj.metadata["dissonance_metrics"] = ds_metric
-                canonical_state_obj.metadata["d_s"] = ds_metric
+            try:
+                metadata = canonical_state_obj.metadata
+                if isinstance(metadata, dict):
+                    metadata["dissonance_metrics"] = ds_metric
+                    metadata["d_s"] = ds_metric
+            except AttributeError:
+                pass
 
             # 3. Consolidación Inmutable
             return self._finalize_custody(admitted_input, canonical_state_obj, updated_graph, ds_metric, operation_time)
@@ -116,6 +174,8 @@ class CustodialKernel:
         timestamp: str | None = None,
     ) -> dict[str, Any] | None:
         if epsilon is not None:
+            if epsilon != self._epsilon:
+                raise RuntimeError("Parameter mutation violates the Rigidity Theorem.")
             self.epsilon = epsilon
 
         # Wrapper backwards compatibility
@@ -125,9 +185,12 @@ class CustodialKernel:
         canonical_state_obj = self.isg.generate(canonical_state)
         updated_graph = property_graph
         if updated_graph is None:
-            if hasattr(self.dse, "property_graph") and self.dse.property_graph is not None:
-                updated_graph = self.dse.property_graph
-            else:
+            try:
+                if self.dse is not None and self.dse.property_graph is not None:
+                    updated_graph = self.dse.property_graph
+            except AttributeError:
+                pass
+            if updated_graph is None:
                 updated_graph = PropertyGraph()
 
         try:
@@ -174,28 +237,45 @@ class CustodialKernel:
         )
         self.state_s["buffers"][6] = "VERIFIED"
 
-        if hasattr(self.dissonance_strategy, "select_canonical_input"):
+        try:
             canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
-        else:
-            canonical_payload = getattr(canonical_state_obj, "measure_vector", canonical_state_obj)
+        except AttributeError:
+            try:
+                canonical_payload = canonical_state_obj.measure_vector
+            except AttributeError:
+                canonical_payload = canonical_state_obj
 
         ts = ""
-        if hasattr(canonical_state_obj, "metadata") and isinstance(canonical_state_obj.metadata, dict):
-            ts = canonical_state_obj.metadata.get("timestamp", "")
+        try:
+            metadata = canonical_state_obj.metadata
+            if isinstance(metadata, dict):
+                ts = metadata.get("timestamp", "")
+        except AttributeError:
+            pass
         invariant_state_hash = sha256_hex(repr(canonical_payload) + ts)
 
-        nodes_repr = getattr(updated_graph, "nodes", [])
-        edges_repr = getattr(updated_graph, "edges", [])
+        try:
+            nodes_repr = updated_graph.nodes
+        except AttributeError:
+            nodes_repr = []
+
+        try:
+            edges_repr = updated_graph.edges
+        except AttributeError:
+            edges_repr = []
         property_graph_hash = sha256_hex(repr(nodes_repr) + str(edges_repr))
 
         aem_counters = None
-        if hasattr(self, "aem") and self.aem is not None and hasattr(self.aem, "get_counters"):
-            t_s, v_s, r_s = self.aem.get_counters()
-            aem_counters = {
-                "total_signals": t_s,
-                "valid_signals": v_s,
-                "rejected_signals": r_s,
-            }
+        try:
+            if self.aem is not None:
+                t_s, v_s, r_s = self.aem.get_counters()
+                aem_counters = {
+                    "total_signals": t_s,
+                    "valid_signals": v_s,
+                    "rejected_signals": r_s,
+                }
+        except AttributeError:
+            pass
 
         self.ctm.commit(
             canonical_payload,
@@ -213,14 +293,6 @@ class CustodialKernel:
             "root_hash": self.ctm.root_hash,
         }
 
-    def _compute_recent_variance(self) -> float:
-        if len(self._dissonance_history) < 2:
-            return 0.0
-        window = self._dissonance_history[-10:]
-        mean = sum(window) / len(window)
-        variance = sum((x - mean) ** 2 for x in window) / len(window)
-        return variance
-
     def _is_hardware_contained(
         self,
         admitted: Any,
@@ -232,14 +304,18 @@ class CustodialKernel:
         def _extract_flag(source: Any) -> bool:
             if isinstance(source, dict):
                 return bool(source.get("hardware_contained", False))
-            if hasattr(source, "hardware_contained"):
-                return bool(getattr(source, "hardware_contained"))
-            if hasattr(source, "metadata"):
-                metadata = getattr(source, "metadata")
+            try:
+                return bool(source.hardware_contained)
+            except AttributeError:
+                pass
+            try:
+                metadata = source.metadata
                 if isinstance(metadata, dict) and metadata.get("hardware_contained"):
                     return True
-            if hasattr(source, "is_hardware_contained"):
-                attr = getattr(source, "is_hardware_contained")
+            except AttributeError:
+                pass
+            try:
+                attr = source.is_hardware_contained
                 if callable(attr):
                     try:
                         return bool(attr())
@@ -247,6 +323,8 @@ class CustodialKernel:
                         pass
                 else:
                     return bool(attr)
+            except AttributeError:
+                pass
             return False
 
         if _extract_flag(admitted):
@@ -261,8 +339,6 @@ class CustodialKernel:
         if self.enable_hard_halt:
             raise HardHaltException()
         self.state_s["registers"][0] = "HALT_SKIPPED"
-
-
 
     def _apply_emergency_correction(self, admitted: Any) -> Any:
         raise InvariantStateBreach(

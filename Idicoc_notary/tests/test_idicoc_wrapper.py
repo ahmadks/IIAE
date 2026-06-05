@@ -74,8 +74,9 @@ def test_pipeline_algebraic_components_in_metadata():
     )
     wrapper = IDICOCNotaryClient(config)
 
+    from idicoc_notary_core.audit import SemanticPayload
     state = wrapper.process_interaction(
-        audit_input="test input",
+        audit_input=SemanticPayload("test input"),
         context_input=["ctx"],
         context_policies=["ax"],
     )

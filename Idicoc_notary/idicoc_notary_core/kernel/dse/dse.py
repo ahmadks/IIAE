@@ -105,8 +105,9 @@ class PolicyExtractor:
                 try:
                     vec = embedder.encode(policy_text)
                     policy_dict["embedding"] = vec.tolist()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[DSE] Critical failure: could not generate embedding for policy text '{policy_text}': {e}")
+                    raise RuntimeError(f"Embedding generation failed: {e}") from e
             self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
         # 2. Políticas extraídas de context_input
@@ -118,8 +119,9 @@ class PolicyExtractor:
                 try:
                     vec = embedder.encode(text)
                     policy_dict["embedding"] = vec.tolist()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"[DSE] Critical failure: could not generate embedding for context text '{text}': {e}")
+                    raise RuntimeError(f"Embedding generation failed: {e}") from e
             self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
         # 3. Detección de contradicciones vía NLI en el contexto base
@@ -178,28 +180,63 @@ class PolicyExtractor:
 
         text_lower = text.lower().strip()
 
-        # Clasificación de polaridad, hardness, prioridad
-        if any(
-            kw in text_lower
-            for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")
-        ):
-            polarity = "negative"
-            hardness = "hard"
-            priority = 10
-        elif any(
-            kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")
-        ):
-            polarity = "affirmative"
-            hardness = "hard"
-            priority = 9
-        elif any(kw in text_lower for kw in ("should ", "prefer", "recommend")):
-            polarity = "affirmative"
-            hardness = "soft"
-            priority = 5
+        nli = self._get_nli()
+        polarity = "affirmative"
+        hardness = "soft"
+        priority = 1
+
+        if nli is not None:
+            try:
+                result = nli(
+                    text,
+                    candidate_labels=["entailment", "contradiction", "neutral"],
+                    hypothesis_template="This policy represents a state of {}",
+                )
+                scores = dict(zip(result["labels"], result["scores"]))
+                best_label = result["labels"][0]
+                if best_label == "contradiction":
+                    polarity = "negative"
+                    hardness = "hard"
+                    priority = 10
+                elif best_label == "entailment":
+                    polarity = "affirmative"
+                    hardness = "hard"
+                    priority = 9
+                else:
+                    polarity = "affirmative"
+                    hardness = "soft"
+                    priority = 5
+            except Exception as e:
+                logger.error(f"[DSE] NLI polarity detection failed: {e}")
+                if getattr(self.config, "enable_hard_halt", False):
+                    raise RuntimeError(f"NLI polarity detection failed: {e}") from e
+                # Fallback to simple deterministic rules if NLI execution fails
+                if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
+                    polarity = "negative"
+                    hardness = "hard"
+                    priority = 10
+                elif any(kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")):
+                    polarity = "affirmative"
+                    hardness = "hard"
+                    priority = 9
+                elif any(kw in text_lower for kw in ("should ", "prefer", "recommend")):
+                    polarity = "affirmative"
+                    hardness = "soft"
+                    priority = 5
         else:
-            polarity = "affirmative"
-            hardness = "soft"
-            priority = 1
+            # Fallback if NLI model is offline / not loaded (to avoid crashing unit tests)
+            if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
+                polarity = "negative"
+                hardness = "hard"
+                priority = 10
+            elif any(kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")):
+                polarity = "affirmative"
+                hardness = "hard"
+                priority = 9
+            elif any(kw in text_lower for kw in ("should ", "prefer", "recommend")):
+                polarity = "affirmative"
+                hardness = "soft"
+                priority = 5
 
         # Tipo de política por palabras clave
         if any(kw in text_lower for kw in ("after", "before", "during", "when", "at time")):
@@ -287,7 +324,7 @@ class PolicyExtractor:
             vecs = embedder.encode([raw_text, canonical_text])
             cosine_sim = float(np.dot(vecs[0], vecs[1]))
             polarity = "affirmative" if cosine_sim >= 0.5 else "negative"
-            sigma = f"semantic|{raw_text[:32]}|{canonical_text[:32]}|{cosine_sim:.4f}"
+            sigma = f"semantic|{raw_text}|{canonical_text}|{cosine_sim:.4f}"
             structural_signature = sha256_hex(sigma)
             policy_id = sha256_hex(structural_signature + "||" + timestamp)
             return {

@@ -1,11 +1,28 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
     from idicoc_notary_core.kernel.projection import CanonicalState
     from idicoc_notary_core.kernel.source.anchor import SourceAnchor
+
+
+@dataclass(frozen=True)
+class DissonanceEvaluationResult:
+    structural_dissonance_ds: float
+    factual_dissonance_df: float
+    corrected_output: Any
+    correction_applied: bool
+    metrics: Dict[str, Any]
+
+    def __iter__(self):
+        yield self.structural_dissonance_ds
+        yield self.factual_dissonance_df
+        yield self.corrected_output
+        yield self.correction_applied
+        yield self.metrics
 
 
 class DissonanceStrategy(ABC):
@@ -27,18 +44,18 @@ class DissonanceStrategy(ABC):
         context_policies: List[str],
         epsilon: float = 0.0,
         validate_conflicts: bool = False,
-    ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
+    ) -> DissonanceEvaluationResult:
         """
         Compute dissonance metrics for the given audit input.
         
-        TODAS las implementaciones deben devolver la misma estructura:
+        TODAS las implementaciones deben devolver DissonanceEvaluationResult.
         
         Returns:
-            Tuple[float, float, Any, bool, Dict[str, Any]] donde:
-            - D_s (float): Dissonancia estructural [0, 1]
-            - D_f (float): Dissonancia factual [0, 1]
+            DissonanceEvaluationResult donde:
+            - structural_dissonance_ds (float): Dissonancia estructural [0, 1]
+            - factual_dissonance_df (float): Dissonancia factual [0, 1]
             - corrected_output (Any): Salida corregida o audit_input original
-            - correction_flag (bool): Si se aplicó corrección
+            - correction_applied (bool): Si se aplicó corrección
             - metrics (Dict[str, Any]): Diccionario con TODOS estos campos REQUERIDOS:
                 * 'd_s' (float): Dissonancia estructural
                 * 'd_logic' (float): Dissonancia lógica máxima

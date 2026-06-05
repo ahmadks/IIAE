@@ -17,7 +17,7 @@ from .pipeline import IDICOCPipeline
 from .graph.loader import PolicyLoader, FilePolicyLoader, InlinePolicyLoader
 from .graph.cache import GraphCache, NoOpGraphCache, RedisGraphCache
 from .dse import DissonanceStrategy
-from .wrapper_pipeline import IDICOCNotaryClient
+from .wrapper_pipeline import IDICOCNotaryClient, SemanticPayload
 from .aem import AuditEntropyModule
 
 __all__ = [
@@ -37,4 +37,5 @@ __all__ = [
     "IDICOCNotaryClient",
     "DissonanceStrategy",
     "AuditEntropyModule",
+    "SemanticPayload",
 ]

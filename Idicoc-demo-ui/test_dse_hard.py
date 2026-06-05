@@ -32,8 +32,20 @@ def run_test_scenario(
     for p in policies:
         print(f"  - [{p['hardness'].upper()}] {p['text']}")
 
+    from idicoc_notary_core.audit import SemanticPayload
+    import numpy as np
+
+    if isinstance(audit_input, list):
+        payload = SemanticPayload(
+            text="numeric input",
+            vec=np.array(audit_input),
+            payload_type="numeric"
+        )
+    else:
+        payload = SemanticPayload(audit_input)
+
     result = notary.process_interaction(
-        audit_input=audit_input, context_input=[], context_policies=policies
+        audit_input=payload, context_input=[], context_policies=policies
     )
 
     metrics = result.get("dissonance_metrics", {})

@@ -89,6 +89,7 @@ class InvariantSynthesizer:
         self.vocab_token_ids: List[int] = []
         self.vocab_embeddings: Optional[np.ndarray] = None
         self.vocab_cache_path = vocab_cache_path
+        self.kd_tree: Optional[Any] = None
 
         if precompute_vocab_embeddings:
             try:
@@ -326,12 +327,12 @@ class InvariantSynthesizer:
             # Seleccionar tokens que superen el umbral semántico
             selected = [tok for tok, score in scored_sorted if score >= self.embedding_threshold]
 
-            # Si no hay tokens por encima del umbral, degradar a los top-N por similitud
+            # Si no hay tokens por encima del umbral, loguear error de ambigüedad y retornar lista vacía
             if not selected:
-                logger.warning(
-                    f"[InvariantSynthesizer] Ningún token supera el umbral {self.embedding_threshold:.2f}; usando top tokens por similitud"
+                logger.error(
+                    f"[Ambiguity Alert] Ningún token de la política '{normalized}' supera el umbral semántico de {self.embedding_threshold:.2f}."
                 )
-                selected = [tok for tok, _ in scored_sorted[:8]]
+                return []
 
             # Retornar tokens seleccionados como frases conceptuales (unidades atómicas)
             return selected[:10]
@@ -395,9 +396,16 @@ class InvariantSynthesizer:
                     tokens = meta.get("tokens", [])
                     token_ids = meta.get("token_ids", [])
                     embeddings = np.load(emb_path)
+                    # Normalize for KDTree L2-based cosine mapping
+                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    norms = np.where(norms < 1e-12, 1.0, norms)
+                    embeddings = embeddings / norms
+
+                    from scipy.spatial import KDTree
                     self.vocab_tokens_text = tokens
                     self.vocab_token_ids = token_ids
                     self.vocab_embeddings = embeddings
+                    self.kd_tree = KDTree(embeddings)
                     return embeddings
                 except Exception as e:
                     logger.warning(
@@ -420,10 +428,17 @@ class InvariantSynthesizer:
                 self.embedding_service.encode(clean_tokens, convert_to_numpy=True), dtype=float
             )
 
+        # Normalize the embeddings for KDTree L2-based cosine mapping
+        norms = np.linalg.norm(embs, axis=1, keepdims=True)
+        norms = np.where(norms < 1e-12, 1.0, norms)
+        embs = embs / norms
+
         # Guardar en atributos
         self.vocab_tokens_text = tokens_text
         self.vocab_token_ids = token_ids
         self.vocab_embeddings = embs
+        from scipy.spatial import KDTree
+        self.kd_tree = KDTree(embs)
 
         # Guardar cache si se especificó path
         if cache_path:
@@ -479,20 +494,78 @@ class InvariantSynthesizer:
 
         return variants
 
+    SYNONYM_MAP = {
+        "prohibit": ["forbid", "ban", "restrict", "prevent", "disallow", "bar", "block"],
+        "never": ["not", "at no time", "under no circumstances"],
+        "always": ["constantly", "forever", "without exception", "invariably"],
+        "allow": ["permit", "let", "authorize", "approve", "sanction"],
+        "restricted": ["limited", "confined", "curbed", "bounded"],
+        "required": ["mandatory", "compulsory", "obligatory", "needed", "essential"],
+        "access": ["entry", "admission", "reach"],
+        "permit": ["allow", "authorize", "license"],
+        "deny": ["refuse", "reject", "decline", "withhold"],
+    }
+
     def _generate_synthetic_paraphrases(self, text: str) -> List[str]:
-        """Genera paráfrasis sintéticas de una política (estrategia placeholder)."""
-        # Estrategia simple: invertir palabras clave, cambiar orden, etc.
-        # En producción, esto usaría modelos T5 o similares
+        """Genera paráfrasis sintéticas de una política usando un grafo de sinónimos local determinista."""
         paraphrases = []
+        words = text.lower().strip().split()
+        
+        # Intentar usar NLTK wordnet si está disponible localmente
+        nltk_synonyms = {}
+        try:
+            import nltk
+            from nltk.corpus import wordnet
+            for word in words:
+                syns = []
+                for syn in wordnet.synsets(word):
+                    for lemma in syn.lemmas():
+                        name = lemma.name().replace("_", " ")
+                        if name != word and name not in syns:
+                            syns.append(name)
+                if syns:
+                    nltk_synonyms[word] = syns[:3]
+        except Exception:
+            pass
 
-        words = text.split()
-        if len(words) > 2:
-            # Variante 1: orden invertido
-            paraphrases.append(" ".join(reversed(words)))
-            # Variante 2: primeras palabras duplicadas
-            paraphrases.append(" ".join(words[:2]) + " " + text)
+        # Generar paráfrasis reemplazando palabras por sus sinónimos
+        for idx, word in enumerate(words):
+            clean_word = word.strip(".,;:!?()\"'")
+            syns = nltk_synonyms.get(clean_word) or self.SYNONYM_MAP.get(clean_word)
+            if syns:
+                for syn in syns[:3]:
+                    new_words = list(words)
+                    new_words[idx] = word.replace(clean_word, syn)
+                    paraphrases.append(" ".join(new_words))
+                    
+        # Reestructuración simple de frases
+        if len(words) > 3:
+            if words[0] in ("never", "always", "prohibit"):
+                paraphrases.append(" ".join(words[1:]) + f" is {words[0]}ed")
+                
+        unique_paraphrases = list(dict.fromkeys(p for p in paraphrases if p.strip()))
+        return unique_paraphrases[:5]
 
-        return paraphrases
+    def query_similar_tokens(self, query_text: str, threshold: float) -> List[int]:
+        """Consulta el KDTree en O(log V) para obtener IDs de tokens similares."""
+        if self.vocab_embeddings is None or self.kd_tree is None:
+            return []
+
+        try:
+            import math
+            query_emb = np.asarray(self.embedding_service.encode(query_text), dtype=float)
+            norm = np.linalg.norm(query_emb)
+            if norm > 1e-12:
+                query_emb /= norm
+                
+            # d = sqrt(2 * (1 - cosine_sim)) -> d <= sqrt(2 * (1 - threshold))
+            r = math.sqrt(2.0 * max(0.0, 1.0 - threshold))
+            
+            indices = self.kd_tree.query_ball_point(query_emb, r)
+            return [self.vocab_token_ids[idx] for idx in indices]
+        except Exception as e:
+            logger.warning(f"Error consultando KDTree: {e}")
+            return []
 
     def get_w_bank_mask(self) -> Dict[int, Tuple[str, int]]:
         """
