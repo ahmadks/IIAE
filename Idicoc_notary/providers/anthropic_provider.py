@@ -2,11 +2,13 @@ from __future__ import annotations
 from typing import Any
 
 from idicoc_notary_core.audit.llm_interface import BaseLLMProvider
+import os
 
 
 class AnthropicProvider(BaseLLMProvider):
     def __init__(self, api_key: str | None = None, embedding_model: str | None = None):
-        self.api_key = api_key
+        # Prefer explicit api_key, otherwise read from environment variable
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.embedding_model = embedding_model
         self.embedding_provider = None
         try:
@@ -15,6 +17,8 @@ class AnthropicProvider(BaseLLMProvider):
             self._anthropic = anthropic
             if api_key:
                 self._client = anthropic.Client(api_key)
+            elif self.api_key:
+                self._client = anthropic.Client(self.api_key)
             else:
                 self._client = None
         except Exception:

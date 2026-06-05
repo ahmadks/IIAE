@@ -2,11 +2,13 @@ from __future__ import annotations
 from typing import Any
 
 from idicoc_notary_core.audit.llm_interface import BaseLLMProvider
+import os
 
 
 class OpenAIProvider(BaseLLMProvider):
     def __init__(self, api_key: str | None = None, embedding_model: str | None = None):
-        self.api_key = api_key
+        # Prefer explicit api_key, otherwise read from environment variable
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.embedding_model = embedding_model or "text-embedding-3-small"
         self.embedding_provider = None
         try:
@@ -14,6 +16,8 @@ class OpenAIProvider(BaseLLMProvider):
 
             if api_key:
                 openai.api_key = api_key
+            elif self.api_key:
+                openai.api_key = self.api_key
             self._openai = openai
         except Exception:
             self._openai = None

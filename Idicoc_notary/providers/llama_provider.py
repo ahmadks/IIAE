@@ -54,26 +54,90 @@ class LlamaProvider(BaseLLMProvider):
     def _ensure_model(self) -> None:
         if self._model is not None:
             return
-        try:
-            # Try llama-cpp-python first
-            from llama_cpp import Llama
+        
+        import os
+        is_directory = self.model_path and os.path.isdir(self.model_path)
 
-            if self.model_path:
-                self._model = Llama(model_path=self.model_path)
+        if not is_directory:
+            try:
+                # Try llama-cpp-python first
+                from llama_cpp import Llama
+
+                if self.model_path:
+                    self._model = Llama(model_path=self.model_path)
+                    return
+                else:
+                    raise RuntimeError("No model_path provided for LlamaProvider")
+            except Exception as e:
+                # If not a directory and llama-cpp failed, try fallback
+                pass
+
+        # Load via transformers AutoModelForCausalLM
+        try:
+            from transformers import AutoModelForCausalLM
+            import torch
+
+            print(f"[LlamaProvider] Cargando modelo transformers desde {self.model_path}...")
+            
+            # Determine best device and device_map settings
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+                device_map = "auto"
+                torch_dtype = torch.float16
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
+                device_map = None # Avoid meta device issues on Apple Silicon
+                torch_dtype = torch.float16
             else:
-                raise RuntimeError("No model_path provided for LlamaProvider")
+                device = torch.device("cpu")
+                device_map = None
+                torch_dtype = torch.float32
+
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                device_map=device_map,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+            )
+            
+            if device_map is None:
+                self._model = self._model.to(device)
+                
+            print(f"[LlamaProvider] Modelo transformers cargado exitosamente en {device}.")
         except Exception as e:
-            raise ImportError(f"Unable to initialize Llama model: {e}")
+            raise ImportError(f"Unable to initialize Llama model via transformers or llama-cpp: {e}")
 
     def generate(self, prompt: str) -> str:
         self._ensure_model()
-        # Basic generate using llama-cpp-python streaming API
         try:
-            resp = self._model.generate(prompt)
-            # llama-cpp may provide different shapes; coerce to string
-            if isinstance(resp, dict) and "choices" in resp:
-                return resp["choices"][0]["text"]
-            return str(resp)
+            # Check if it is a transformers model
+            if hasattr(self._model, "generate"):
+                from transformers import AutoTokenizer
+                import torch
+                tokenizer = AutoTokenizer.from_pretrained(self.model_path, local_files_only=True)
+                
+                # Format prompt simply
+                inputs = tokenizer(prompt, return_tensors="pt")
+                model_device = next(self._model.parameters()).device
+                inputs = {k: v.to(model_device) for k, v in inputs.items() if hasattr(v, "to")}
+                
+                with torch.no_grad():
+                    outputs = self._model.generate(
+                        **inputs,
+                        max_new_tokens=150,
+                        temperature=0.7,
+                        do_sample=True,
+                        pad_token_id=tokenizer.eos_token_id,
+                    )
+                
+                generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+                return tokenizer.decode(generated_tokens, skip_special_tokens=True)
+            else:
+                # Basic generate using llama-cpp-python streaming API
+                resp = self._model.generate(prompt)
+                if isinstance(resp, dict) and "choices" in resp:
+                    return resp["choices"][0]["text"]
+                return str(resp)
         except Exception as e:
             raise RuntimeError(f"LlamaProvider.generate failed: {e}")
 
