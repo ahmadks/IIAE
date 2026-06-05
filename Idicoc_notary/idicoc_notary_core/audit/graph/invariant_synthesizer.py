@@ -218,6 +218,24 @@ class InvariantSynthesizer:
                 message=f"Error durante compilación: {str(e)}",
             )
 
+    # Multilingual stopwords — these carry zero policy-violation signal and must
+    # never appear in the W_bank, regardless of how concept_phrases were obtained.
+    # This is critical when the Ambiguity Alert fires and _extract_concept_tokens
+    # falls back to encoding the full policy text (which contains stopwords).
+    POLICY_STOPWORDS: Set[str] = frozenset({
+        # Spanish — artículos, preposiciones, conjunciones, pronombres
+        "no", "los", "las", "del", "de", "la", "el", "un", "una", "en", "y",
+        "a", "al", "se", "su", "sus", "que", "por", "con", "para", "es", "son",
+        "lo", "le", "les", "me", "te", "nos", "mi", "tu", "si", "o", "u",
+        "pero", "más", "como", "hay", "ser", "ha", "han", "ya", "ni", "e",
+        # English — articles, prepositions, conjunctions, pronouns
+        "the", "an", "of", "in", "on", "to", "is", "are", "was", "were",
+        "be", "been", "it", "its", "this", "that", "and", "or", "but", "not",
+        "by", "at", "as", "do", "does", "did", "will", "can", "may", "with",
+        "for", "from", "all", "any", "have", "has", "had", "he", "she", "we",
+        "they", "you", "i", "my", "your", "his", "her", "their", "our",
+    })
+
     def _extract_concept_tokens(
         self,
         text: str,
@@ -250,6 +268,12 @@ class InvariantSynthesizer:
                         token_text = self.tokenizer.decode([token_id])
                     except Exception:
                         token_text = f"<UNK:{token_id}>"
+
+                    # Filter stopwords — they carry no conceptual signal for the W_bank.
+                    # This applies both to tokens from the semantic extractor and from the
+                    # full-text fallback path triggered by the Ambiguity Alert.
+                    if token_text.strip().lower() in self.POLICY_STOPWORDS:
+                        continue
 
                     tokens.append(
                         InvariantToken(

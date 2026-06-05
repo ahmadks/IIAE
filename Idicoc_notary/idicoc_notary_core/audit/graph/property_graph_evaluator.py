@@ -8,6 +8,7 @@ from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 
 class DimensionalityMismatchError(ValueError):
     """Excepción para discordancia de dimensiones en cálculo de distancias."""
+
     pass
 
 
@@ -236,6 +237,7 @@ class PropertyGraphEvaluator:
         ax_embedding: Optional[list] = policy.get("embedding")
         if ax_embedding is None:
             from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
             try:
                 ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
                 policy["embedding"] = ax_embedding
@@ -246,12 +248,27 @@ class PropertyGraphEvaluator:
 
         if y_vec is None:
             from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
             try:
                 y_text = self._to_str(y)
                 y_vec = EmbeddingService().encode(y_text).tolist()
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to generate embedding for input text: '{y_text}' due to: {e}"
+                ) from e
+        elif ax_embedding is not None and len(y_vec) != len(ax_embedding):
+            # y_vec is in a different metric space than ax_embedding (e.g. a token-probability
+            # distribution [0.4, 0.6] vs a 384-dim sentence embedding).
+            # Comparing them via cosine distance would be topologically meaningless.
+            # Re-embed the text representation to ensure dimensional compatibility.
+            from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
+            try:
+                y_text = self._to_str(y)
+                y_vec = EmbeddingService().encode(y_text).tolist()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to generate embedding for input text: '{self._to_str(y)}' due to: {e}"
                 ) from e
 
         dist = self._cosine_distance(y_vec, ax_embedding)

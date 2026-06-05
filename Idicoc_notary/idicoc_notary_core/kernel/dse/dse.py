@@ -253,7 +253,11 @@ class PolicyExtractor:
         scope = "session"
 
         # Generar quíntupla (S, P, O, Θ, σ) y versión criptográfica H(σ ∥ t)
-        sigma = f"{subject}|{predicate}|{obj}|{scope}|{policy_type}|{polarity}|{text[:64]}"
+        # Usamos el hash SHA-256 del texto completo para garantizar resistencia a colisiones.
+        # Truncar el texto (text[:64]) es peligroso cuando múltiples normas (GDPR, ISO)
+        # comparten preámbulos normativos idénticos de más de 64 caracteres.
+        text_hash = sha256_hex(text)
+        sigma = f"{subject}|{predicate}|{obj}|{scope}|{policy_type}|{polarity}|{text_hash}"
         structural_signature = sha256_hex(sigma)
         policy_id = sha256_hex(structural_signature + "||" + timestamp)
 

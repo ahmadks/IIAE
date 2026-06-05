@@ -102,63 +102,45 @@ class CustodialKernel:
         self.state_s["buffers"][5] = admitted_input
 
         # 1. Bypass por hardware (MUX)
-        try:
-            is_hw = bool(admitted_input.hardware_contained)
-        except AttributeError:
-            is_hw = False
+        # Direct protocol access: is_hw is established via _is_hardware_contained,
+        # which handles both dict-based and attribute-based sources cleanly.
+        is_hw = self._is_hardware_contained(admitted_input, canonical_state_obj, updated_graph)
 
-        if is_hw or self._is_hardware_contained(
-            admitted_input, canonical_state_obj, updated_graph
-        ):
+        if is_hw:
             logger.info("[Kernel] Señal contenida por MUX. Evaluando métrica de comportamiento...")
 
             # 2. Cálculo de Ds (Prueba de Equivalencia de Trazas)
-            dissonance_engine = None
-            try:
-                if self.dse is not None:
-                    _ = self.dse.compute_dissonance
-                    dissonance_engine = self.dse
-            except AttributeError:
-                pass
-
-            if dissonance_engine is None:
-                try:
-                    if self.dissonance_strategy is not None:
-                        _ = self.dissonance_strategy.compute_dissonance
-                        dissonance_engine = self.dissonance_strategy
-                except AttributeError:
-                    pass
-
-            if dissonance_engine is None:
-                try:
-                    if self.dqe is not None:
-                        _ = self.dqe.compute_dissonance
-                        dissonance_engine = self.dqe
-                except AttributeError:
-                    pass
+            # Resolution order (Protocol priority): dse > dissonance_strategy > dqe
+            dissonance_engine: DissonanceEngine | None = None
+            for candidate in (self.dse, self.dissonance_strategy, self._dqe):
+                if candidate is not None and callable(getattr(candidate, "compute_dissonance", None)):
+                    dissonance_engine = candidate
+                    break
 
             if dissonance_engine is not None:
                 import inspect
                 sig = inspect.signature(dissonance_engine.compute_dissonance)
                 if len(sig.parameters) >= 3:
-                    ds_metric = dissonance_engine.compute_dissonance(admitted_input, canonical_state_obj, updated_graph)
+                    ds_metric = dissonance_engine.compute_dissonance(
+                        admitted_input, canonical_state_obj, updated_graph
+                    )
                 else:
                     ds_metric = dissonance_engine.compute_dissonance(admitted_input, updated_graph)
             else:
                 ds_metric = 0.0
 
-            try:
-                metadata = canonical_state_obj.metadata
-                if isinstance(metadata, dict):
-                    metadata["dissonance_metrics"] = ds_metric
-                    metadata["d_s"] = ds_metric
-            except AttributeError:
-                pass
+            # Write dissonance metric into the canonical state metadata (protocol-conformant access)
+            metadata = getattr(canonical_state_obj, "metadata", None)
+            if isinstance(metadata, dict):
+                metadata["dissonance_metrics"] = ds_metric
+                metadata["d_s"] = ds_metric
 
             # 3. Consolidación Inmutable
-            return self._finalize_custody(admitted_input, canonical_state_obj, updated_graph, ds_metric, operation_time)
+            return self._finalize_custody(
+                admitted_input, canonical_state_obj, updated_graph, ds_metric, operation_time
+            )
 
-        # Fail-Safe crítico
+        # Fail-Safe crítico: la señal no cumple el protocolo de hardware containment.
         raise InvariantStateBreach(
             message="La señal evadió la máscara estructural (no es hardware_contained).",
             invalid_state=admitted_input,
@@ -237,21 +219,18 @@ class CustodialKernel:
         )
         self.state_s["buffers"][6] = "VERIFIED"
 
-        try:
-            canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
-        except AttributeError:
-            try:
-                canonical_payload = canonical_state_obj.measure_vector
-            except AttributeError:
-                canonical_payload = canonical_state_obj
+        # Protocol-conformant resolution of canonical payload.
+        # If dissonance_strategy implements select_canonical_input, use it;
+        # otherwise fall through to the CanonicalState.measure_vector protocol attribute.
+        select_fn = getattr(self.dissonance_strategy, "select_canonical_input", None)
+        if callable(select_fn):
+            canonical_payload = select_fn(canonical_state_obj)
+        else:
+            canonical_payload = getattr(canonical_state_obj, "measure_vector", canonical_state_obj)
 
-        ts = ""
-        try:
-            metadata = canonical_state_obj.metadata
-            if isinstance(metadata, dict):
-                ts = metadata.get("timestamp", "")
-        except AttributeError:
-            pass
+        # Read timestamp from protocol-conformant metadata dict
+        metadata = getattr(canonical_state_obj, "metadata", {})
+        ts = metadata.get("timestamp", "") if isinstance(metadata, dict) else ""
         invariant_state_hash = sha256_hex(repr(canonical_payload) + ts)
 
         try:
@@ -299,41 +278,32 @@ class CustodialKernel:
         canonical_state_obj: Any,
         updated_graph: Any,
     ) -> bool:
-        """Detecta señales ya contenidas por hardware para evitar proyecciones innecesarias."""
+        """Detecta señales ya contenidas por hardware para evitar proyecciones innecesarias.
+
+        Extraction strategy (no duck typing, fail-fast on the first positive signal):
+        1. Dict-based: source.get("hardware_contained")
+        2. Object attribute: source.hardware_contained
+        3. Protocol metadata dict: source.metadata["hardware_contained"]
+        """
 
         def _extract_flag(source: Any) -> bool:
+            # 1. Dict-based payload (e.g., admitted_input={"hardware_contained": True})
             if isinstance(source, dict):
                 return bool(source.get("hardware_contained", False))
-            try:
-                return bool(source.hardware_contained)
-            except AttributeError:
-                pass
-            try:
-                metadata = source.metadata
-                if isinstance(metadata, dict) and metadata.get("hardware_contained"):
-                    return True
-            except AttributeError:
-                pass
-            try:
-                attr = source.is_hardware_contained
-                if callable(attr):
-                    try:
-                        return bool(attr())
-                    except Exception:
-                        pass
-                else:
-                    return bool(attr)
-            except AttributeError:
-                pass
+
+            # 2. Direct attribute (Protocol: CanonicalState, SemanticPayload, etc.)
+            hw = getattr(source, "hardware_contained", None)
+            if hw is not None:
+                return bool(hw)
+
+            # 3. Protocol metadata dict (CanonicalState.metadata)
+            meta = getattr(source, "metadata", None)
+            if isinstance(meta, dict):
+                return bool(meta.get("hardware_contained", False))
+
             return False
 
-        if _extract_flag(admitted):
-            return True
-        if _extract_flag(canonical_state_obj):
-            return True
-        if _extract_flag(updated_graph):
-            return True
-        return False
+        return _extract_flag(admitted) or _extract_flag(canonical_state_obj) or _extract_flag(updated_graph)
 
     def _halt(self) -> None:
         if self.enable_hard_halt:
