@@ -9,7 +9,6 @@ from idicoc_notary_core.kernel.custody.merkle_dag import (
     EnvHardwareSealer,
     MerkleDAG,
 )
-from idicoc_notary_core.kernel.deviation.dqe import DissonanceCalculator
 from idicoc_notary_core.kernel.dse.dse import PolicyExtractor
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.kernel.manifold.cmc import ManifoldConstructor
@@ -62,24 +61,10 @@ class IDICOCPipeline:
                     self.config.ctm_nodes_path,
                     self.config.ctm_root_path,
                 )
-            elif backend_type_lower == "postgres":
-                from .persistence.postgres_backend import PostgresCTMStorage
-
-                uri = getattr(self.config, "ctm_postgres_uri", None)
-                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
-                ctm_storage = PostgresCTMStorage(connection_uri=uri, **kwargs)
-            elif backend_type_lower == "dynamodb":
-                from .persistence.dynamodb_backend import DynamoDBStorage
-
-                table = getattr(self.config, "ctm_dynamodb_table", None)
-                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
-                ctm_storage = DynamoDBStorage(table_name=table, **kwargs)
-            elif backend_type_lower == "qldb":
-                from .persistence.qldb_backend import QLDBCTMStorage
-
-                ledger = getattr(self.config, "ctm_qldb_ledger", None)
-                kwargs = getattr(self.config, "ctm_storage_kwargs", {})
-                ctm_storage = QLDBCTMStorage(ledger_name=ledger, **kwargs)
+            elif backend_type_lower in ("postgres", "dynamodb", "qldb"):
+                raise ValueError(
+                    f"Backend de almacenamiento CTM '{backend_type}' ya no está soportado en la arquitectura Standard-Zero."
+                )
             else:
                 raise ValueError(f"Backend de almacenamiento CTM no soportado: {backend_type}")
         else:
@@ -98,9 +83,7 @@ class IDICOCPipeline:
         self.verifier = InvariantVerifier(self.anchor)
         self.dse = PolicyExtractor(self.graph, self.config)
         self.dissonance_strategy = self._create_dissonance_strategy()
-        self.dqe = DissonanceCalculator(
-            strategy=self.dissonance_strategy,
-        )
+        self.dqe = self.dissonance_strategy
         self.cmc = ManifoldConstructor(dqe=self.dqe)
         self.ctm = CustodialTraceManager(
             dag=MerkleDAG(
@@ -395,19 +378,11 @@ class IDICOCPipeline:
                 correction_flag = False
                 y_corrected_for_metrics = audit_input
             else:
-                y_corrected = self.dqe.project_to_manifold(
-                    audit_input, manifold, V_hat, self.graph, context_input=context_input
-                )
-                y_corrected_for_metrics = y_corrected
-                D_s_corrected = self.dqe.compute_dissonance(
-                    y_corrected, V_hat, self.graph, context_input=context_input
-                )
-                if D_s_corrected <= epsilon_used + tolerance_slack:
-                    admitted = True
-                    correction_flag = True
-                else:
-                    admitted = False
-                    correction_flag = False
+                # En la arquitectura Standard-Zero no se realiza corrección ex-post (SPSA / proyección)
+                admitted = False
+                correction_flag = False
+                y_corrected = audit_input
+                y_corrected_for_metrics = audit_input
 
             # Convertir ndarrays a listas de forma segura para toda la orquestación
             if isinstance(y_corrected, np.ndarray):

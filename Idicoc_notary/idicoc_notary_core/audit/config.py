@@ -122,6 +122,8 @@ class AuditConfig:
 
     # Proveedor de embeddings mockeable inyectable opcional.
     embedding_provider: Any = None
+    # Canal centralizado para el pipeline NLI (cargado en __post_init__)
+    nli_pipeline: Any = None
 
     # Nota: El parámetro 'mode' (factual/hybrid/creative) ha sido eliminado.
     # La creatividad se controla exclusivamente mediante rigidity_epsilon.
@@ -181,6 +183,27 @@ class AuditConfig:
         # Configurar el proveedor de embeddings en el servicio central de forma inmediata.
         # Si no se especifica proveedor, esto borra cualquier proveedor previo compartido entre instancias.
         EmbeddingService.set_provider(self.embedding_provider)
+
+        # Cargar pipeline NLI centralizado y exponerlo en la configuración
+        try:
+            from transformers import pipeline as hf_pipeline
+
+            hf_token = os.getenv("HF_TOKEN")
+            auth = hf_token if hf_token else True
+            print(f"[Fase 1 - Cold Loop] Cargando pipeline NLI: {self.semantic_nli_model}")
+            self.nli_pipeline = hf_pipeline(
+                "zero-shot-classification",
+                model=self.semantic_nli_model,
+            )
+        except Exception as e:
+            import warnings
+
+            warnings.warn(
+                f"[Fase 1 - Cold Loop] No se pudo cargar pipeline NLI ({self.semantic_nli_model}): {e}. "
+                "Operaciones basadas en NLI se omitirán.",
+                UserWarning,
+            )
+            self.nli_pipeline = None
 
         # Asegurar que las rutas de persistencia relativas se resuelvan siempre respecto al directorio raíz del proyecto 'Idicoc_notary'
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

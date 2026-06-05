@@ -26,6 +26,14 @@ class DummyTokenizer:
         return " ".join(reverse.get(token_id, f"<UNK:{token_id}>") for token_id in token_ids)
 
 
+class DummyEmbeddingService:
+    def encode(self, text, model_name=None):
+        vector = [float(ord(ch) % 32) for ch in str(text)[:32]]
+        if len(vector) < 32:
+            vector += [0.0] * (32 - len(vector))
+        return np.asarray(vector, dtype=float)
+
+
 class DummyGraph:
     def __init__(self):
         self.nodes = ["n1"]
@@ -125,21 +133,30 @@ def test_logits_processor_masks_forbidden_tokens(use_torch):
             pytest.skip("Torch no disponible para este entorno")
 
     masked = processor.process_logits(logits)
+    masked_tensor = None
     if use_torch:
         import torch
 
         assert isinstance(masked, torch.Tensor)
+        masked_tensor = masked
         masked = masked.detach().cpu().numpy()
     assert masked.shape == (4,)
-    assert masked[1] < -1e5
-    assert masked[3] < -1e5
+    if use_torch:
+        import torch
+
+        assert torch.isneginf(masked_tensor[1])
+        assert torch.isneginf(masked_tensor[3])
+    else:
+        assert np.isneginf(masked[1])
+        assert np.isneginf(masked[3])
     assert masked[0] == pytest.approx(0.5)
     assert masked[2] == pytest.approx(0.2)
 
 
 def test_invariant_synthesizer_extracts_semantic_concepts():
     tokenizer = DummyTokenizer()
-    synthesizer = InvariantSynthesizer(tokenizer)
+    embedding_service = DummyEmbeddingService()
+    synthesizer = InvariantSynthesizer(tokenizer, embedding_service=embedding_service)
     report = synthesizer.compile_policies(
         [
             {

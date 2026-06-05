@@ -57,6 +57,15 @@ class PolicyExtractor:
         return self._embedder
 
     def _get_nli(self) -> Any:
+        # Preferir pipeline NLI centralizado desde config si está disponible
+        try:
+            if self.config is not None:
+                cfg_nli = getattr(self.config, "nli_pipeline", None)
+                if cfg_nli is not None:
+                    return cfg_nli
+        except Exception:
+            pass
+
         if self._nli_pipeline is None and self._models_available:
             try:
                 from transformers import pipeline as hf_pipeline

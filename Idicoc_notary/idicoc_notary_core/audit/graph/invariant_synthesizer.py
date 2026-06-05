@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
 import re
 import numpy as np
+import os
+import json
 from idicoc_notary_core.utils.logger import get_logger
 
 logger = get_logger("audit.invariant_synthesizer")
@@ -59,6 +61,9 @@ class InvariantSynthesizer:
         self,
         tokenizer: Any,  # transformers.PreTrainedTokenizer (Llama)
         embedding_service: Optional[Any] = None,  # Para análisis semántico avanzado
+        embedding_threshold: float = 0.65,
+        precompute_vocab_embeddings: bool = False,
+        vocab_cache_path: Optional[str] = None,
     ) -> None:
         """
         Inicializa el sintetizador.
@@ -69,9 +74,27 @@ class InvariantSynthesizer:
         """
         self.tokenizer = tokenizer
         self.embedding_service = embedding_service
+        if self.embedding_service is None:
+            raise ValueError(
+                "EmbeddingService es obligatorio para InvariantSynthesizer. "
+                "Configure un proveedor de embeddings en AuditConfig."
+            )
         self.w_bank: Dict[int, Tuple[str, int]] = {}  # token_id → (hardness, priority)
         self.compilation_log: List[PolicyCompilationResult] = []
         self.vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size
+        # Umbral de similitud para selección semántica de tokens/frases
+        self.embedding_threshold = embedding_threshold
+        # Vocab embeddings cache (opcional, calculado sólo si solicitado)
+        self.vocab_tokens_text: List[str] = []
+        self.vocab_token_ids: List[int] = []
+        self.vocab_embeddings: Optional[np.ndarray] = None
+        self.vocab_cache_path = vocab_cache_path
+
+        if precompute_vocab_embeddings:
+            try:
+                self._get_or_compute_vocab_embeddings(cache_path=vocab_cache_path)
+            except Exception as e:
+                logger.warning(f"Fallo al precomputar embeddings de vocabulario: {e}")
 
         logger.info(
             f"[Invariant Synthesizer] Inicializado con tokenizador Llama. "
@@ -250,110 +273,72 @@ class InvariantSynthesizer:
             return []
 
         phrases: List[str] = []
-        quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'|‘([^’]+)’|“([^”]+)”', text)
+        quoted = re.findall(r'"([^\"]+)"|\'([^\']+)\'|‘([^’]+)’|“([^”]+)”', text)
         for group in quoted:
             for match in group:
                 if match:
                     phrases.append(match.strip())
 
+        # Extraer tokens básicos (mantener acentos y caracteres multilingües)
         tokens = re.findall(r"\b[\wáéíóúüñÁÉÍÓÚÜÑ']+\b", normalized, flags=re.UNICODE)
-        stopwords = {
-            "de",
-            "la",
-            "el",
-            "los",
-            "las",
-            "y",
-            "o",
-            "en",
-            "por",
-            "para",
-            "con",
-            "sin",
-            "al",
-            "del",
-            "a",
-            "un",
-            "una",
-            "unos",
-            "unas",
-            "se",
-            "su",
-            "sus",
-            "como",
-            "que",
-            "es",
-            "no",
-            "pero",
-            "más",
-            "menos",
-            "este",
-            "esta",
-            "estos",
-            "estas",
-            "también",
-            "muy",
-            "desde",
-            "hasta",
-            "entre",
-            "sobre",
-            "contra",
-            "durante",
-            "mediante",
-            "mientras",
-            "ni",
-            "ya",
-            "porque",
-            "cuando",
-            "quien",
-            "quienes",
-            "cual",
-            "cuales",
-            "donde",
-            "todo",
-            "todos",
-            "toda",
-            "todas",
-            "algo",
-            "alguna",
-            "algunas",
-            "algun",
-            "algunos",
-            "su",
-            "sus",
-            "tiene",
-            "tienen",
-            "ser",
-            "estar",
-            "hay",
-            "tener",
-            "hacer",
-            "puede",
-            "pueden",
-        }
+        unique_tokens = []
+        seen = set()
+        for t in (tok.lower() for tok in tokens):
+            if t and t not in seen:
+                seen.add(t)
+                unique_tokens.append(t)
 
-        content_words = [
-            w for w in (token.lower() for token in tokens) if w not in stopwords and len(w) > 2
-        ]
-        if content_words:
-            ngram_phrases: List[str] = []
-            for n in (3, 2, 1):
-                for i in range(len(content_words) - n + 1):
-                    ngram_phrases.append(" ".join(content_words[i : i + n]))
-            for concept in ngram_phrases:
-                if concept not in phrases:
-                    phrases.append(concept)
+        if not unique_tokens:
+            return [normalized]
 
-        if not phrases and tokens:
-            phrases = [" ".join(content_words) or normalized]
+        # Reemplazo arquitectónico: filtrar tokens por proyección de embeddings
+        if not self.embedding_service:
+            raise RuntimeError(
+                "EmbeddingService es obligatorio para la extracción de conceptos en InvariantSynthesizer."
+            )
 
-        unique_phrases: List[str] = []
-        for phrase in phrases:
-            phrase = phrase.strip()
-            if phrase and phrase not in unique_phrases:
-                unique_phrases.append(phrase)
+        try:
+            policy_emb = np.asarray(self.embedding_service.encode(normalized), dtype=float)
+            # Filtrar tokens demasiado cortos (evitar partículas/afijos que no cargan concepto)
+            filtered_tokens = [t for t in unique_tokens if len(t) > 3]
+            if not filtered_tokens:
+                filtered_tokens = unique_tokens
 
-        return unique_phrases[:10]
+            token_embs = [
+                np.asarray(self.embedding_service.encode(t), dtype=float) for t in filtered_tokens
+            ]
+
+            def cosine(a: np.ndarray, b: np.ndarray) -> float:
+                if a.size == 0 or b.size == 0:
+                    return 0.0
+                na = np.linalg.norm(a)
+                nb = np.linalg.norm(b)
+                if na < 1e-12 or nb < 1e-12:
+                    return 0.0
+                return float(np.dot(a, b) / (na * nb))
+
+            scored = [
+                (tok, cosine(policy_emb, emb)) for tok, emb in zip(filtered_tokens, token_embs)
+            ]
+            # Ordenar por similitud descendente
+            scored_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
+
+            # Seleccionar tokens que superen el umbral semántico
+            selected = [tok for tok, score in scored_sorted if score >= self.embedding_threshold]
+
+            # Si no hay tokens por encima del umbral, degradar a los top-N por similitud
+            if not selected:
+                logger.warning(
+                    f"[InvariantSynthesizer] Ningún token supera el umbral {self.embedding_threshold:.2f}; usando top tokens por similitud"
+                )
+                selected = [tok for tok, _ in scored_sorted[:8]]
+
+            # Retornar tokens seleccionados como frases conceptuales (unidades atómicas)
+            return selected[:10]
+
+        except Exception as e:
+            logger.warning(f"Fallo la priorización semántica de conceptos: {e}")
+            return [normalized]
 
     def _prioritize_semantic_concepts(self, policy_text: str, phrases: List[str]) -> List[str]:
         """Ordena conceptos por similitud semántica respecto a la política original."""
@@ -383,6 +368,75 @@ class InvariantSynthesizer:
             logger.warning(f"No se pudo priorizar conceptos semánticos: {e}")
             return phrases
 
+    def _get_or_compute_vocab_embeddings(self, cache_path: Optional[str] = None) -> np.ndarray:
+        """Computa y opcionalmente cachea las proyecciones de embeddings para todo el vocabulario.
+
+        Args:
+            cache_path: Ruta base (sin extensión) para guardar meta + numpy. Si se pasa y los
+                archivos existen, los cargará en lugar de recomputar.
+
+        Returns:
+            Matriz numpy de shape (V, D) con embeddings de vocabulario.
+        """
+        if not hasattr(self.tokenizer, "get_vocab"):
+            raise RuntimeError(
+                "El tokenizador no expone `get_vocab()`, imposible precalcular vocab."
+            )
+
+        meta_path = None
+        emb_path = None
+        if cache_path:
+            meta_path = f"{cache_path}.meta.json"
+            emb_path = f"{cache_path}.npy"
+            if os.path.exists(meta_path) and os.path.exists(emb_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                    tokens = meta.get("tokens", [])
+                    token_ids = meta.get("token_ids", [])
+                    embeddings = np.load(emb_path)
+                    self.vocab_tokens_text = tokens
+                    self.vocab_token_ids = token_ids
+                    self.vocab_embeddings = embeddings
+                    return embeddings
+                except Exception as e:
+                    logger.warning(
+                        f"No se pudo cargar cache de vocab ({meta_path},{emb_path}): {e}"
+                    )
+
+        vocab = self.tokenizer.get_vocab()
+        tokens_text = list(vocab.keys())
+        token_ids = [vocab[t] for t in tokens_text]
+
+        # Limpiar tokens especiales para una mejor proyección semántica (heurística)
+        clean_tokens = [t.replace("Ġ", "").replace(" ", "") for t in tokens_text]
+
+        # Calcular embeddings en batch
+        try:
+            embs = np.asarray(self.embedding_service.encode(clean_tokens), dtype=float)
+        except TypeError:
+            # Algunos servicios usan convert_to_numpy kwarg
+            embs = np.asarray(
+                self.embedding_service.encode(clean_tokens, convert_to_numpy=True), dtype=float
+            )
+
+        # Guardar en atributos
+        self.vocab_tokens_text = tokens_text
+        self.vocab_token_ids = token_ids
+        self.vocab_embeddings = embs
+
+        # Guardar cache si se especificó path
+        if cache_path:
+            try:
+                meta = {"tokens": tokens_text, "token_ids": token_ids}
+                with open(f"{cache_path}.meta.json", "w", encoding="utf-8") as f:
+                    json.dump(meta, f, ensure_ascii=False)
+                np.save(f"{cache_path}.npy", embs)
+            except Exception as e:
+                logger.warning(f"No se pudo escribir cache de vocab: {e}")
+
+        return embs
+
     def _generate_semantic_variants(
         self,
         policy_text: str,
@@ -402,21 +456,23 @@ class InvariantSynthesizer:
             synthetic_variants = self._generate_synthetic_paraphrases(policy_text)
 
             for variant in synthetic_variants:
-                token_ids = self.tokenizer.encode(variant, add_special_tokens=False)
-                for token_id in token_ids[:5]:  # Limitar a primeros 5 tokens por variante
-                    if token_id not in [t.token_id for t in variants]:
-                        token_text = self.tokenizer.decode([token_id])
-                        token = InvariantToken(
-                            token_id=token_id,
-                            token_text=token_text,
-                            source_policy=f"variant:{policy_text[:40]}...",
-                            policy_id=policy_id,
-                            hardness=hardness,
-                            priority=max(
-                                1, priority - 1
-                            ),  # Variantes con prioridad ligeramente menor
-                        )
-                        variants.append(token)
+                variant_phrases = self._extract_concept_phrases(variant)
+                for phrase in variant_phrases:
+                    token_ids = self.tokenizer.encode(phrase, add_special_tokens=False)
+                    for token_id in token_ids[:5]:  # Limitar a primeros 5 tokens por variante
+                        if token_id not in [t.token_id for t in variants]:
+                            token_text = self.tokenizer.decode([token_id])
+                            token = InvariantToken(
+                                token_id=token_id,
+                                token_text=token_text,
+                                source_policy=f"variant:{policy_text[:40]}...",
+                                policy_id=policy_id,
+                                hardness=hardness,
+                                priority=max(
+                                    1, priority - 1
+                                ),  # Variantes con prioridad ligeramente menor
+                            )
+                            variants.append(token)
 
         except Exception as e:
             logger.warning(f"Error generando variantes de '{policy_text}': {e}")

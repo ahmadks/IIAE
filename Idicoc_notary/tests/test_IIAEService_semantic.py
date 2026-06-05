@@ -79,8 +79,8 @@ def test_semantic_service_with_hard_violation():
 
     metadata = canonical_state.metadata
     assert math.isinf(metadata["d_s"])
-    assert metadata["admission_breach"] is False
-    assert metadata["correction_flag"] is True
+    assert metadata["admission_breach"] is True  # En Standard-Zero no se corrige ex-post, se rechaza
+    assert metadata["correction_flag"] is False  # En Standard-Zero no se aplica corrección ex-post (SPSA / proyección)
     assert service.verify_compliance(canonical_state, tolerance=0.0) is False
 
 

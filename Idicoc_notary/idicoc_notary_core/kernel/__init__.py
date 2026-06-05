@@ -18,7 +18,6 @@ from .custody import (
     MerkleDAG,
     CustodialTraceManager,
 )
-from .deviation import DissonanceCalculator
 from .dse import PolicyExtractor
 from .exceptions import AlignmentBreach, InvariantStateBreach, HardHaltException
 from .graph import PropertyGraph
@@ -37,8 +36,6 @@ __all__ = [
     "MerkleNode",
     "MerkleDAG",
     "CustodialTraceManager",
-    # Deviation
-    "DissonanceCalculator",
     # DSE
     "PolicyExtractor",
     # Exceptions

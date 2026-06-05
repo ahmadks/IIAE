@@ -95,54 +95,17 @@ class CustodialKernel:
 
             if self._is_hardware_contained(admitted, canonical_state_obj, updated_graph):
                 logger.info("[Kernel] Hardware-contained signal detected: omitiendo proyección.")
-                corrected_state = admitted
-            elif dissonance > self.epsilon:
-                corrected_state = self.dqe.project_to_manifold(
-                    admitted, manifold, canonical_input, updated_graph
+                self.state_s["buffers"][5] = admitted
+                return self._finalize_custody(
+                    admitted,
+                    canonical_state_obj,
+                    updated_graph,
+                    dissonance,
+                    operation_time,
                 )
             else:
-                corrected_state = admitted
-            self.state_s["buffers"][5] = corrected_state
-
-            # Stage 6 — Verification con tolerancia
-            self.verifier.verify_alignment(
-                canonical_state_obj,
-                tolerance=self.epsilon,
-                dqe=self.dqe,
-                graph=updated_graph,
-            )
-            self.state_s["buffers"][6] = "VERIFIED"
-
-            canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
-            invariant_state_hash = sha256_hex(
-                repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", "")
-            )
-            property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
-
-            aem_counters = None
-            if hasattr(self, "aem") and self.aem is not None and hasattr(self.aem, "get_counters"):
-                t_s, v_s, r_s = self.aem.get_counters()
-                aem_counters = {
-                    "total_signals": t_s,
-                    "valid_signals": v_s,
-                    "rejected_signals": r_s,
-                }
-
-            self.ctm.commit(
-                canonical_payload,
-                dissonance=dissonance,
-                epsilon=self.epsilon,
-                property_graph=updated_graph,
-                timestamp=operation_time,
-                invariant_state_hash=invariant_state_hash,
-                property_graph_hash=property_graph_hash,
-                aem_counters=aem_counters,
-            )
-            self.state_s["registers"][0] = "COMMITTED"
-            return {
-                "status": "committed",
-                "root_hash": self.ctm.root_hash,
-            }
+                self.state_s["buffers"][5] = admitted
+                return self._apply_emergency_correction(admitted)
 
         except (InvariantStateBreach, AlignmentBreach) as breach:
             snapshot = {
@@ -212,3 +175,58 @@ class CustodialKernel:
         if self.enable_hard_halt:
             raise HardHaltException()
         self.state_s["registers"][0] = "HALT_SKIPPED"
+
+    def _finalize_custody(
+        self,
+        admitted: Any,
+        canonical_state_obj: Any,
+        updated_graph: Any,
+        dissonance: float,
+        operation_time: str,
+    ) -> dict[str, Any]:
+        # Stage 6 — Verification con tolerancia
+        self.verifier.verify_alignment(
+            canonical_state_obj,
+            tolerance=self.epsilon,
+            dqe=self.dqe,
+            graph=updated_graph,
+        )
+        self.state_s["buffers"][6] = "VERIFIED"
+
+        canonical_payload = self.dissonance_strategy.select_canonical_input(canonical_state_obj)
+        invariant_state_hash = sha256_hex(
+            repr(canonical_payload) + canonical_state_obj.metadata.get("timestamp", "")
+        )
+        property_graph_hash = sha256_hex(repr(updated_graph.nodes) + str(updated_graph.edges))
+
+        aem_counters = None
+        if hasattr(self, "aem") and self.aem is not None and hasattr(self.aem, "get_counters"):
+            t_s, v_s, r_s = self.aem.get_counters()
+            aem_counters = {
+                "total_signals": t_s,
+                "valid_signals": v_s,
+                "rejected_signals": r_s,
+            }
+
+        self.ctm.commit(
+            canonical_payload,
+            dissonance=dissonance,
+            epsilon=self.epsilon,
+            property_graph=updated_graph,
+            timestamp=operation_time,
+            invariant_state_hash=invariant_state_hash,
+            property_graph_hash=property_graph_hash,
+            aem_counters=aem_counters,
+        )
+        self.state_s["registers"][0] = "COMMITTED"
+        return {
+            "status": "committed",
+            "root_hash": self.ctm.root_hash,
+        }
+
+    def _apply_emergency_correction(self, admitted: Any) -> Any:
+        raise InvariantStateBreach(
+            message="Emergency correction triggered: signal is not hardware-contained.",
+            invalid_state=admitted,
+            origin="CustodialKernel._apply_emergency_correction",
+        )

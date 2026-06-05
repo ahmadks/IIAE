@@ -45,48 +45,6 @@ def test_compute_dissonance_with_property_graph(mock_to_vector, strategy):
         mock_eval.assert_called_once_with("candidato")
         mock_temp.assert_called_once_with("candidato")
 
-@patch('idicoc_notary_core.utils.string_utils.StringUtils.to_vector')
-def test_projection_manifold(mock_to_vector, strategy):
-    """
-    Verifica que el algoritmo de proyección por gradiente reduce el D_s.
-    """
-    # Vector ancla y vector candidato
-    target_vec = np.array([1.0, 0.0])
-    candidate_vec = np.array([0.0, 1.0])
-    
-    def side_effect(text, **kw):
-        if text == "ancla":
-            return target_vec
-        return candidate_vec
-        
-    mock_to_vector.side_effect = side_effect
-    
-    # Mock graph
-    mock_graph = MagicMock()
-    mock_graph.evaluate.return_value = 0.0
-    mock_graph.compute_temporal.return_value = 0.0
-    
-    # Sobreescribimos compute_dissonance para simular que la distancia se reduce
-    # cuando los vectores se acercan. En StructuralDissonanceStrategy, compute_dissonance
-    # se llama repetidamente en el bucle.
-    dissonances = [0.8, 0.6, 0.4, 0.1]
-    call_counts = {"count": 0}
-    
-    def mock_compute_dissonance(z, V_hat, G_t, context_input=None):
-        val = dissonances[min(call_counts["count"], len(dissonances)-1)]
-        call_counts["count"] += 1
-        return val
-        
-    strategy.compute_dissonance = mock_compute_dissonance
-    
-    # Proyectar
-    epsilon = 0.2
-    final_vec = strategy.project("candidato", epsilon, "ancla", mock_graph, max_iter=10)
-    
-    # El bucle de gradiente debe ejecutarse hasta que la disonancia <= epsilon
-    # En nuestro mock, ocurre en la 4ª llamada (valor 0.1 <= 0.2)
-    assert call_counts["count"] >= 4
-    assert isinstance(final_vec, np.ndarray)
 
 from idicoc_notary_core.audit.pipeline import IDICOCPipeline
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
