@@ -6,6 +6,10 @@ Cumple con la especificación de Contención Generativa (patente IIAE).
 
 import sys
 import os
+
+# Enable PyTorch MPS fallback to avoid hangs on unsupported operators
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
 import json
 from datetime import datetime, timezone
 import numpy as np
@@ -19,7 +23,7 @@ sys.path.insert(
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient, SemanticPayload
 from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
-from providers.llama_provider import LlamaProvider
+from providers.phi_provider import PhiProvider
 from idicoc_notary_core.utils.hashing import sha256_dict, sha256_hex
 
 # ── Configuración de Página ───────────────────────────────────────────────────
@@ -123,8 +127,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Proveedores Llama ─────────────────────────────────────────────────────────
-class SimulatedLlamaProvider:
+# ── Proveedores Phi ───────────────────────────────────────────────────────────
+class SimulatedPhiProvider:
     def __init__(self, embedding_model_name=None):
         self.embedding_provider = None
         try:
@@ -145,9 +149,9 @@ class SimulatedLlamaProvider:
             return f"He recibido su consulta: '{prompt}'. De acuerdo con los datos indexados por RAG, la transacción ha sido confirmada."
 
 @st.cache_resource
-def load_real_llama(model_path, embedding_model_name):
+def load_real_phi(model_path, embedding_model_name):
     try:
-        provider = LlamaProvider(
+        provider = PhiProvider(
             model_path=model_path,
             embedding_model_name=embedding_model_name
         )
@@ -167,6 +171,8 @@ if "tampered_nodes" not in st.session_state:
     st.session_state.tampered_nodes = set()
 if "last_audit_details" not in st.session_state:
     st.session_state.last_audit_details = None
+if "last_processed_query" not in st.session_state:
+    st.session_state.last_processed_query = None
 
 # ── Configurar Barra Lateral ──────────────────────────────────────────────────
 with st.sidebar:
@@ -177,22 +183,22 @@ with st.sidebar:
     epsilon = st.slider("Umbral de Tolerancia (ε)", 0.01, 1.00, 0.20, 0.01)
     st.session_state.epsilon = epsilon
 
-    model_mode = st.radio("🤖 Proveedor LLM", ["Simulado (Ligero / Seguro)", "Real (Llama-3-8B local)"])
+    model_mode = st.radio("🤖 Proveedor LLM", ["Simulado (Ligero / Seguro)", "Real (Phi-3.5-mini local)"])
     
     llm_provider = None
-    if model_mode == "Real (Llama-3-8B local)":
-        with st.spinner("⏳ Cargando Llama-3 (Safetensors)..."):
-            llm_provider, status = load_real_llama(
-                model_path="models_cache/Meta-Llama-3-8B-Instruct",
+    if model_mode == "Real (Phi-3.5-mini local)":
+        with st.spinner("⏳ Cargando Phi-3.5-mini (Safetensors)..."):
+            llm_provider, status = load_real_phi(
+                model_path="models_cache/Phi-3.5-mini-instruct",
                 embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
             if llm_provider is None:
                 st.warning(f"⚠️ Fallback al simulador: {status}")
-                llm_provider = SimulatedLlamaProvider("sentence-transformers/all-MiniLM-L6-v2")
+                llm_provider = SimulatedPhiProvider("sentence-transformers/all-MiniLM-L6-v2")
             else:
-                st.success("✓ Llama-3 cargado con aceleración hardware")
+                st.success("✓ Phi-3.5-mini cargado con aceleración hardware")
     else:
-        llm_provider = SimulatedLlamaProvider("sentence-transformers/all-MiniLM-L6-v2")
+        llm_provider = SimulatedPhiProvider("sentence-transformers/all-MiniLM-L6-v2")
 
     # Inicializar Notario con config y provider
     if "notary_client" not in st.session_state or st.session_state.get("current_provider") != model_mode:
@@ -200,6 +206,7 @@ with st.sidebar:
             config = AuditConfig(
                 policy_file_path=_pol_path,
                 compile_policies_on_init=True,
+                enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
             st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
@@ -211,6 +218,7 @@ with st.sidebar:
     st.markdown("### 💥 Test de Fricción")
     if st.button("Simular Ataque: Inyectar instrucción prohibida", type="primary", use_container_width=True):
         st.session_state.injected_attack = True
+        st.session_state.last_processed_query = None
         st.rerun()
 
     st.markdown("---")
@@ -237,11 +245,13 @@ with st.sidebar:
         st.session_state.tampered_nodes = set()
         st.session_state.injected_attack = False
         st.session_state.last_audit_details = None
+        st.session_state.last_processed_query = None
         # Limpiar ledger recreando el pipeline
         try:
             config = AuditConfig(
                 policy_file_path=_pol_path,
                 compile_policies_on_init=True,
+                enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
             st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
@@ -310,14 +320,20 @@ with col_chat:
             elif msg["role"] == "audit":
                 status = msg["status"]
                 badge_class = "audit-badge" if status == "ADMITTED" else "audit-badge rejected"
-                d_s_val = msg["d_s"]
-                d_s_text = "∞" if d_s_val == float("inf") else f"{d_s_val:.5f}"
+                d_s_val = msg.get("d_s")
+                d_s_text = "N/A" if d_s_val is None else ("∞" if d_s_val == float("inf") else f"{d_s_val:.5f}")
+                d_1_val = msg.get("d_1")
+                d_1_text = "N/A" if d_1_val is None else f"{d_1_val:.4f}"
+                d_2_val = msg.get("d_2")
+                d_2_text = "N/A" if d_2_val is None else f"{d_2_val:.4f}"
+                d_3_val = msg.get("d_3")
+                d_3_text = "N/A" if d_3_val is None else f"{d_3_val:.4f}"
                 
                 st.markdown(
                     f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
                     f'<b>🔍 Notaría IDICOC:</b> '
                     f'<span class="{badge_class}">{status}</span><br>'
-                    f'<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={msg["d_1"]:.4f}, d2={msg["d_2"]:.4f}, d3={msg["d_3"]:.4f}</small><br>'
+                    f'<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>'
                     f'<small>Ledger Tx Hash: <span style="font-family:\"JetBrains Mono\"; font-size:10px;">{msg["hash"][:24]}...</span></small>'
                     f'</div>',
                     unsafe_allow_html=True
@@ -342,7 +358,9 @@ with col_chat:
         with input_col2:
             send_btn = st.button("Enviar", use_container_width=True, type="primary")
 
-    if (send_btn or chat_input_val) and chat_input_val.strip() and "notary_client" in st.session_state:
+    is_new_query = chat_input_val.strip() and chat_input_val.strip() != st.session_state.get("last_processed_query")
+    if (send_btn or is_new_query) and chat_input_val.strip() and "notary_client" in st.session_state:
+        st.session_state.last_processed_query = chat_input_val.strip()
         user_msg = chat_input_val.strip()
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
         
@@ -351,7 +369,18 @@ with col_chat:
             if forced_response:
                 assistant_res = forced_response
             else:
-                assistant_res = llm_provider.generate(user_msg)
+                # Interceptar logits en el Hot Loop si el Notario está disponible
+                processor = None
+                if "notary_client" in st.session_state:
+                    processor = st.session_state.notary_client.pipeline.config.logits_processor
+                
+                # Pasar processor a generate() si el llm_provider lo soporta
+                import inspect
+                sig = inspect.signature(llm_provider.generate)
+                if "logits_processor" in sig.parameters:
+                    assistant_res = llm_provider.generate(user_msg, logits_processor=processor)
+                else:
+                    assistant_res = llm_provider.generate(user_msg)
         
         # 2. Auditar Respuesta
         with st.spinner("🛡️ Evaluando respuesta en el Notario IDICOC..."):
@@ -366,14 +395,19 @@ with col_chat:
                 )
                 
                 # Extraer métricas y hashes
-                d_s = audit_result.metadata.get("d_s", 0.0)
+                d_s = audit_result.metadata.get("d_s")
+                if d_s is None:
+                    d_s = 0.0
                 admission_breach = audit_result.metadata.get("admission_breach", False)
                 status = "REJECTED" if admission_breach else "ADMITTED"
                 
-                ac = audit_result.metadata.get("algebraic_components", {})
-                d_1 = ac.get("d_1", 0.0)
-                d_2 = ac.get("d_2", 0.0)
-                d_3 = ac.get("d_3", 0.0)
+                ac = audit_result.metadata.get("algebraic_components") or {}
+                d_1 = ac.get("d_1")
+                if d_1 is None: d_1 = 0.0
+                d_2 = ac.get("d_2")
+                if d_2 is None: d_2 = 0.0
+                d_3 = ac.get("d_3")
+                if d_3 is None: d_3 = 0.0
                 
                 integrity_hash = str(audit_result.integrity_hash)
                 
@@ -443,12 +477,20 @@ with col_telemetry:
     
     if audit_msgs:
         indices = list(range(1, len(audit_msgs) + 1))
-        dissonances = [m["d_s"] for m in audit_msgs]
-        # Reemplazar inf con 1.5 en el plot
-        plot_dissonances = [1.4 if d == float('inf') else d for d in dissonances]
+        dissonances = [m.get("d_s") for m in audit_msgs]
         
-        # Clasificar colores
-        colors = ['#ef4444' if (d >= epsilon or d == float('inf')) else '#10b981' for d in dissonances]
+        plot_dissonances = []
+        colors = []
+        for d in dissonances:
+            if d is None:
+                plot_dissonances.append(0.0)
+                colors.append('#10b981')
+            elif d == float('inf'):
+                plot_dissonances.append(1.4)
+                colors.append('#ef4444')
+            else:
+                plot_dissonances.append(d)
+                colors.append('#ef4444' if d >= epsilon else '#10b981')
         
         ax.scatter(indices, plot_dissonances, c=colors, s=120, zorder=3, edgecolors='white', linewidth=1)
         ax.plot(indices, plot_dissonances, color='#38bdf8', alpha=0.5, linestyle='-', zorder=2)
@@ -498,12 +540,13 @@ with col_telemetry:
             # Revisar si este nodo fue saboteado
             is_tampered = curr in st.session_state.tampered_nodes
             
+            dev_score = node_data.get("deviation_score")
             chain.append({
                 "hash": curr,
                 "timestamp": node_data.get("timestamp", ""),
                 "parent": parent_hashes[0] if parent_hashes else "Genesis",
                 "type": node_data.get("payload", {}).get("type", "COMMIT"),
-                "dissonance": node_data.get("deviation_score", 0.0),
+                "dissonance": dev_score if dev_score is not None else None,
                 "tampered": is_tampered
             })
             
@@ -534,7 +577,12 @@ with col_telemetry:
                 badge_style = "background-color: #ef4444; color: white;"
                 
             d_val = block["dissonance"]
-            d_text = "∞" if d_val == float("inf") else f"{d_val:.4f}"
+            if d_val is None:
+                d_text = "N/A"
+            elif d_val == float("inf"):
+                d_text = "∞"
+            else:
+                d_text = f"{d_val:.4f}"
             
             with st.container():
                 st.markdown(

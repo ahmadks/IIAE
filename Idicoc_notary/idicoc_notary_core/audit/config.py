@@ -140,7 +140,7 @@ class AuditConfig:
     input_field_policies: str = "context_policies"  # Fase 1: Políticas para compilación
 
     # Configuración de Llama para Fase 1 (Cold Loop) y Fase 3 (Hot Loop)
-    llama_model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct"
+    llama_model_name: str = "microsoft/Phi-3.5-mini-instruct"
     llama_tokenizer: Any = None  # Se carga en __post_init__ si es necesario
     llama_model: Any = None  # Se carga en __post_init__ si es necesario
 

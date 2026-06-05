@@ -14,8 +14,8 @@ def _get_auth_token(token: Optional[str] = None) -> Optional[str | bool]:
     return env_token if env_token else True
 
 
-def ensure_llama_downloaded(
-    model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
+def ensure_phi_downloaded(
+    model_name: str = "microsoft/Phi-3.5-mini-instruct",
     cache_dir: str = "models_cache",
     token: Optional[str] = None,
     force_update: bool = False,
@@ -30,13 +30,14 @@ def ensure_llama_downloaded(
 
     is_forced = force_update or os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
 
-    print(f"[Providers.ModelDownloader] Verificando Llama: {model_name}")
+    print(f"[Providers.ModelDownloader] Verificando Phi: {model_name}")
+    allow_patterns = ["*.safetensors", "*.json", "tokenizer*"]
     if is_forced:
-        print("[Providers.ModelDownloader] Forzando descarga/actualización completa de Llama...")
+        print("[Providers.ModelDownloader] Forzando descarga/actualización completa de Phi...")
         snapshot_download(
             repo_id=model_name,
             local_dir=local_target_dir,
-            allow_patterns=["original/*", "*.safetensors", "*.json", "tokenizer*"],
+            allow_patterns=allow_patterns,
             token=auth_token,
             local_files_only=False,
         )
@@ -45,20 +46,24 @@ def ensure_llama_downloaded(
             snapshot_download(
                 repo_id=model_name,
                 local_dir=local_target_dir,
-                allow_patterns=["original/*", "*.safetensors", "*.json", "tokenizer*"],
+                allow_patterns=allow_patterns,
                 token=auth_token,
                 local_files_only=True,
             )
-            print("[Providers.ModelDownloader] Llama ya se encuentra en caché local.")
+            print("[Providers.ModelDownloader] Phi ya se encuentra en caché local.")
         except Exception:
-            print("[Providers.ModelDownloader] Llama no encontrada o incompleta en la caché local. Iniciando descarga...")
+            print("[Providers.ModelDownloader] Phi no encontrada o incompleta en la caché local. Iniciando descarga...")
             snapshot_download(
                 repo_id=model_name,
                 local_dir=local_target_dir,
-                allow_patterns=["original/*", "*.safetensors", "*.json", "tokenizer*"],
+                allow_patterns=allow_patterns,
                 token=auth_token,
                 local_files_only=False,
             )
+
+
+# Alias backward compatibility
+ensure_llama_downloaded = ensure_phi_downloaded
 
 
 class ModelDownloader:
@@ -67,12 +72,20 @@ class ModelDownloader:
         self.token = token
         _ensure_cache_dir(self.cache_dir)
 
-    def download_llama(
+    def download_phi(
         self,
-        llama_model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
+        phi_model_name: str = "microsoft/Phi-3.5-mini-instruct",
         force_update: bool = False,
     ) -> None:
-        ensure_llama_downloaded(llama_model_name, self.cache_dir, self.token, force_update=force_update)
+        ensure_phi_downloaded(phi_model_name, self.cache_dir, self.token, force_update=force_update)
+
+    # Alias backward compatibility
+    def download_llama(
+        self,
+        llama_model_name: str = "microsoft/Phi-3.5-mini-instruct",
+        force_update: bool = False,
+    ) -> None:
+        self.download_phi(llama_model_name, force_update=force_update)
 
 
-__all__ = ["ensure_llama_downloaded", "ModelDownloader"]
+__all__ = ["ensure_phi_downloaded", "ensure_llama_downloaded", "ModelDownloader"]

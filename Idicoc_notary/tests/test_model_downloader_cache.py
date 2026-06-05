@@ -5,8 +5,8 @@ from unittest.mock import patch, MagicMock
 # Import components
 from idicoc_notary_core.utils.model_downloader import ModelDownloader
 from idicoc_notary_core.utils.embedding_service import EmbeddingService
-from providers.model_downloader import ensure_llama_downloaded
-from providers.llama_provider import LlamaProvider
+from providers.model_downloader import ensure_phi_downloaded
+from providers.phi_provider import PhiProvider
 from idicoc_notary_core.audit.config import AuditConfig
 
 
@@ -46,36 +46,36 @@ def test_model_downloader_respects_force_update(mock_model, mock_tok, mock_st):
     
     _, kwargs_st = mock_st.call_args
     assert kwargs_st["local_files_only"] is False
-
+ 
     _, kwargs_tok = mock_tok.call_args
     assert kwargs_tok["local_files_only"] is False
-
+ 
     _, kwargs_model = mock_model.call_args
     assert kwargs_model["local_files_only"] is False
-
-
+ 
+ 
 @patch("huggingface_hub.snapshot_download")
-def test_ensure_llama_downloaded_respects_cache(mock_snapshot):
-    # Test Llama downloader uses local_files_only=True first
-    ensure_llama_downloaded(cache_dir="test_models_cache", force_update=False)
+def test_ensure_phi_downloaded_respects_cache(mock_snapshot):
+    # Test Phi downloader uses local_files_only=True first
+    ensure_phi_downloaded(cache_dir="test_models_cache", force_update=False)
     
     # Verify snapshot_download was called with local_files_only=True
     assert mock_snapshot.call_count == 1
     _, kwargs = mock_snapshot.call_args
     assert kwargs["local_files_only"] is True
-    assert kwargs["repo_id"] == "meta-llama/Meta-Llama-3-8B-Instruct"
-
-
+    assert kwargs["repo_id"] == "microsoft/Phi-3.5-mini-instruct"
+ 
+ 
 @patch("huggingface_hub.snapshot_download")
-def test_ensure_llama_downloaded_forced(mock_snapshot):
-    # Test Llama downloader with force_update=True
-    ensure_llama_downloaded(cache_dir="test_models_cache", force_update=True)
+def test_ensure_phi_downloaded_forced(mock_snapshot):
+    # Test Phi downloader with force_update=True
+    ensure_phi_downloaded(cache_dir="test_models_cache", force_update=True)
     
     assert mock_snapshot.call_count == 1
     _, kwargs = mock_snapshot.call_args
     assert kwargs["local_files_only"] is False
-
-
+ 
+ 
 @patch("sentence_transformers.SentenceTransformer")
 def test_embedding_service_respects_cache(mock_st):
     service = EmbeddingService()
@@ -87,11 +87,11 @@ def test_embedding_service_respects_cache(mock_st):
     _, kwargs = mock_st.call_args
     assert kwargs["local_files_only"] is True
     assert kwargs["cache_folder"] == "models_cache"
-
-
+ 
+ 
 @patch("sentence_transformers.SentenceTransformer")
-def test_llama_provider_respects_cache(mock_st):
-    provider = LlamaProvider(embedding_model_name="test-model")
+def test_phi_provider_respects_cache(mock_st):
+    provider = PhiProvider(embedding_model_name="test-model")
     
     _, kwargs = mock_st.call_args
     assert kwargs["local_files_only"] is True
