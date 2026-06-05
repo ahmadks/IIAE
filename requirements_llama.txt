@@ -1,0 +1,5 @@
+transformers
+llama-cpp-python
+huggingface-hub
+safetensors
+sentence-transformers

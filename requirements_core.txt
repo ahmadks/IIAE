@@ -1,0 +1,10 @@
+numpy>=1.24,<2
+scipy
+python-dotenv
+rfc3339
+# Optional tools for static analysis
+ruff
+mypy
+vulture
+# For serialization and crypto
+cryptography

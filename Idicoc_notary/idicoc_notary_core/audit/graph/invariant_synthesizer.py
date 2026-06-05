@@ -59,7 +59,7 @@ class InvariantSynthesizer:
 
     def __init__(
         self,
-        tokenizer: Any,  # transformers.PreTrainedTokenizer (Llama)
+        tokenizer: Any = None,  # Tokenizer-like object; fallback applied if None
         embedding_service: Optional[Any] = None,  # Para análisis semántico avanzado
         embedding_threshold: float = 0.65,
         precompute_vocab_embeddings: bool = False,
@@ -72,6 +72,30 @@ class InvariantSynthesizer:
             tokenizer: Tokenizador de Llama (transformers.AutoTokenizer)
             embedding_service: Servicio de embeddings opcional para análisis semántico
         """
+        # Allow a tokenizer-agnostic fallback to keep core independent of transformers
+        if tokenizer is None:
+            # Simple whitespace tokenizer fallback with incremental vocab ids
+            class _FallbackTokenizer:
+                def __init__(self):
+                    self._vocab = {}
+
+                def encode(self, text: str):
+                    ids = []
+                    for tok in text.split():
+                        if tok not in self._vocab:
+                            self._vocab[tok] = len(self._vocab) + 1
+                        ids.append(self._vocab[tok])
+                    return ids
+
+                @property
+                def vocab_size(self):
+                    return max(1, len(self._vocab))
+
+                def __len__(self):
+                    return self.vocab_size
+
+            tokenizer = _FallbackTokenizer()
+
         self.tokenizer = tokenizer
         self.embedding_service = embedding_service
         if self.embedding_service is None:
@@ -97,10 +121,7 @@ class InvariantSynthesizer:
             except Exception as e:
                 logger.warning(f"Fallo al precomputar embeddings de vocabulario: {e}")
 
-        logger.info(
-            f"[Invariant Synthesizer] Inicializado con tokenizador Llama. "
-            f"Tamaño de vocabulario: {self.vocab_size}"
-        )
+        logger.info(f"[Invariant Synthesizer] Inicializado. Vocab size: {self.vocab_size}")
 
     def compile_policies(
         self,

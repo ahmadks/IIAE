@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
 from idicoc_notary_core.utils.logger import get_logger
-from idicoc_notary_core.utils.model_downloader import ensure_llama_downloaded
+from providers.model_downloader import ensure_llama_downloaded
 
 logger = get_logger("example.integration")
 

@@ -15,6 +15,7 @@ from .base import (
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
 from .pipeline import IDICOCPipeline
+from .llm_interface import BaseLLMProvider
 
 
 class CompatibleCanonicalState(CanonicalStateDTO):
@@ -76,14 +77,24 @@ class IDICOCNotaryClient(IIAENotaryContract):
     def __init__(
         self,
         config: AuditConfig,
+        llm_provider: BaseLLMProvider | None = None,
     ) -> None:
         self.pipeline: IDICOCPipeline | None = None
         self._initialized = False
-        self.initialize(config)
+        self.llm_provider = llm_provider
+        self.initialize(config, llm_provider=llm_provider)
 
-    def initialize(self, config: AuditConfig) -> None:
+    def initialize(self, config: AuditConfig, llm_provider: BaseLLMProvider | None = None) -> None:
         self.config = config
-        self.pipeline = IDICOCPipeline(config)
+        self.llm_provider = llm_provider
+        # If the provided LLM exposes an embedding adapter, register it with the config
+        try:
+            if llm_provider is not None and hasattr(llm_provider, "embedding_provider"):
+                config.embedding_provider = getattr(llm_provider, "embedding_provider")
+        except Exception:
+            pass
+
+        self.pipeline = IDICOCPipeline(config, llm_provider=llm_provider)
         self._initialized = True
 
     def adapt_input(

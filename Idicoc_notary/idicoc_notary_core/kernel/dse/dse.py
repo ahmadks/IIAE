@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.utils.hashing import sha256_hex
+from idicoc_notary_core.kernel.dse.extractor_strategy import ExtractorStrategy
 from idicoc_notary_core.utils.logger import get_logger
 
 logger = get_logger("kernel.dse")
@@ -46,6 +47,8 @@ class PolicyExtractor:
         self._embedder: Any = None
         self._nli_pipeline: Any = None
         self._models_available: bool = True
+        # Strategy for extraction decisions (NLI vs fallback)
+        self.extractor_strategy = ExtractorStrategy(config)
 
     def _get_embedder(self) -> Any:
         if self._embedder is None and self._models_available:
@@ -100,13 +103,17 @@ class PolicyExtractor:
         for policy_text in context_policies:
             if not isinstance(policy_text, str):
                 policy_text = str(policy_text)
-            policy_dict = self._policy_from_text(policy_text, policy_type="protocol", timestamp=timestamp)
+            policy_dict = self._policy_from_text(
+                policy_text, policy_type="protocol", timestamp=timestamp
+            )
             if embedder is not None:
                 try:
                     vec = embedder.encode(policy_text)
                     policy_dict["embedding"] = vec.tolist()
                 except Exception as e:
-                    logger.error(f"[DSE] Critical failure: could not generate embedding for policy text '{policy_text}': {e}")
+                    logger.error(
+                        f"[DSE] Critical failure: could not generate embedding for policy text '{policy_text}': {e}"
+                    )
                     raise RuntimeError(f"Embedding generation failed: {e}") from e
             self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
@@ -120,7 +127,9 @@ class PolicyExtractor:
                     vec = embedder.encode(text)
                     policy_dict["embedding"] = vec.tolist()
                 except Exception as e:
-                    logger.error(f"[DSE] Critical failure: could not generate embedding for context text '{text}': {e}")
+                    logger.error(
+                        f"[DSE] Critical failure: could not generate embedding for context text '{text}': {e}"
+                    )
                     raise RuntimeError(f"Embedding generation failed: {e}") from e
             self.property_graph.add_policy(policy_dict["policy_id"], policy_dict)
 
@@ -180,70 +189,12 @@ class PolicyExtractor:
 
         text_lower = text.lower().strip()
 
-        nli = self._get_nli()
-        polarity = "affirmative"
-        hardness = "soft"
-        priority = 1
-
-        if nli is not None:
-            try:
-                result = nli(
-                    text,
-                    candidate_labels=["entailment", "contradiction", "neutral"],
-                    hypothesis_template="This policy represents a state of {}",
-                )
-                scores = dict(zip(result["labels"], result["scores"]))
-                best_label = result["labels"][0]
-                if best_label == "contradiction":
-                    polarity = "negative"
-                    hardness = "hard"
-                    priority = 10
-                elif best_label == "entailment":
-                    polarity = "affirmative"
-                    hardness = "hard"
-                    priority = 9
-                else:
-                    polarity = "affirmative"
-                    hardness = "soft"
-                    priority = 5
-                extraction_mode = "nli_deterministic"  # Polaridad certificada por oráculo NLI
-            except Exception as e:
-                logger.error(f"[DSE] NLI polarity detection failed: {e}")
-                if getattr(self.config, "enable_hard_halt", False):
-                    raise RuntimeError(f"NLI polarity detection failed: {e}") from e
-                # Fallback to simple deterministic rules if NLI execution fails.
-                # ADVERTENCIA: Esta rama implica degradación heurística y debe quedar
-                # registrada en el Merkle DAG como 'regex_fallback' para trazabilidad forense.
-                extraction_mode = "regex_fallback"
-                if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
-                    polarity = "negative"
-                    hardness = "hard"
-                    priority = 10
-                elif any(kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")):
-                    polarity = "affirmative"
-                    hardness = "hard"
-                    priority = 9
-                elif any(kw in text_lower for kw in ("should ", "prefer", "recommend")):
-                    polarity = "affirmative"
-                    hardness = "soft"
-                    priority = 5
-        else:
-            # NLI offline (tests, entorno sin modelos). Modo degradado por diseño.
-            # Se registra 'regex_fallback' para que el notario forense sepa que esta
-            # política no fue evaluada por el oráculo semántico.
-            extraction_mode = "regex_fallback"
-            if any(kw in text_lower for kw in ("not ", "never ", "prohibit", "forbidden", "must not", "no ")):
-                polarity = "negative"
-                hardness = "hard"
-                priority = 10
-            elif any(kw in text_lower for kw in ("must ", "always ", "required", "mandatory", "obligatory")):
-                polarity = "affirmative"
-                hardness = "hard"
-                priority = 9
-            elif any(kw in text_lower for kw in ("should ", "prefer", "recommend")):
-                polarity = "affirmative"
-                hardness = "soft"
-                priority = 5
+        # Delegate extraction decisions to strategy
+        extract_info = self.extractor_strategy.analyze(text)
+        polarity = extract_info.get("polarity", "affirmative")
+        hardness = extract_info.get("hardness", "soft")
+        priority = extract_info.get("priority", 1)
+        extraction_mode = extract_info.get("extraction_mode", "regex_fallback")
 
         # Tipo de política por palabras clave
         if any(kw in text_lower for kw in ("after", "before", "during", "when", "at time")):
@@ -291,39 +242,7 @@ class PolicyExtractor:
         }
 
     def _detect_contradictions(self, fragments: list[str], timestamp: str) -> list[dict[str, Any]]:
-        nli = self._get_nli()
-        if nli is None or len(fragments) < 2:
-            return []
-
-        contradiction_policies: list[dict[str, Any]] = []
-        for i, premise in enumerate(fragments):
-            for hypothesis in fragments[i + 1 :]:
-                try:
-                    result = nli(
-                        hypothesis,
-                        candidate_labels=["contradiction", "entailment", "neutral"],
-                        hypothesis_template="{}",
-                    )
-                    scores = dict(zip(result["labels"], result["scores"]))
-                    contradiction_score = scores.get("contradiction", 0.0)
-                    if contradiction_score >= self.nli_conflict_threshold:
-                        policy_dict = self._policy_from_text(
-                            f"CONTRADICTION: '{premise[:64]}' vs '{hypothesis[:64]}'",
-                            policy_type="logic",
-                            timestamp=timestamp,
-                        )
-                        policy_dict["polarity"] = "negative"
-                        policy_dict["hardness"] = "hard"
-                        policy_dict["priority"] = 10
-                        policy_dict["nli_contradiction_score"] = contradiction_score
-                        contradiction_policies.append(policy_dict)
-                except Exception as e:
-                    logger.error(f"[DSE] Error in NLI contradiction detection: {e}", exc_info=True)
-                    if getattr(self.config, "enable_hard_halt", False):
-                        raise RuntimeError(f"Fallo crítico en NLI (oráculo de contradicciones): {e}") from e
-                    continue
-
-        return contradiction_policies
+        return self.extractor_strategy.detect_contradictions(fragments)
 
     def _build_semantic_policy(
         self,

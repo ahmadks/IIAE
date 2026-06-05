@@ -9,6 +9,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
+from ..config_defaults import (
+    DEFAULT_DISSONANCE_WEIGHTS,
+    DEFAULT_SEMANTIC_EMBEDDING_MODEL,
+    DEFAULT_SEMANTIC_NLI_MODEL,
+    DEFAULT_SEMANTIC_NLI_CONFLICT_THRESHOLD,
+    DEFAULT_SEMANTIC_NLI_WARNING_THRESHOLD,
+    DEFAULT_SEMANTIC_MIN_RAG_SCORE,
+    DEFAULT_TERMINAL_RIGIDITY_THRESHOLD,
+    DEFAULT_EMBEDDING_MAX_CHUNKS,
+)
+
 if TYPE_CHECKING:
     from .dse import DissonanceStrategy
     from .graph.loader import PolicyLoader
@@ -71,13 +82,7 @@ class AuditConfig:
     #
     # Los pesos se normalizan automáticamente en _normalized_weights.
     dissonance_weights: tuple[float, float, float, float, float, float, float] = (
-        0.0,  # λ₀ — d₀ Levenshtein        (INACTIVO: input numérico, sin text_content)
-        0.5,  # λ₁ — d₁ EMD al ancla K     (ACTIVO)
-        0.4,  # λ₂ — d₂ Property Graph     (ACTIVO)
-        0.1,  # λ₃ — d₃ bisimulación temp. (ACTIVO)
-        0.0,  # λ₄ — d₄ Hamming cripto.    (INACTIVO: hashes no disponibles en ciclo)
-        0.0,  # λ₅ — d₅ Boundary trap      (INACTIVO: señal SO, no conectada al pipeline)
-        0.0,  # λ₆ — d₆ convergencia asint.(INACTIVO: requiere estado terminal acumulado)
+        DEFAULT_DISSONANCE_WEIGHTS
     )
 
     # Estrategia de disonancia inyectable.
@@ -86,10 +91,10 @@ class AuditConfig:
     dissonance_strategy: Any = None
 
     # Parámetros específicos de evaluación semántica
-    semantic_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    semantic_nli_model: str = "facebook/bart-large-mnli"
-    semantic_nli_conflict_threshold: float = 0.5
-    semantic_nli_warning_threshold: float = 0.75
+    semantic_embedding_model: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
+    semantic_nli_model: str = DEFAULT_SEMANTIC_NLI_MODEL
+    semantic_nli_conflict_threshold: float = DEFAULT_SEMANTIC_NLI_CONFLICT_THRESHOLD
+    semantic_nli_warning_threshold: float = DEFAULT_SEMANTIC_NLI_WARNING_THRESHOLD
     semantic_nli_warning_geom_threshold: float = 0.1
     semantic_nli_label_mapping: dict[str, str] = field(
         default_factory=lambda: {
@@ -101,11 +106,11 @@ class AuditConfig:
     semantic_embedding_model_signature: str | None = None
     semantic_embedding_model_signature_algo: str = "sha256"
     semantic_max_rag_results: int = 5
-    semantic_min_rag_score: float = 0.1
+    semantic_min_rag_score: float = DEFAULT_SEMANTIC_MIN_RAG_SCORE
     embedding_signature: str | None = None
     strict_embedding_signature: bool = False
-    terminal_rigidity_threshold: float = 0.01
-    embedding_max_chunks: int = 10
+    terminal_rigidity_threshold: float = DEFAULT_TERMINAL_RIGIDITY_THRESHOLD
+    embedding_max_chunks: int = DEFAULT_EMBEDDING_MAX_CHUNKS
 
     ctm_mode: str = "full"
 

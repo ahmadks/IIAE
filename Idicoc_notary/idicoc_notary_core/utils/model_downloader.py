@@ -17,41 +17,8 @@ def _get_auth_token(token: Optional[str] = None) -> Optional[str | bool]:
     return env_token if env_token else True
 
 
-def ensure_llama_downloaded(
-    model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
-    cache_dir: str = "models_cache",
-    token: Optional[str] = None,
-) -> None:
-    """
-    Asegura que el modelo Llama esté disponible en caché.
-    Implementa un mecanismo Fail-Safe estricto: si la descarga falla, el pipeline se aborta.
-    """
-    from huggingface_hub import snapshot_download
-
-    auth_token = _get_auth_token(token)
-    _ensure_cache_dir(cache_dir)
-
-    folder_name = model_name.split("/")[-1]
-    local_target_dir = Path(cache_dir) / folder_name
-
-    print(
-        f"[ModelDownloader] Verificando/Descargando Llama para compilación de políticas: {model_name}"
-    )
-    try:
-        snapshot_download(
-            repo_id=model_name,
-            local_dir=local_target_dir,
-            # Asegúrate de que 'original/*' incluye los safetensors/pesos que tu loader específico necesita
-            allow_patterns=["original/*", "*.safetensors", "*.json", "tokenizer*"],
-            token=auth_token,
-        )
-        print(f"[ModelDownloader] Inferencia Llama gestionada correctamente en: {local_target_dir}")
-    except Exception as exc:
-        # Mecanismo FAIL-SAFE: Abortar ejecución para prevenir corrupción de estado coalgebraico
-        raise RuntimeError(
-            f"[Fallo de Integridad Fatal] No se pudo instanciar Llama '{model_name}'. "
-            f"La validación determinista no puede garantizarse. Abortando. Detalles: {exc}"
-        ) from exc
+# Note: Llama-specific download helpers were intentionally moved out of the core
+# to avoid coupling the core library to model artifacts and heavy HF logic.
 
 
 class ModelDownloader:
@@ -71,8 +38,6 @@ class ModelDownloader:
         self,
         embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         entailment_model_name: str = "cross-encoder/nli-deberta-v3-small",
-        include_llama: bool = False,
-        llama_model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
     ) -> None:
         """
         Descarga modelos base y asegura una interrupción determinista si las capas de validación no están disponibles.
@@ -115,12 +80,9 @@ class ModelDownloader:
                 f"[Phase 1 Error] Ausencia de motor Entailment. La variedad de contención no puede calcularse. Abortando. {exc}"
             )
 
-        # Ejecución controlada de Llama
-        if include_llama:
-            self.download_llama(llama_model_name)
-
-    def download_llama(self, model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct") -> None:
-        ensure_llama_downloaded(model_name, self.cache_dir, self.token)
+        # Llama/artifacts provisioning if required should be handled by external
+        # provider tooling (see providers/model_downloader.py) to keep the core
+        # free of heavy dependencies.
 
 
 if __name__ == "__main__":
@@ -128,15 +90,8 @@ if __name__ == "__main__":
 
     downloader = ModelDownloader()
 
-    include_llama = "--with-llama" in sys.argv
-    llama_model = "meta-llama/Meta-Llama-3-8B-Instruct"
-
-    for i, arg in enumerate(sys.argv):
-        if arg == "--llama-model" and i + 1 < len(sys.argv):
-            llama_model = sys.argv[i + 1]
-            include_llama = True
-
-    print("[IIAE] Iniciando secuencia de verificación de modelos...")
-    # Si esta llamada finaliza sin lanzar excepciones, el universo F_k es seguro.
-    downloader.download_models(include_llama=include_llama, llama_model_name=llama_model)
-    print("[IIAE] Topología de modelos confirmada. Sistema listo para inicializar Fase 1.")
+    print("[IIAE] Iniciando secuencia de verificación de modelos (core: embeddings + NLI)...")
+    downloader.download_models()
+    print(
+        "[IIAE] Topología de modelos confirmada (core). For Llama artifacts use providers tooling."
+    )

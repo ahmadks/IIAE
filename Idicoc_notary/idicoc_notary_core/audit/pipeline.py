@@ -39,8 +39,16 @@ class IDICOCPipeline:
         self,
         config: AuditConfig,
         graph_cache: Optional[GraphCache] = None,
+        llm_provider: Any = None,
     ) -> None:
         self.config = config
+        self.llm_provider = llm_provider
+        # If llm_provider exposes an embedding adapter, prefer it for embedding computations
+        try:
+            if llm_provider is not None and hasattr(llm_provider, "embedding_provider"):
+                self.config.embedding_provider = getattr(llm_provider, "embedding_provider")
+        except Exception:
+            pass
         self.graph_cache = graph_cache
         self.graph = PropertyGraph(embedding_signature=self.config.embedding_signature)
         self.logger = get_logger("audit_flow.pipeline")
@@ -439,27 +447,9 @@ class IDICOCPipeline:
                     )
                 )
 
-            def normalize_payload(item: Any) -> Any:
-                import numpy as np
+            from idicoc_notary_core.utils.data_converter import DataConverter
 
-                if hasattr(item, "source_text") and hasattr(item, "distribution"):
-                    dist = getattr(item, "distribution", None)
-                    if hasattr(dist, "tolist"):
-                        try:
-                            dist = dist.tolist()
-                        except Exception:
-                            dist = str(dist)
-                    return {
-                        "payload_type": getattr(item, "payload_type", None),
-                        "source_text": getattr(item, "source_text", None),
-                        "text_content": getattr(item, "text_content", None),
-                        "distribution": dist,
-                    }
-                if isinstance(item, np.ndarray):
-                    return item.tolist()
-                if isinstance(item, (list, tuple)):
-                    return [normalize_payload(v) for v in item]
-                return item
+            normalize_payload = DataConverter.normalize_payload
 
             payload_data = normalize_payload(y_corrected)
             if (

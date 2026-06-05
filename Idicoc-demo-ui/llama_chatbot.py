@@ -10,6 +10,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
 
+# Providers live outside the core package to avoid heavy dependencies in the core.
+from providers.llama_provider import LlamaProvider
+
 
 class LlamaChatbot:
     """Chatbot con auditoría en tiempo real."""
@@ -27,7 +30,17 @@ class LlamaChatbot:
                 compile_policies_on_init=True,
                 instance_name="demo_chatbot",
             )
-            self.notary = IDICOCNotaryClient(self.config)
+            # Build a LlamaProvider (optional). If dependencies are missing this will
+            # raise on use; the wrapper accepts None and continues without model.
+            try:
+                provider = LlamaProvider(
+                    model_path=self.config.llama_model_name,
+                    embedding_model_name=self.config.semantic_embedding_model,
+                )
+            except Exception:
+                provider = None
+
+            self.notary = IDICOCNotaryClient(self.config, llm_provider=provider)
             print(
                 f"[Init] ✓ Notary listo con {len(self.config.w_bank or {})} tokens prohibidos"
             )
@@ -57,6 +70,7 @@ class LlamaChatbot:
         if self.notary:
             try:
                 from idicoc_notary_core.audit import SemanticPayload
+
                 audit_output = self.notary.process_interaction(
                     audit_input=SemanticPayload(""),
                     context_input=context,
