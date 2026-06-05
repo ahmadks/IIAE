@@ -114,7 +114,9 @@ class ExtractorStrategy:
                     contradiction_score = scores.get("contradiction", 0.0)
                     threshold = getattr(self.config, "semantic_nli_conflict_threshold", 0.5)
                     if contradiction_score >= threshold:
-                        policy_id = sha256_hex(f"contra|{premise[:64]}|{hypothesis[:64]}|{contradiction_score}")
+                        policy_id = sha256_hex(
+                            f"contra|{premise[:64]}|{hypothesis[:64]}|{contradiction_score}"
+                        )
                         contradiction_policies.append(
                             {
                                 "policy_id": policy_id,
