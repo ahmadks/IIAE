@@ -59,12 +59,12 @@ def ensure_llama_downloaded(
         AutoTokenizer.from_pretrained(
             model_name,
             cache_dir=cache_dir,
-            use_auth_token=auth_token,
+            token=auth_token,
         )
         AutoModelForCausalLM.from_pretrained(
             model_name,
             cache_dir=cache_dir,
-            use_auth_token=auth_token,
+            token=auth_token,
             device_map="auto" if _is_torch_available() else None,
         )
     except Exception as exc:
@@ -111,19 +111,19 @@ class ModelDownloader:
         SentenceTransformer(
             embedding_model_name,
             cache_folder=self.cache_dir,
-            use_auth_token=auth_token,
+            token=auth_token,
         )
 
         print(f"[Phase 1 - Cold Loop] Downloading entailment model: {entailment_model_name}")
         AutoTokenizer.from_pretrained(
             entailment_model_name,
             cache_dir=self.cache_dir,
-            use_auth_token=auth_token,
+            token=auth_token,
         )
         AutoModelForSequenceClassification.from_pretrained(
             entailment_model_name,
             cache_dir=self.cache_dir,
-            use_auth_token=auth_token,
+            token=auth_token,
         )
 
         if include_llama:

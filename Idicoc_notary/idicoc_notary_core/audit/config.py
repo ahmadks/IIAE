@@ -290,7 +290,7 @@ class AuditConfig:
                     self.llama_tokenizer = AutoTokenizer.from_pretrained(
                         self.llama_model_name,
                         cache_dir="models_cache",
-                        use_auth_token=auth_token,
+                        token=auth_token,
                     )
                 except Exception as e:
                     import warnings
