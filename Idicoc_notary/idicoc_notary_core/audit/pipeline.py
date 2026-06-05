@@ -13,7 +13,7 @@ from idicoc_notary_core.kernel.dse.dse import PolicyExtractor
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.kernel.manifold.cmc import ManifoldConstructor
 from idicoc_notary_core.kernel.pipeline.kernel import CustodialKernel
-from idicoc_notary_core.kernel.projection.invariant_state_generator import InvariantStateGenerator
+from idicoc_notary_core.kernel.projection import InvariantStateGenerator
 from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 from idicoc_notary_core.kernel.verification.verifier import InvariantVerifier

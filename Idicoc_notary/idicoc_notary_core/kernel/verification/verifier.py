@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 from idicoc_notary_core.kernel.source.anchor import SourceAnchor
-from idicoc_notary_core.kernel.projection.invariant_state_generator import CanonicalState
+from idicoc_notary_core.kernel.projection import CanonicalState
 from idicoc_notary_core.kernel.exceptions.alignment_breach import AlignmentBreach
 
 

@@ -8,7 +8,7 @@ from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.base import CanonicalStateDTO
 from idicoc_notary_core.audit.pipeline import IDICOCPipeline
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
-from idicoc_notary_core.kernel.projection.invariant_state_generator import (
+from idicoc_notary_core.kernel.projection import (
     InvariantStateGenerator,
     CanonicalState,
 )

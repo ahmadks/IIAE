@@ -7,7 +7,7 @@ from .dissonance_strategy import DissonanceStrategy
 
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
-    from idicoc_notary_core.kernel.projection.invariant_state_generator import CanonicalState
+    from idicoc_notary_core.kernel.projection import CanonicalState
     from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 
 

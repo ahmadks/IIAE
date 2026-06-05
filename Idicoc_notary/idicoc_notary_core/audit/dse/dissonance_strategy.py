@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from idicoc_notary_core.audit.config import AuditConfig
-    from idicoc_notary_core.kernel.projection.invariant_state_generator import CanonicalState
+    from idicoc_notary_core.kernel.projection import CanonicalState
     from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 
 
