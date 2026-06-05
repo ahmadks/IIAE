@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Any
-from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 from idicoc_notary_core.kernel.projection import CanonicalState
 from idicoc_notary_core.kernel.exceptions.alignment_breach import AlignmentBreach
+import hashlib
 
 
 class InvariantVerifier:
@@ -21,8 +21,9 @@ class InvariantVerifier:
     estructural es cero o está dentro del manifold admisible ε.
     """
 
-    def __init__(self, anchor: SourceAnchor) -> None:
-        self._anchor = anchor  # Marcador estructural de K (sin valor)
+    def __init__(self, anchor: Any | None = None) -> None:
+        _STRUCTURAL_ID = "IDICOC::K::terminal_coalgebra_object::v1"
+        self._anchor_fingerprint = hashlib.sha256(_STRUCTURAL_ID.encode()).hexdigest()
 
     def verify_alignment(
         self,
@@ -67,7 +68,7 @@ class InvariantVerifier:
                     "K": "objeto terminal — no representable",
                     "D_s": distance,
                     "tolerance": tolerance,
-                    "anchor_fingerprint": self._anchor.fingerprint,
+                    "anchor_fingerprint": self._anchor_fingerprint,
                 },
                 origin="InvariantVerifier.verify_alignment",
             )

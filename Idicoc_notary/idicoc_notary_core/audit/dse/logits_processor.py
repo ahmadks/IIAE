@@ -57,7 +57,8 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
 
         # Convert to torch tensor on the specified device
         device_to_use = cuda_device or device
-        self.mask = torch.tensor(list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long)
+        self.mask_tensor = torch.tensor(list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long)
+        self.mask = self.mask_tensor
 
         # Audit logs and stats
         self.intercepts_log: list[Dict] = [] if audit_trace else None
@@ -78,13 +79,14 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
         """
         self.logits_processed_count += 1
         
-        if self.mask.numel() > 0:
+        if self.mask_tensor.numel() > 0:
             # Enforce that mask is on the same device as scores
-            if self.mask.device != scores.device:
-                self.mask = self.mask.to(scores.device)
+            if self.mask_tensor.device != scores.device:
+                self.mask_tensor = self.mask_tensor.to(scores.device)
+                self.mask = self.mask_tensor
             
             # Apply in-place -inf masking
-            scores[:, self.mask] = -float('inf')
+            scores[:, self.mask_tensor] = -float('inf')
 
         if self.audit_trace and self.intercepts_log is not None:
             # Basic stats logging for debugging

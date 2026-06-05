@@ -24,7 +24,6 @@ from .graph import PropertyGraph
 from .manifold import ManifoldConstructor
 from .pipeline import CustodialKernel
 from .projection import CanonicalState, InvariantStateGenerator
-from .source import SourceAnchor
 from .verification import ProjectionRegistry  # InvariantVerifier se carga diferidamente
 
 __all__ = [
@@ -51,8 +50,6 @@ __all__ = [
     # Projection
     "CanonicalState",
     "InvariantStateGenerator",
-    # Source
-    "SourceAnchor",
     # Verification
     "InvariantVerifier",
     "ProjectionRegistry",

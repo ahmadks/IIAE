@@ -12,9 +12,7 @@ from idicoc_notary_core.kernel.custody.merkle_dag import (
 from idicoc_notary_core.kernel.dse.dse import PolicyExtractor
 from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
 from idicoc_notary_core.kernel.manifold.cmc import ManifoldConstructor
-from idicoc_notary_core.kernel.pipeline.kernel import CustodialKernel
 from idicoc_notary_core.kernel.projection import InvariantStateGenerator
-from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 from idicoc_notary_core.kernel.verification.verifier import InvariantVerifier
 from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
@@ -49,8 +47,6 @@ class IDICOCPipeline:
         self.aem = AuditEntropyModule()
         self._aem_lock = threading.Lock()
 
-        self.anchor = SourceAnchor()
-
         # Selección dinámica y configurable de backend de almacenamiento para CTM
         backend_type = getattr(self.config, "ctm_storage_backend", "file")
         ctm_storage: Any
@@ -76,11 +72,11 @@ class IDICOCPipeline:
 
         self.registry = ProjectionRegistry()
         self.isg = InvariantStateGenerator(
-            anchor=self.anchor,
+            anchor=None,
             registry=self.registry,
             config=self.config,
         )
-        self.verifier = InvariantVerifier(self.anchor)
+        self.verifier = InvariantVerifier(None)
         self.dse = PolicyExtractor(self.graph, self.config)
         self.dissonance_strategy = self._create_dissonance_strategy()
         self.dqe = self.dissonance_strategy

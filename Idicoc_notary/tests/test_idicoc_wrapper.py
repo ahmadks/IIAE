@@ -12,7 +12,6 @@ from idicoc_notary_core.kernel.projection import (
     InvariantStateGenerator,
     CanonicalState,
 )
-from idicoc_notary_core.kernel.source.anchor import SourceAnchor
 from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 
 
@@ -37,7 +36,7 @@ def test_audit_config_properties():
 # TEST 2: InvariantStateGenerator preserves signal magnitude
 # ===================================================================
 def test_invariant_state_generator_preserves_text_signal():
-    anchor = SourceAnchor()
+    anchor = None
     registry = ProjectionRegistry()
     isg = InvariantStateGenerator(anchor, registry)
 
@@ -47,7 +46,7 @@ def test_invariant_state_generator_preserves_text_signal():
 
 
 def test_invariant_state_generator_preserves_exact_vector_input():
-    anchor = SourceAnchor()
+    anchor = None
     registry = ProjectionRegistry()
     isg = InvariantStateGenerator(anchor, registry)
 

@@ -1,7 +1,4 @@
-"""Package source — SourceAnchor y tipos de entrada del kernel."""
-
+"""Package source — Tipos de entrada del kernel (SourceAnchor deprecado)."""
 from __future__ import annotations
 
-from .anchor import SourceAnchor
-
-__all__ = ["SourceAnchor"]
+__all__ = []
