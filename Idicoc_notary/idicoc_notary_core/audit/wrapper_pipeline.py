@@ -68,11 +68,31 @@ class IDICOCNotaryClient(IIAENotaryContract):
         audit_input: Any,
         context_input: list[str] | None = None,
         context_policies: list[str] | None = None,
+        user_input: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Adapta entrada multiparamétrica al formato interno del pipeline.
+
+        Fase 2 (Interacción) - Standard-Zero:
+        - user_input: Instrucción del usuario (User Prompt)
+        - context_input: Contexto RAG/sesión (System Prompt conditioning)
+        - context_policies: Políticas ya compiladas en Fase 1
+        - audit_input: Señal generativa interceptada (logits stream en Fase 3)
+
+        Args:
+            audit_input: Entrada de auditoría o logits interceptados
+            context_input: Lista de fragmentos de contexto RAG
+            context_policies: Lista de políticas aplicables
+            user_input: Instrucción directa del usuario (NUEVO - Fase 2)
+
+        Returns:
+            Dict con campos mapeados al formato interno
+        """
         return {
             self.config.input_field_audit: audit_input,
             self.config.input_field_context: context_input or [],
             self.config.input_field_policies: context_policies or [],
+            self.config.input_field_user: user_input or "",
             "instance_name": self.config.instance_name,
         }
 
@@ -96,6 +116,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         audit_input: Any,
         context_input: list[str] | None = None,
         context_policies: list[str | dict[str, Any]] | None = None,
+        user_input: str | None = None,
         epsilon_override: float | None = None,
         trace_input: str = "",
         client_id: str | None = None,
@@ -185,6 +206,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
             audit_input=audit_input,
             context_input=context_input,
             context_policies=context_policies,
+            user_input=user_input or "",
             epsilon_override=epsilon_override,
             trace_input=trace_input,
             client_id=client_id,
@@ -207,6 +229,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         context_policies = data.get(
             self.config.input_field_policies, data.get("context_policies", [])
         )
+        user_input = data.get(self.config.input_field_user, data.get("user_input", ""))
         epsilon_override = data.get("epsilon_override", None)
         trace_input = data.get("trace_input", "")
         client_id = data.get("client_id", None)
@@ -215,6 +238,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
             audit_input=audit_input,
             context_input=context_input if isinstance(context_input, list) else [],
             context_policies=context_policies if isinstance(context_policies, list) else [],
+            user_input=str(user_input) if user_input is not None else "",
             epsilon_override=epsilon_override,
             trace_input=str(trace_input) if trace_input is not None else "",
             client_id=str(client_id) if client_id is not None else None,

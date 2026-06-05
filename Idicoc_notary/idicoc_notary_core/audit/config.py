@@ -133,10 +133,30 @@ class AuditConfig:
     client_id: str | None = None
     trace_input: str | None = None
 
-    # Mapeo configurable de campos de entrada
-    input_field_audit: str = "audit_input"
-    input_field_context: str = "context_input"
-    input_field_policies: str = "context_policies"
+    # Mapeo configurable de campos de entrada (Standard-Zero Phases 1-4)
+    input_field_audit: str = "audit_input"  # Fase 3: logits stream desde Llama
+    input_field_context: str = "context_input"  # Fase 2: System Prompt (conditioning)
+    input_field_user: str = "user_input"  # Fase 2: User Prompt (instruction) - NUEVO
+    input_field_policies: str = "context_policies"  # Fase 1: Políticas para compilación
+
+    # Configuración de Llama para Fase 1 (Cold Loop) y Fase 3 (Hot Loop)
+    llama_model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct"
+    llama_tokenizer: Any = None  # Se carga en __post_init__ si es necesario
+    llama_model: Any = None  # Se carga en __post_init__ si es necesario
+
+    # Procesador de logits para contención sub-simbólica (Fase 3)
+    logits_processor: Any = None  # Se inicializa en __post_init__
+    logits_processor_hard_only: bool = False  # Si True, solo bloquea políticas "hard"
+    logits_processor_audit_trace: bool = False  # Si True, registra interceptiones
+
+    # Matriz compilada de tokens prohibidos (W_bank) - Fase 1
+    # Se genera automáticamente en __post_init__ desde context_policies
+    w_bank: dict[int, tuple[str, int]] | None = None
+    invariant_synthesizer: Any = None  # Instancia de InvariantSynthesizer
+
+    # Control de compilación Cold/Hot Loop
+    compile_policies_on_init: bool = True  # Si True, compila políticas durante __post_init__
+    enable_logits_interception: bool = False  # Si True, inyecta procesador en generate()
 
     extra_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -152,6 +172,7 @@ class AuditConfig:
     def __post_init__(self) -> None:
         """
         Validaciones y normalizaciones post-inicialización.
+        Implementa Fase 1 (Cold Loop): compilación de políticas → W_bank.
         """
         import os
 
@@ -200,4 +221,142 @@ class AuditConfig:
             )
             self.enable_hard_halt = False
 
+        # ─────────────────────────────────────────────────────────────────────
+        # FASE 1 (COLD LOOP): Compilación de Políticas → W_bank
+        # Se ejecuta UNA SOLA VEZ durante la inicialización del sistema
+        # ─────────────────────────────────────────────────────────────────────
+        if self.compile_policies_on_init:
+            self._initialize_cold_loop()
+
         # El framework no fuerza normalización de embeddings; la coherencia de espacios queda a cargo del usuario.
+
+    def _initialize_cold_loop(self) -> None:
+        """
+        Inicializa el bucle frío (Fase 1): carga políticas, Llama tokenizer, compila W_bank.
+        """
+        import os
+
+        try:
+            # Cargar políticas si existe policy_loader
+            policies = []
+            if self.policy_loader is not None:
+                policies = self.policy_loader.load_policies()
+
+            if not policies:
+                # Sin políticas, se puede seguir funcionando (W_bank estará vacío)
+                import warnings
+
+                warnings.warn(
+                    "[Fase 1 - Cold Loop] No se encontraron políticas. "
+                    "W_bank estará vacío y no se aplicará contención.",
+                    UserWarning,
+                )
+                self.w_bank = {}
+                return
+
+            # Cargar tokenizador de Llama si no está ya cargado
+            if self.llama_tokenizer is None:
+                try:
+                    from transformers import AutoTokenizer
+
+                    print(
+                        f"[Fase 1 - Cold Loop] Cargando tokenizador Llama: {self.llama_model_name}"
+                    )
+                    self.llama_tokenizer = AutoTokenizer.from_pretrained(
+                        self.llama_model_name,
+                        cache_dir="models_cache",
+                    )
+                except Exception as e:
+                    import warnings
+
+                    warnings.warn(
+                        f"[Fase 1 - Cold Loop] Error cargando tokenizador Llama: {e}. "
+                        "Se omitirá compilación de W_bank.",
+                        UserWarning,
+                    )
+                    self.w_bank = {}
+                    return
+
+            # Crear e inicializar InvariantSynthesizer
+            from .graph.invariant_synthesizer import InvariantSynthesizer
+
+            embedding_service = None
+            try:
+                # Intentar obtener el servicio de embeddings si está disponible
+                embedding_service = EmbeddingService()
+            except:
+                pass  # Sin servicio de embeddings, igual funciona
+
+            self.invariant_synthesizer = InvariantSynthesizer(
+                tokenizer=self.llama_tokenizer,
+                embedding_service=embedding_service,
+            )
+
+            # Compilar políticas → W_bank
+            print(f"[Fase 1 - Cold Loop] Compilando {len(policies)} políticas...")
+            self.w_bank = self.invariant_synthesizer.compile_policies(
+                policies=policies,
+                include_variants=True,
+                hardness_multiplier=2.0,  # Políticas "hard" × 2 prioridad
+            )
+
+            # Log del reporte de compilación
+            report = self.invariant_synthesizer.get_compilation_report()
+            print(
+                f"[Fase 1 - Cold Loop] ✓ Compilación completada. "
+                f"W_bank size: {report['w_bank_size']}, "
+                f"Políticas: success={report['successful']}, warnings={report['warnings']}, errors={report['errors']}"
+            )
+
+            # Inicializar Procesador de Logits (Fase 3) si se requiere interception
+            if self.enable_logits_interception and self.w_bank:
+                self._initialize_hot_loop_processor()
+
+        except Exception as e:
+            import warnings
+            import traceback
+
+            warnings.warn(
+                f"[Fase 1 - Cold Loop] Error durante inicialización: {e}\n{traceback.format_exc()}",
+                UserWarning,
+            )
+
+    def _initialize_hot_loop_processor(self) -> None:
+        """
+        Inicializa el Procesador de Logits para Fase 3 (Hot Loop).
+        Se inyectará en la llamada model.generate() de Llama.
+        """
+        if not self.w_bank:
+            import warnings
+
+            warnings.warn(
+                "[Fase 3 - Hot Loop] W_bank está vacío. "
+                "No se inicializará procesador de logits.",
+                UserWarning,
+            )
+            return
+
+        try:
+            from .dse.logits_processor import DeterministicMUXLogitsProcessor
+
+            print(
+                f"[Fase 3 - Hot Loop] Inicializando DeterministicMUXLogitsProcessor. "
+                f"Tokens prohibidos: {len(self.w_bank)}"
+            )
+
+            self.logits_processor = DeterministicMUXLogitsProcessor(
+                w_bank=self.w_bank,
+                hard_only=self.logits_processor_hard_only,
+                audit_trace=self.logits_processor_audit_trace,
+            )
+
+            print(f"[Fase 3 - Hot Loop] ✓ Procesador de logits inicializado.")
+
+        except Exception as e:
+            import warnings
+            import traceback
+
+            warnings.warn(
+                f"[Fase 3 - Hot Loop] Error inicializando procesador: {e}\n{traceback.format_exc()}",
+                UserWarning,
+            )

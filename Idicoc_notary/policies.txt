@@ -1,0 +1,8 @@
+# Políticas de Contención - Ejemplo
+# Formato: id | texto | tipo | polaridad | dureza | prioridad | metadata...
+
+P001 | El cliente debe verificar su identidad | rule | affirmative | hard | 10
+P002 | No revelar números de cuenta completos | rule | negative | hard | 9
+P003 | Limitar transferencias a $50,000 | constraint | affirmative | soft | 5
+P004 | Usar lenguaje profesional | style | affirmative | soft | 3
+P005 | No hacer promesas de rentabilidad | restriction | negative | hard | 8

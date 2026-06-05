@@ -244,6 +244,7 @@ class IDICOCPipeline:
         audit_input: Any,
         context_input: Optional[List[str]] = None,
         context_policies: Optional[List[str | Dict[str, Any]]] = None,
+        user_input: str | None = None,
         epsilon_override: float | None = None,
         trace_input: str = "",
         client_id: str | None = None,
