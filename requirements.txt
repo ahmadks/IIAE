@@ -13,7 +13,6 @@ PyPDF2
 sentence-transformers
 transformers
 torch
-scikit-learn
 sentencepiece
 pytest
 
