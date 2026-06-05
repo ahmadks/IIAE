@@ -1,11 +1,11 @@
-# Quick Start: IIAE Standard-Zero (v2.0)
+# Quick Start: IIAE (v2.0)
 
 **⏱️ Tiempo estimado: 5 minutos**
 
 ---
 
 ## 🎯 Objetivo
-Ejecutar un pipeline completo IIAE Standard-Zero (Phases 1-4) con Llama.
+Ejecutar un pipeline completo IIAE (Phases 1-4) con Llama.
 
 ---
 
@@ -63,7 +63,7 @@ python examples/integration_llama_standard_zero.py
 **Esperado**:
 ```
 ======================================================================
-IIAE STANDARD-ZERO - EJEMPLO INTEGRACIÓN COMPLETO
+IIAE - EJEMPLO INTEGRACIÓN COMPLETO
 ======================================================================
 
 ======================================================================
@@ -316,7 +316,7 @@ R: 100% backward compatible. Código antiguo sigue funcionando.
 
 ## 🎉 ¡Listo!
 
-Ahora estás usando IIAE Standard-Zero v2.0 con:
+Ahora estás usando IIAE v2.0 con:
 - ✓ Compilación de políticas O(1)
 - ✓ Generación determinista <5ms/token
 - ✓ Contención sub-simbólica garantizada

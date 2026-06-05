@@ -5,7 +5,7 @@ Intercepta el flujo autoregresivo de logits desde Llama y aplica máscara O(1)
 usando la matriz W_bank compilada en Fase 1. Garantiza que la red nunca
 asigne probabilidad a tokens prohibidos (se fuerzan a -∞).
 
-Especificación: IDICOC Standard-Zero, Sección 3.2 (Contención Determinista)
+Especificación: IDICOC, Sección 3.2 (Contención Determinista)
 """
 
 from __future__ import annotations
@@ -57,7 +57,9 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
 
         # Convert to torch tensor on the specified device
         device_to_use = cuda_device or device
-        self.mask_tensor = torch.tensor(list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long)
+        self.mask_tensor = torch.tensor(
+            list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long
+        )
         self.mask = self.mask_tensor
 
         # Audit logs and stats
@@ -65,9 +67,7 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
         self.intercepts_count = 0
         self.logits_processed_count = 0
 
-        logger.info(
-            f"[Hot Loop - MUX] Inicializado. Mask size: {len(self.forbidden_token_ids)}"
-        )
+        logger.info(f"[Hot Loop - MUX] Inicializado. Mask size: {len(self.forbidden_token_ids)}")
 
     def __call__(
         self,
@@ -78,7 +78,7 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
         Máscara de bits O(1) in-place sobre el tensor de logits.
         """
         self.logits_processed_count += 1
-        
+
         if self.mask_tensor.numel() > 0:
             # Enforce that mask is on the same device as scores
             if self.mask_tensor.device != scores.device:
@@ -86,16 +86,18 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
                     f"Device mismatch between MUX mask ({self.mask_tensor.device}) and logits ({scores.device}). "
                     f"All device synchronization must occur before the hot loop to satisfy O(1) latency constraints."
                 )
-            
+
             # Apply in-place -inf masking
-            scores[:, self.mask_tensor] = -float('inf')
+            scores[:, self.mask_tensor] = -float("inf")
 
         if self.audit_trace and self.intercepts_log is not None:
             # Basic stats logging for debugging
-            self.intercepts_log.append({
-                "iteration": self.intercepts_count,
-                "forbidden_count": len(self.forbidden_token_ids),
-            })
+            self.intercepts_log.append(
+                {
+                    "iteration": self.intercepts_count,
+                    "forbidden_count": len(self.forbidden_token_ids),
+                }
+            )
             self.intercepts_count += 1
 
         return scores

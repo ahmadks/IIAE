@@ -1,5 +1,5 @@
 """
-IIAE Demo UI + Chatbot con Standard-Zero (sin Llama gateado)
+IIAE Demo UI + Chatbot con (sin Llama gateado)
 Simula respuestas del LLM pero preserva auditoría en tiempo real del IDICOC Notary
 """
 
@@ -16,7 +16,7 @@ from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
 
 # ── Configuración de página ───────────────────────────────────────────────────
 st.set_page_config(
-    page_title="IIAE Chatbot + Standard-Zero",
+    page_title="IIAE Chatbot +",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -63,7 +63,7 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 if "notary_client" not in st.session_state:
-    with st.spinner("🔧 Inicializando IDICOC Notary + Standard-Zero..."):
+    with st.spinner("🔧 Inicializando IDICOC Notary +..."):
         try:
             config = AuditConfig(
                 policy_file_path=os.path.join(
@@ -81,7 +81,7 @@ if "notary_client" not in st.session_state:
             st.session_state.notary_ready = False
 
 # ── Interfaz Principal ────────────────────────────────────────────────────────
-st.title("🛡️ IIAE Chatbot + Standard-Zero Auditoría")
+st.title("🛡️ IIAE Chatbot + Auditoría")
 st.caption("Chatbot con auditoría determinística en tiempo real")
 
 # ── Barra lateral ─────────────────────────────────────────────────────────────
@@ -188,6 +188,7 @@ if (send_button or user_input) and user_input.strip() and st.session_state.notar
     with st.spinner("🔍 Auditando entrada con IDICOC Notary (Fase 2)..."):
         try:
             from idicoc_notary_core.audit import SemanticPayload
+
             audit_result = st.session_state.notary_client.process_interaction(
                 audit_input=SemanticPayload(""),
                 context_input=st.session_state.context_input,
@@ -264,7 +265,7 @@ if (send_button or user_input) and user_input.strip() and st.session_state.notar
 **Respuesta:** Este es un ejemplo de respuesta simulada. En producción, se usaría Llama-3-8B-Instruct con contención sub-simbólica (Fase 3 Hot Loop).
 
 ---
-*ℹ️ Sistema Standard-Zero: Fase 1 (Cold Loop) ✓ | Fase 2 (Interacción) ✓ | Fase 3 (Generación) ⏸️*"""
+*ℹ️ Sistema: Fase 1 (Cold Loop) ✓ | Fase 2 (Interacción) ✓ | Fase 3 (Generación) ⏸️*"""
 
     st.session_state.chat_history.append(
         {"role": "assistant", "content": mock_response}
@@ -299,16 +300,18 @@ with col2:
     st.metric("Auditorías completadas", audit_count, delta=f"{admitted} ADMITTED")
 
 with col3:
-    st.caption(f"**Versión:** Standard-Zero | **Fase activa:** 2 (Interacción)")
+    st.caption(f"**Versión:** | **Fase activa:** 2 (Interacción)")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 ---
-**IIAE Standard-Zero Demo** | Auditoría determinística en Fase 2
+**IIAE Demo** | Auditoría determinística en Fase 2
 - ✓ Fase 1 (Cold Loop): Compilación de políticas
 - ✓ Fase 2 (Interacción): Auditoría de entrada del usuario
 - ⏸️ Fase 3 (Hot Loop): Generación con contención (Requiere Llama autorizado)
 - ⏸️ Fase 4 (Consolidación): Trazabilidad en CTM WAL
 
 [📚 Docs](https://github.com/iiae) | [🐛 Issues](https://github.com/iiae/issues) | [⭐ Star](https://github.com/iiae)
-""")
+"""
+)

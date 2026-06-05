@@ -58,6 +58,7 @@ class SemanticPayload:
         self.payload_type = payload_type
         if vec is None:
             from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
             self.distribution = EmbeddingService().encode(text)
         else:
             self.distribution = vec
@@ -95,7 +96,7 @@ class IDICOCNotaryClient(IIAENotaryContract):
         """
         Adapta entrada multiparamétrica al formato interno del pipeline.
 
-        Fase 2 (Interacción) - Standard-Zero:
+        Fase 2 (Interacción) -:
         - user_input: Instrucción del usuario (User Prompt)
         - context_input: Contexto RAG/sesión (System Prompt conditioning)
         - context_policies: Políticas ya compiladas en Fase 1

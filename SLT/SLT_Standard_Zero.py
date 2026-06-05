@@ -71,7 +71,7 @@ class SLTStandardZeroEngine:
         self.ZIP_RATE = 0.15  # 15% of surplus margin above C
         self.ZIP_FLOOR = 0.05  # 5% floor on surplus margin (FRAND exception applies)
 
-        # Standard-Zero EPR threshold (Annex A)
+        # EPR threshold (Annex A)
         self.STANDARD_ZERO_EPR = 0.99
 
     # -------------------------------------------------------------------
@@ -83,7 +83,7 @@ class SLTStandardZeroEngine:
         Annex A: Technical measure of structural fidelity counted passively by the AEM.
         """
         if y_total <= 0:
-            return 1.0  # Rest state → Standard-Zero baseline
+            return 1.0  # Rest state → baseline
         return y_valid / y_total
 
     # -------------------------------------------------------------------
@@ -155,7 +155,7 @@ class SLTStandardZeroEngine:
         ds_compliant = data.ds_score <= self.epsilon
 
         # 2. ── CERTIFICATION STATUS ─────────────────────────────────
-        # IIAE-CERTIFIED requires: audit + Standard-Zero EPR + D_s within threshold
+        # IIAE-CERTIFIED requires: audit + EPR + D_s within threshold
         is_certified = data.tier_12_audit and is_standard_zero and ds_compliant
 
         # 3. ── TIER SELECTION & ECONOMIC BASE ───────────────────────
@@ -174,7 +174,7 @@ class SLTStandardZeroEngine:
             status_std = "IIAE-COMPLIANT (BLACK-BOX)"
 
         # 5. ── ZIP (Universal Cascading Participation) ──────────────
-        # Applies only to Tier 1.2, with certification + Standard-Zero + T > C
+        # Applies only to Tier 1.2, with certification + + T > C
         zip_contribution = 0.0
         zip_floor_applied = False
         if (

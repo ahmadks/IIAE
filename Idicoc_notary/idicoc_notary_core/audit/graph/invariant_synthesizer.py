@@ -6,7 +6,7 @@ Esta compilación ocurre UNA SOLA VEZ durante la inicialización del sistema.
 Durante la Fase 3 (Hot Loop), el DeterministicMUXLogitsProcessor aplica
 una máscara O(1) usando W_bank para garantizar contenencia de la red neuronal.
 
-Especificación: IDICOC Standard-Zero, Sección 2.3 (Contención Sub-Simbólica)
+Especificación: IDICOC, Sección 2.3 (Contención Sub-Simbólica)
 """
 
 from __future__ import annotations
@@ -304,6 +304,7 @@ class InvariantSynthesizer:
                     embeddings = embeddings / norms
 
                     from scipy.spatial import KDTree
+
                     self.vocab_tokens_text = tokens
                     self.vocab_token_ids = token_ids
                     self.vocab_embeddings = embeddings
@@ -340,6 +341,7 @@ class InvariantSynthesizer:
         self.vocab_token_ids = token_ids
         self.vocab_embeddings = embs
         from scipy.spatial import KDTree
+
         self.kd_tree = KDTree(embs)
 
         # Guardar cache si se especificó path
@@ -393,7 +395,9 @@ class InvariantSynthesizer:
                             source_policy=f"variant:{policy_text[:40]}...",
                             policy_id=policy_id,
                             hardness=hardness,
-                            priority=max(1, priority - 1),  # Variantes con prioridad ligeramente menor
+                            priority=max(
+                                1, priority - 1
+                            ),  # Variantes con prioridad ligeramente menor
                         )
                     )
 
@@ -401,7 +405,6 @@ class InvariantSynthesizer:
             logger.warning(f"Error generando variantes de '{policy_text}': {e}")
 
         return variants
-
 
     SYNONYM_MAP = {
         "prohibit": ["forbid", "ban", "restrict", "prevent", "disallow", "bar", "block"],
@@ -419,12 +422,13 @@ class InvariantSynthesizer:
         """Genera paráfrasis sintéticas de una política usando un grafo de sinónimos local determinista."""
         paraphrases = []
         words = text.lower().strip().split()
-        
+
         # Intentar usar NLTK wordnet si está disponible localmente
         nltk_synonyms = {}
         try:
             import nltk
             from nltk.corpus import wordnet
+
             for word in words:
                 syns = []
                 for syn in wordnet.synsets(word):
@@ -446,12 +450,12 @@ class InvariantSynthesizer:
                     new_words = list(words)
                     new_words[idx] = word.replace(clean_word, syn)
                     paraphrases.append(" ".join(new_words))
-                    
+
         # Reestructuración simple de frases
         if len(words) > 3:
             if words[0] in ("never", "always", "prohibit"):
                 paraphrases.append(" ".join(words[1:]) + f" is {words[0]}ed")
-                
+
         unique_paraphrases = list(dict.fromkeys(p for p in paraphrases if p.strip()))
         return unique_paraphrases[:5]
 
@@ -462,14 +466,15 @@ class InvariantSynthesizer:
 
         try:
             import math
+
             query_emb = np.asarray(self.embedding_service.encode(query_text), dtype=float)
             norm = np.linalg.norm(query_emb)
             if norm > 1e-12:
                 query_emb /= norm
-                
+
             # d = sqrt(2 * (1 - cosine_sim)) -> d <= sqrt(2 * (1 - threshold))
             r = math.sqrt(2.0 * max(0.0, 1.0 - threshold))
-            
+
             indices = self.kd_tree.query_ball_point(query_emb, r)
             return [self.vocab_token_ids[idx] for idx in indices]
         except Exception as e:

@@ -1,4 +1,4 @@
-# Arquitectura Standard-Zero: Refactorización IIAE-Idicoc_sdk
+# Arquitectura: Refactorización IIAE-Idicoc_sdk
 
 ## Resumen Ejecutivo
 
@@ -434,6 +434,6 @@ notary.process_interaction(
 
 ## Referencias
 
-- **Especificación**: IDICOC Standard-Zero (2026-05)
+- **Especificación**: IDICOC (2026-05)
 - **Repositorio**: GitHub IIAE-Idicoc_sdk
 - **Contacto**: [info@iiae.org]

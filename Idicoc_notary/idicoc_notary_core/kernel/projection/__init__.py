@@ -7,7 +7,7 @@ import warnings
 
 # Deprecation Warning
 warnings.warn(
-    "The projection/invariant_state_generator module is deprecated under the Standard-Zero architecture.",
+    "The projection/invariant_state_generator module is deprecated under the architecture.",
     DeprecationWarning,
     stacklevel=2,
 )
@@ -68,6 +68,7 @@ class InvariantStateGenerator:
         if isinstance(vector, str):
             try:
                 from idicoc_notary_core.utils.embedding_service import EmbeddingService
+
                 vector = EmbeddingService().encode(vector)
             except Exception:
                 vector = np.zeros(32, dtype=float)

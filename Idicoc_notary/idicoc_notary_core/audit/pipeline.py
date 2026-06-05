@@ -59,7 +59,7 @@ class IDICOCPipeline:
                 )
             elif backend_type_lower in ("postgres", "dynamodb", "qldb"):
                 raise ValueError(
-                    f"Backend de almacenamiento CTM '{backend_type}' ya no está soportado en la arquitectura Standard-Zero."
+                    f"Backend de almacenamiento CTM '{backend_type}' ya no está soportado en la arquitectura."
                 )
             else:
                 raise ValueError(f"Backend de almacenamiento CTM no soportado: {backend_type}")
@@ -374,7 +374,7 @@ class IDICOCPipeline:
                 correction_flag = False
                 y_corrected_for_metrics = audit_input
             else:
-                # En la arquitectura Standard-Zero no se realiza corrección ex-post (SPSA / proyección)
+                # En la arquitectura no se realiza corrección ex-post (SPSA / proyección)
                 admitted = False
                 correction_flag = False
                 y_corrected = audit_input

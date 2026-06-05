@@ -1,4 +1,4 @@
-# Refactorización Standard-Zero: Resumen Ejecutivo
+# Refactorización: Resumen Ejecutivo
 
 **Fecha**: 2026-06-05  
 **Versión**: 2.0 (Standard-Zero)  
@@ -212,7 +212,7 @@ result = notary.process_interaction(
     user_input="...",  # ← NUEVO
 )
 
-# Paso 3: Full Standard-Zero (con Llama)
+# Paso 3: Full (con Llama)
 config = AuditConfig(enable_logits_interception=True)
 ```
 
@@ -304,5 +304,5 @@ Ver [MIGRATION-STANDARD-ZERO.md] para checklist completo
 
 ---
 
-**Conclusión**: Standard-Zero representa un salto transformacional en arquitectura, seguridad y conformidad, manteniendo 100% de compatibilidad hacia atrás. 🚀
+**Conclusión**: representa un salto transformacional en arquitectura, seguridad y conformidad, manteniendo 100% de compatibilidad hacia atrás. 🚀
 

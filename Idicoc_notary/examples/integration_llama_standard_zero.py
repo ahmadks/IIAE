@@ -1,5 +1,5 @@
 """
-Ejemplo de Integración: IIAE Standard-Zero con Llama (Phases 1-4)
+Ejemplo de Integración: IIAE con Llama (Phases 1-4)
 
 Este script demuestra:
 1. Fase 1 (Cold Loop): Descargar modelos, compilar políticas → W_bank
@@ -137,6 +137,7 @@ def phase_2_interaction(config: AuditConfig):
     print(f"\n[Fase 2] Procesando con wrapper_pipeline...")
 
     from idicoc_notary_core.audit import SemanticPayload
+
     result = client.process_interaction(
         audit_input=SemanticPayload(""),  # Vacío en Fase 2
         context_input=context_input,
@@ -282,7 +283,7 @@ def phase_4_consolidation(config: AuditConfig, user_input: str, output_text: str
 def main():
     """Ejecuta todas las fases."""
     print("\n" + "=" * 70)
-    print("IIAE STANDARD-ZERO - EJEMPLO INTEGRACIÓN COMPLETO")
+    print("IIAE - EJEMPLO INTEGRACIÓN COMPLETO")
     print("=" * 70)
     print(f"\nTiempo: {datetime.now(timezone.utc).isoformat()}")
 

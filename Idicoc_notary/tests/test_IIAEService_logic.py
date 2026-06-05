@@ -64,12 +64,13 @@ def test_logic_service_with_compatible_distribution(logic_service):
     audit_input = MockAuditInput(audit_distribution)
 
     from idicoc_notary_core.audit import SemanticPayload
+
     lst = audit_input.distribution.tolist()
     payload = SemanticPayload(
         text="Mock numeric distribution input",
         vec=audit_input.distribution,
         source_text=str(lst),
-        payload_type="numeric"
+        payload_type="numeric",
     )
     canonical_state = logic_service.process_interaction(
         audit_input=payload,
@@ -97,12 +98,13 @@ def test_logic_service_with_incompatible_distribution():
     ]
 
     from idicoc_notary_core.audit import SemanticPayload
+
     lst = audit_input.distribution.tolist()
     payload = SemanticPayload(
         text="Incompatible numeric distribution input",
         vec=audit_input.distribution,
         source_text=str(lst),
-        payload_type="numeric"
+        payload_type="numeric",
     )
     canonical_state = logic_service.process_interaction(
         audit_input=payload,
@@ -114,8 +116,10 @@ def test_logic_service_with_incompatible_distribution():
     )
 
     metadata = canonical_state.metadata
-    assert metadata["admission_breach"] is True  # En Standard-Zero no se corrige ex-post, se rechaza directamente
-    assert metadata["correction_flag"] is False  # En Standard-Zero no se aplica corrección ex-post (SPSA / proyección)
+    assert metadata["admission_breach"] is True  # En no se corrige ex-post, se rechaza directamente
+    assert (
+        metadata["correction_flag"] is False
+    )  # En no se aplica corrección ex-post (SPSA / proyección)
     assert math.isinf(metadata["d_s"])
     assert logic_service.verify_compliance(canonical_state, tolerance=0.0) is False
 
@@ -126,12 +130,13 @@ def test_logic_service_with_partial_dissonance():
     audit_distribution = np.array([0.35, 0.32, 0.33])
 
     from idicoc_notary_core.audit import SemanticPayload
+
     lst = audit_distribution.tolist()
     payload = SemanticPayload(
         text="Partial dissonance distribution input",
         vec=audit_distribution,
         source_text=str(lst),
-        payload_type="numeric"
+        payload_type="numeric",
     )
     canonical_state = logic_service.process_interaction(
         audit_input=payload,
@@ -150,13 +155,14 @@ def test_logic_service_lambda_composition():
     logic_service = _build_logic_service()
 
     from idicoc_notary_core.audit import SemanticPayload
+
     vec = np.array([0.33, 0.33, 0.34])
     lst = vec.tolist()
     payload = SemanticPayload(
         text="Uniform-ish numeric distribution input",
         vec=vec,
         source_text=str(lst),
-        payload_type="numeric"
+        payload_type="numeric",
     )
     canonical_state = logic_service.process_interaction(
         audit_input=payload,

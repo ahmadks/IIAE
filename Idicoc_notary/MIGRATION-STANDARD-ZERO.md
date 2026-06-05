@@ -1,4 +1,4 @@
-# Guía de Migración: Standard-Zero (v2.0)
+# Guía de Migración: (v2.0)
 
 **Versión**: 2.0 (Standard-Zero)  
 **Fecha**: 2026-06-05  
@@ -14,7 +14,7 @@
 ❌ Sin garantías sub-simbólicas → violaciones posibles  
 ❌ No conforme a estándares ETSI/IA europeos  
 
-### Ventajas de Standard-Zero
+### Ventajas de
 ✓ Compilación de políticas UNA VEZ en Fase 1 (Cold Loop)  
 ✓ Hot Loop O(1) determinista → latencia predecible  
 ✓ Contención sub-simbólica garantizada  
@@ -96,7 +96,7 @@ result = client.process_interaction(
 
 ---
 
-### PASO 3: Full Standard-Zero (Producción)
+### PASO 3: Full (Producción)
 
 #### 3a. Descargar modelos Llama
 
@@ -153,7 +153,7 @@ output_text = tokenizer.decode(output_ids[0])
 
 ## Tabla de Comparación
 
-| Aspecto | v1.0 | v2.0 Standard-Zero |
+| Aspecto | v1.0 | v2.0 |
 |--------|------|-------------------|
 | **Compilación de políticas** | En tiempo real (O(n)) | Fase 1 UNA VEZ (O(1)) |
 | **Evaluación de políticas** | Hot Loop (lenta) | Cold Loop (rápida) |
@@ -309,7 +309,7 @@ for t in range(200):  # 200 iteraciones
 
 ## Changelog
 
-### v2.0 (2026-06-05) - STANDARD-ZERO
+### v2.0 (2026-06-05) -
 ✓ Arquitectura Cold/Hot Loop separada  
 ✓ Compilación de políticas en Fase 1  
 ✓ Contención sub-simbólica O(1) en Fase 3  

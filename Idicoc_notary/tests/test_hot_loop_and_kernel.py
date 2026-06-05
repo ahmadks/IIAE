@@ -174,7 +174,7 @@ def test_logits_processor_masks_forbidden_tokens(use_torch):
 def test_invariant_synthesizer_extracts_semantic_concepts():
     """Verifica que el InvariantSynthesizer extrae tokens via KDTree geométrico.
 
-    Con la arquitectura Standard-Zero puramente geométrica, el filtrado de stopwords
+    Con la arquitectura puramente geométrica, el filtrado de stopwords
     se realiza implícitamente por distancia semántica, no por diccionarios lingüísticos.
     Este test usa embedding_threshold=0.0 para incluir todo el vocabulario (radio máximo)
     y verificar el plumbing del KDTree: que el grafo del vocabulario se construye, los
@@ -223,12 +223,9 @@ def test_invariant_synthesizer_extracts_semantic_concepts():
 
     # Invariante 3: los tokens son decodificables correctamente
     token_texts = [synthesizer.tokenizer.decode([token_id]) for token_id in token_ids]
-    assert all(isinstance(t, str) and len(t) > 0 for t in token_texts), (
-        "Todos los tokens del W_bank deben decodificarse como strings no vacíos"
-    )
-
-
-
+    assert all(
+        isinstance(t, str) and len(t) > 0 for t in token_texts
+    ), "Todos los tokens del W_bank deben decodificarse como strings no vacíos"
 
 
 def test_kernel_skips_projection_for_hardware_contained_signal():

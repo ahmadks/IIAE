@@ -48,6 +48,7 @@ def test_semantic_service_with_similar_inputs():
     policy_input = ["Execute a transfer of 50000.00 euros, which is within the limit."]
 
     from idicoc_notary_core.audit import SemanticPayload
+
     canonical_state = service.process_interaction(
         audit_input=SemanticPayload(audit_input),
         context_input=context_input,
@@ -73,6 +74,7 @@ def test_semantic_service_with_hard_violation():
     ]
 
     from idicoc_notary_core.audit import SemanticPayload
+
     canonical_state = service.process_interaction(
         audit_input=SemanticPayload(audit_input),
         context_input=["The maximum allowed transaction amount is 50000.00 euros."],
@@ -81,8 +83,10 @@ def test_semantic_service_with_hard_violation():
 
     metadata = canonical_state.metadata
     assert math.isinf(metadata["d_s"])
-    assert metadata["admission_breach"] is True  # En Standard-Zero no se corrige ex-post, se rechaza
-    assert metadata["correction_flag"] is False  # En Standard-Zero no se aplica corrección ex-post (SPSA / proyección)
+    assert metadata["admission_breach"] is True  # En no se corrige ex-post, se rechaza
+    assert (
+        metadata["correction_flag"] is False
+    )  # En no se aplica corrección ex-post (SPSA / proyección)
     assert service.verify_compliance(canonical_state, tolerance=0.0) is False
 
 
@@ -95,6 +99,7 @@ def test_semantic_service_with_context_and_policy_alignment():
     policy_input = ["Confirmed transfer stays within the approved limit."]
 
     from idicoc_notary_core.audit import SemanticPayload
+
     canonical_state = service.process_interaction(
         audit_input=SemanticPayload(audit_input),
         context_input=context_input,
