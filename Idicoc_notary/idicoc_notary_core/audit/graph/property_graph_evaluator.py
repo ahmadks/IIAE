@@ -59,6 +59,32 @@ class PropertyGraphEvaluator:
             return 0.0
         return min(1.0, weighted_penalty / total_weight)
 
+    def get_violated_policies(self, y: Any) -> List[Dict[str, Any]]:
+        """
+        Retorna la lista de políticas violadas (con penalización > 0).
+        """
+        violated = []
+        policies = [ax for ax in self.graph.nodes.values() if ax.get("policy_type") != "temporal"]
+        if not policies:
+            return violated
+
+        y_tokens = self._tokenize(self._to_str(y))
+        y_vec = self._to_vec(y)
+
+        for ax in policies:
+            if not self._policy_matches_mode(ax, y):
+                continue
+
+            raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
+            if raw_penalty > 0.0:
+                violated.append({
+                    "id": ax.get("id"),
+                    "text": ax.get("text", ax.get("description", "")),
+                    "hardness": ax.get("hardness", "hard"),
+                    "penalty": raw_penalty
+                })
+        return violated
+
     # ──────────────────────────────────────────────────────────────────────────
     # compute_temporal(y) — dissonancia temporal
     # ──────────────────────────────────────────────────────────────────────────

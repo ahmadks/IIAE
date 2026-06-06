@@ -355,13 +355,46 @@ class IDICOCPipeline:
 
             y_corrected_for_metrics = audit_input if admitted else y_corrected_for_metrics
 
+            # 5. Evaluate logical and context dissonance
+            from idicoc_notary_core.audit.graph.property_graph_evaluator import (
+                PropertyGraphEvaluator,
+            )
+
+            evaluator = PropertyGraphEvaluator(self.graph)
+            d_logic = evaluator.evaluate(y_corrected_for_metrics)
+
+            d_context = 0.0
+            contradictory_contexts = []
+            if context_input and hasattr(
+                self.dissonance_strategy, "_compute_context_contradiction"
+            ):
+                d_context, contradictory_contexts = (
+                    self.dissonance_strategy._compute_context_contradiction(
+                        y_corrected_for_metrics, context_input
+                    )
+                )
+
+            # Compute violated policies
+            violated_list = []
+            try:
+                violated_nodes = evaluator.get_violated_policies(y_corrected_for_metrics)
+                for vn in violated_nodes:
+                    violated_list.append(f"{vn['id']}: {vn['text']} ({vn['hardness'].upper()})")
+            except Exception as ex:
+                self.logger.warning(f"Error computing violated policies: {ex}")
+
+            if d_context > 0.4:
+                for ctx_text in contradictory_contexts:
+                    violated_list.append(f"Contradicción RAG: {ctx_text} (SOFT)")
+
             # 6. AEM (Hebra segura mediante Lock de exclusión mutua)
             aem_record = {
                 "d_s": D_s,
                 "d_f": D_f,
                 "epsilon": epsilon_used,
                 "correction_flag": correction_flag,
-                "violated_policies": [],
+                "violated_policies": violated_list,
+                "user_input": user_input,
                 "audit_input": (
                     str(audit_input) if isinstance(audit_input, np.ndarray) else audit_input
                 ),
@@ -381,24 +414,6 @@ class IDICOCPipeline:
                 v_hat_payload = v_hat_payload.tolist()
             invariant_hash = sha256_hex(canonical_json(v_hat_payload))
             graph_hash = sha256_hex(canonical_json(self.graph.nodes))
-
-            from idicoc_notary_core.audit.graph.property_graph_evaluator import (
-                PropertyGraphEvaluator,
-            )
-
-            evaluator = PropertyGraphEvaluator(self.graph)
-            d_logic = evaluator.evaluate(y_corrected_for_metrics)
-
-            d_context = 0.0
-            contradictory_contexts = []
-            if context_input and hasattr(
-                self.dissonance_strategy, "_compute_context_contradiction"
-            ):
-                d_context, contradictory_contexts = (
-                    self.dissonance_strategy._compute_context_contradiction(
-                        y_corrected_for_metrics, context_input
-                    )
-                )
 
             from idicoc_notary_core.utils.data_converter import DataConverter
 
@@ -433,6 +448,7 @@ class IDICOCPipeline:
                 },
                 "audit_metrics": {"d_s": D_s, "d_logic": d_logic},
                 "admission_breach": not admitted,
+                "violated_policies": violated_list,
                 "instance_name": self.config.instance_name,
                 "client_id": client_id or self.config.client_id,
                 "trace_input": trace_input or self.config.trace_input,

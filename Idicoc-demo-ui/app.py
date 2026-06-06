@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
+import logging
 
 # ── Path del core ─────────────────────────────────────────────────────────────
 sys.path.insert(
@@ -33,6 +34,30 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Captura de Logs para el Visor ─────────────────────────────────────────────
+class MemoryLogHandler(logging.Handler):
+    def __init__(self, log_list):
+        super().__init__()
+        self.log_list = log_list
+        self.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.log_list.append(msg)
+            if len(self.log_list) > 100:
+                self.log_list.pop(0)
+        except Exception:
+            self.handleError(record)
+
+if "notary_logs" not in st.session_state:
+    st.session_state.notary_logs = []
+
+iiae_logger = logging.getLogger("IIAE")
+iiae_logger.handlers = [h for h in iiae_logger.handlers if not isinstance(h, MemoryLogHandler)]
+iiae_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
+iiae_logger.setLevel(logging.INFO)
 
 # Estilos Premium (Outfit/Inter, Dark Theme, Glassmorphism)
 st.markdown(
@@ -218,6 +243,25 @@ with st.sidebar:
     epsilon = st.slider("Umbral de Tolerancia (ε)", 0.01, 1.00, 0.20, 0.01)
     st.session_state.epsilon = epsilon
 
+    st.markdown("---")
+    st.markdown("### 📄 Simular Contexto RAG")
+    rag_presets = {
+        "Sin Contexto (Vacío)": "",
+        "Información Financiera (Saldo)": "El saldo actual de la cuenta del usuario es USD 2,500.\nTodas las cuentas se encuentran validadas y activas.",
+        "Verificación de Identidad": "Para verificar la identidad del cliente, se requiere token digital y clave SMS.\nEl canal de atención telefónica está disponible de lunes a viernes.",
+        "Advertencia de Rentabilidad": "El banco ofrece fondos de inversión de renta fija y variable.\nNo se garantizan rentabilidades futuras de renta variable.",
+    }
+    selected_preset = st.selectbox("Escenarios RAG predefinidos", list(rag_presets.keys()))
+    preset_val = rag_presets[selected_preset]
+    
+    rag_context = st.text_area(
+        "Ingresar contexto recuperado (context_input)", 
+        value=preset_val, 
+        placeholder="Escribe el contexto aquí...",
+        help="Simula documentos recuperados por RAG para la validación coalgebraica."
+    )
+    st.session_state.context_list = [line.strip() for line in rag_context.split("\n") if line.strip()] if rag_context.strip() else None
+
     model_mode = st.radio("🤖 Proveedor LLM", ["Simulado (Ligero / Seguro)", "Real (Phi-3.5-mini local)"])
     
     llm_provider = None
@@ -263,13 +307,23 @@ with st.sidebar:
     st.markdown("---")
     # Mostrar políticas cargadas
     policies = []
-    if os.path.exists(_pol_path):
-        with open(_pol_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip() and not line.startswith("#"):
-                    parts = line.split("|")
-                    if len(parts) >= 2:
-                        policies.append((parts[0], parts[1], parts[4] if len(parts) > 4 else "soft"))
+    loader = None
+    if "notary_client" in st.session_state and st.session_state.notary_client.config.policy_loader:
+        loader = st.session_state.notary_client.config.policy_loader
+    elif os.path.exists(_pol_path):
+        from idicoc_notary_core.audit.graph.loader import FilePolicyLoader
+        loader = FilePolicyLoader(_pol_path)
+    
+    if loader:
+        try:
+            loaded = loader.load_policies()
+            for p in loaded:
+                pid = p.get("policy_id") or p.get("id") or "N/A"
+                ptext = p.get("text") or "Regla sin descripción"
+                phard = p.get("hardness") or "soft"
+                policies.append((pid, ptext, phard))
+        except Exception as e:
+            st.error(f"Error cargando reglas de políticas: {e}")
                         
     with st.expander(f"Reglas del Notario ({len(policies)})", expanded=False):
         for pid, ptext, phard in policies:
@@ -423,6 +477,7 @@ with col_chat:
                 audit_result = st.session_state.notary_client.process_interaction(
                     audit_input=payload,
                     user_input=user_msg,
+                    context_input=st.session_state.get("context_list"),
                     epsilon_override=epsilon,
                 )
                 
@@ -448,17 +503,17 @@ with col_chat:
                 
                 # Identificar la política específica violada en caso de rechazo
                 violated_policy = None
+                rejection_reason = None
                 if status == "REJECTED":
-                    # Usamos el PropertyGraphEvaluator para identificar la regla específica con penalización
-                    evaluator = PropertyGraphEvaluator(st.session_state.notary_client.pipeline.graph)
-                    for node_id, node in st.session_state.notary_client.pipeline.graph.nodes.items():
-                        if evaluator._policy_matches_mode(node, assistant_res):
-                            y_tokens = evaluator._tokenize(evaluator._to_str(assistant_res))
-                            y_vec = evaluator._to_vec(assistant_res)
-                            penalty = evaluator._logical_penalty(assistant_res, y_tokens, y_vec, node)
-                            if penalty > 0:
-                                violated_policy = f"{node_id} | \"{node.get('text', '')}\""
-                                break
+                    violated_policies = audit_result.metadata.get("violated_policies") or []
+                    violated_policy = ", ".join(violated_policies) if violated_policies else "Desviación/Disonancia alta"
+                    
+                    if float('inf') in (d_s, d_2):
+                        rejection_reason = "Violación de una política de seguridad estricta (HARD)."
+                    elif violated_policies:
+                        rejection_reason = f"Disonancia total ({d_s:.4f}) superó el umbral de tolerancia (ε={epsilon:.2f})."
+                    else:
+                        rejection_reason = f"Desviación semántica alta ({d_s:.4f}) respecto al invariante (ε={epsilon:.2f})."
 
                 # Guardar auditoría en historial
                 st.session_state.chat_history.append({
@@ -473,6 +528,7 @@ with col_chat:
                     "root_hash": st.session_state.notary_client.pipeline.ctm.root_hash or "GENESIS",
                     "timestamp": audit_result.timestamp,
                     "violated_policy": violated_policy,
+                    "rejection_reason": rejection_reason,
                     "aem_total": aem_total,
                     "aem_valid": aem_valid,
                     "aem_rejected": aem_rejected
@@ -522,10 +578,13 @@ with col_telemetry:
         )
         
         # Si hay políticas específicas que causaron el rechazo, listarlas
-        if status == "REJECTED" and last_audit.get("violated_policy"):
+        if status == "REJECTED":
+            reason = last_audit.get("rejection_reason") or "Desviación con respecto a las políticas del Notario."
+            vp = last_audit.get("violated_policy")
+            vp_html = f"<br>❌ <b>Política(s) Violada(s)</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{vp}</span>" if vp else ""
             st.markdown(
                 f"<div style='background-color:rgba(239, 68, 68, 0.1); border:1px solid #EF4444; border-radius:5px; padding:10px; font-size:12px; margin-bottom:8px;'>"
-                f"❌ <b>Política Violada</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{last_audit['violated_policy']}</span>"
+                f"⚠️ <b>Motivo del Rechazo:</b> {reason}{vp_html}"
                 f"</div>",
                 unsafe_allow_html=True
             )
@@ -628,18 +687,10 @@ with col_telemetry:
             else:
                 curr = None
                 
-        for idx, block in enumerate(chain):
-            card_class = "block-card"
-            badge_text = "VÁLIDO"
-            badge_style = "background-color: #10b981; color: white;"
-            
-            # Si el bloque está marcado como alterado o es descendiente de uno alterado
-            # (En Merkle, si alteras un bloque, rompe todos los bloques posteriores)
-            # Encontramos si algún ancestro fue saboteado.
-            # Como la lista chain va desde el root (último) al genesis (primero),
-            # si algún bloque posterior en la lista (más antiguo) está alterado, este se invalida.
+        if chain:
+            block = chain[0]
             is_broken = False
-            for b_old in chain[idx:]:
+            for b_old in chain:
                 if b_old["tampered"]:
                     is_broken = True
                     break
@@ -648,6 +699,10 @@ with col_telemetry:
                 card_class = "block-card tampered"
                 badge_text = "⚠️ CORRUPTO"
                 badge_style = "background-color: #ef4444; color: white;"
+            else:
+                card_class = "block-card"
+                badge_text = "VÁLIDO"
+                badge_style = "background-color: #10b981; color: white;"
                 
             d_val = block["dissonance"]
             if d_val is None:
@@ -661,7 +716,7 @@ with col_telemetry:
                 st.markdown(
                     f"<div class='{card_class}'>"
                     f"<div style='display:flex; justify-content:space-between;'>"
-                    f"<span><b>Bloque #{len(chain)-idx}</b> ({block['type']})</span>"
+                    f"<span><b>Último Bloque #{len(chain)}</b> ({block['type']})</span>"
                     f"<span style='{badge_style} font-size:10px; padding:2px 6px; border-radius:3px;'>{badge_text}</span>"
                     f"</div>"
                     f"<small>Hash: <span style='font-family:\"JetBrains Mono\"'>{block['hash'][:24]}...</span></small><br>"
@@ -670,13 +725,39 @@ with col_telemetry:
                     f"</div>",
                     unsafe_allow_html=True
                 )
+
+    # ── Casos del AEM (Audit Entropy Module) ──────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📋 Casos Registrados en AEM")
+    if "notary_client" in st.session_state and st.session_state.notary_client.pipeline:
+        aem_trail = st.session_state.notary_client.pipeline.aem.get_audit_trail()
+        if not aem_trail:
+            st.info("No se han registrado rechazos o violaciones en el AEM aún.")
+        else:
+            for idx, case in enumerate(reversed(aem_trail)):
+                d_s_val = case.get("d_s", 0.0)
+                d_s_text = "∞" if d_s_val == float("inf") else f"{d_s_val:.4f}"
+                user_in = case.get("user_input") or "N/A"
                 
-                # Botón de alteración en el bloque si es un COMMIT y está válido
-                if block["type"] == "COMMIT" and not block["tampered"]:
-                    if st.button(f"⚡ Sabotear Bloque #{len(chain)-idx}", key=f"tamper_{block['hash']}"):
-                        st.session_state.tampered_nodes.add(block["hash"])
-                        st.error(f"💥 ¡Ataque de Alteración Simulado en el Bloque #{len(chain)-idx}! El hash de integridad se ha roto.")
-                        st.rerun()
+                audit_in = case.get("audit_input")
+                output_text = "N/A"
+                if audit_in:
+                    output_text = getattr(audit_in, "text_content", getattr(audit_in, "source_text", str(audit_in)))
+                
+                vps = case.get("violated_policies") or []
+                vps_text = ", ".join(vps) if vps else "Desviación/Disonancia alta"
+                
+                st.markdown(
+                    f"<div style='background-color:#1e293b; padding:12px; border-radius:8px; border:1px solid #ef4444; margin-bottom:8px;'>"
+                    f"<b>Caso #{len(aem_trail)-idx}</b> - <span style='color:#ef4444; font-weight:bold;'>RECHAZADO</span><br>"
+                    f"<small>Fecha: {case.get('timestamp', '')[:19]}</small><br>"
+                    f"💬 <b>Input Usuario:</b> {user_in}<br>"
+                    f"🤖 <b>Output Interceptado:</b> {output_text}<br>"
+                    f"📊 <b>Disonancia:</b> {d_s_text}<br>"
+                    f"❌ <b>Políticas Violadas:</b> {vps_text}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
 
 # ── Detalle del Último Análisis de Auditoría (Expander) ───────────────────────
 st.markdown("---")
@@ -685,6 +766,13 @@ with st.expander("📊 Explicabilidad Detallada de la Notaría (Última Transacc
         st.json(st.session_state.last_audit_details)
     else:
         st.info("Envíe mensajes para desplegar el análisis matemático de la auditoría.")
+
+with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
+    log_text = "\n".join(st.session_state.notary_logs)
+    if not log_text:
+        st.markdown("<div class='term'>Sin mensajes de log registrados en esta sesión.</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='term'>{log_text}</div>", unsafe_allow_html=True)
 
 # ── Exportación Forense ───────────────────────────────────────────────────────
 if st.session_state.chat_history:
