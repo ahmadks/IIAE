@@ -21,9 +21,9 @@ import logging
 sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"))
 )
-from idicoc_core.audit.config import AuditConfig
-from idicoc_core.audit.wrapper_pipeline import IDICOCNotaryClient, SemanticPayload
-from idicoc_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
+from idicoc_core.config import AuditConfig
+from idicoc_core.compat import IDICOCNotaryClient, SemanticPayload
+from idicoc_core.dse.evaluator import PropertyGraphEvaluator
 from providers.factory import get_provider
 from idicoc_core.utils.hashing import sha256_dict, sha256_hex
 
@@ -311,7 +311,7 @@ with st.sidebar:
     if "notary_client" in st.session_state and st.session_state.notary_client.config.policy_loader:
         loader = st.session_state.notary_client.config.policy_loader
     elif os.path.exists(_pol_path):
-        from idicoc_core.audit.graph.loader import FilePolicyLoader
+        from idicoc_core.isg.loader import FilePolicyLoader
         loader = FilePolicyLoader(_pol_path)
     
     if loader:
