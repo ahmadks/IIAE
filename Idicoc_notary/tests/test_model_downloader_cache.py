@@ -55,7 +55,25 @@ def test_model_downloader_respects_force_update(mock_model, mock_tok, mock_st):
  
  
 @patch("huggingface_hub.snapshot_download")
-def test_ensure_phi_downloaded_respects_cache(mock_snapshot):
+@patch("providers.model_downloader.Path")
+def test_ensure_phi_downloaded_respects_cache(mock_path, mock_snapshot):
+    # Mock Path constructor and parent-child target folder structure
+    mock_parent = MagicMock()
+    mock_target_dir = MagicMock()
+    mock_parent.__truediv__.return_value = mock_target_dir
+    mock_path.return_value = mock_parent
+    
+    # local_target_dir properties
+    mock_target_dir.exists.return_value = True
+    mock_target_dir.iterdir.return_value = [MagicMock()] # non-empty
+    mock_target_dir.glob.return_value = [MagicMock()] # non-empty weight files list
+    
+    # Subpath calls (like index or .cache) return mock_subpath which does not exist
+    mock_subpath = MagicMock()
+    mock_subpath.exists.return_value = False
+    mock_subpath.__truediv__.return_value = mock_subpath
+    mock_target_dir.__truediv__.return_value = mock_subpath
+
     # Test Phi downloader uses local_files_only=True first
     ensure_phi_downloaded(cache_dir="test_models_cache", force_update=False)
     
@@ -64,6 +82,7 @@ def test_ensure_phi_downloaded_respects_cache(mock_snapshot):
     _, kwargs = mock_snapshot.call_args
     assert kwargs["local_files_only"] is True
     assert kwargs["repo_id"] == "microsoft/Phi-3.5-mini-instruct"
+
  
  
 @patch("huggingface_hub.snapshot_download")

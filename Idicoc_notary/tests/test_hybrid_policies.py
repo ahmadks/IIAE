@@ -29,9 +29,33 @@ def test_unified_evaluation():
     # Context RAG y politicas híbridos
     context_input = ["El cielo es azul en un dia despejado."]
     context_policies = [
-        "ax_num_1|El primer bin no puede superar 0.5|numeric|negative|hard|10|index=0|max=0.5",
-        'ax_regex_1|No puede haber espacios|regex|negative|hard|5|pattern="\\s"',
-        "ax_sem_1|El texto debe hablar de clima|semantic|affirmative|soft|5",
+        {
+            "id": "ax_num_1",
+            "text": "El primer bin no puede superar 0.5",
+            "policy_type": "numeric",
+            "polarity": "negative",
+            "hardness": "hard",
+            "priority": 10,
+            "index": 0,
+            "max": 0.5,
+        },
+        {
+            "id": "ax_regex_1",
+            "text": "No puede haber espacios",
+            "policy_type": "regex",
+            "polarity": "negative",
+            "hardness": "hard",
+            "priority": 5,
+            "pattern": "\\s",
+        },
+        {
+            "id": "ax_sem_1",
+            "text": "El texto debe hablar de clima",
+            "policy_type": "semantic",
+            "polarity": "affirmative",
+            "hardness": "soft",
+            "priority": 5,
+        },
     ]
 
     pipeline.initialize()

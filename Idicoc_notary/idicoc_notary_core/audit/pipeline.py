@@ -15,11 +15,11 @@ from idicoc_notary_core.kernel.manifold.cmc import ManifoldConstructor
 from idicoc_notary_core.kernel.projection import InvariantStateGenerator
 from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
 from idicoc_notary_core.kernel.verification.verifier import InvariantVerifier
-from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
 from idicoc_notary_core.utils.logger import get_logger
-from idicoc_notary_core.audit.graph.loader.file_loader import split_policy_line
+from idicoc_notary_core.utils.hashing import canonical_json, sha256_hex
+from idicoc_notary_core.audit.graph.loader.file_loader import parse_policy_line
 
-from .base import CanonicalStateDTO
+from idicoc_notary_core.base import CanonicalStateDTO
 from .persistence.file_backend import FileCTMStorage
 from .config import AuditConfig
 from .exceptions import WrapperInitializationError
@@ -276,57 +276,10 @@ class IDICOCPipeline:
                             or f"dynamic_policy_{idx}"
                         )
                     elif isinstance(ax_item, str):
-                        parts = split_policy_line(ax_item)
-                        if not parts or not parts[0]:
-                            continue
-
-                        has_id = len(parts) >= 6 and "=" not in parts[0]
-                        if has_id:
-                            policy_id = parts[0]
-                            text = parts[1]
-                            policy_type = parts[2] if len(parts) > 2 else "fact"
-                            polarity = parts[3] if len(parts) > 3 else "affirmative"
-                            hardness = parts[4] if len(parts) > 4 else "soft"
-                            try:
-                                priority = int(parts[5]) if len(parts) > 5 else 1
-                            except ValueError:
-                                priority = 1
-                            extra_parts = parts[6:]
-                        else:
-                            policy_id = f"dynamic_policy_{idx}"
-                            text = parts[0]
-                            policy_type = parts[1] if len(parts) > 1 else "fact"
-                            polarity = parts[2] if len(parts) > 2 else "affirmative"
-                            hardness = parts[3] if len(parts) > 3 else "soft"
-                            try:
-                                priority = int(parts[4]) if len(parts) > 4 else 1
-                            except ValueError:
-                                priority = 1
-                            extra_parts = parts[5:]
-
-                        policy_dict: dict[str, Any] = {
-                            "id": policy_id,
-                            "policy_id": policy_id,
-                            "text": text,
-                            "policy_type": policy_type,
-                            "polarity": polarity,
-                            "hardness": hardness,
-                            "priority": priority,
-                            "source_text": text,
-                        }
-                        # Parse key=value metadata
-                        for ep in extra_parts:
-                            if "=" in ep:
-                                k, v = ep.split("=", 1)
-                                k = k.strip()
-                                v = v.strip().strip("'\"")
-                                if v.isdigit():
-                                    policy_dict[k] = int(v)
-                                else:
-                                    try:
-                                        policy_dict[k] = float(v)
-                                    except ValueError:
-                                        policy_dict[k] = v
+                        policy_dict = parse_policy_line(ax_item, idx)
+                        policy_id = policy_dict["id"]
+                        policy_dict["source"] = f"dynamic_policy_{idx+1}"
+                        policy_dict["source_text"] = policy_dict["text"]
                     else:
                         continue
 

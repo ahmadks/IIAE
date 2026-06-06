@@ -1,30 +1,73 @@
+import hashlib
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 import json
 import os
-from datetime import datetime, timezone
 from idicoc_notary_core.utils.logger import get_logger
 
 logger = get_logger("audit.policy_loader.file_loader")
 
 
-def split_policy_line(line: str) -> List[str]:
-    """Split a policy line on unescaped delimiters while preserving regex values."""
-    parts = [p.strip() for p in line.split("|")]
-    if len(parts) <= 7:
-        return parts
+def parse_policy_line(line: str, line_idx: int) -> Dict[str, Any]:
+    # 1. Inferencia de Dureza
+    hardness = "soft"
+    if "[HARD]" in line.upper():
+        hardness = "hard"
+        line = re.sub(r"\[HARD\]", "", line, flags=re.IGNORECASE).strip()
+    elif "[SOFT]" in line.upper():
+        line = re.sub(r"\[SOFT\]", "", line, flags=re.IGNORECASE).strip()
 
-    for idx, part in enumerate(parts[6:], start=6):
-        if part.startswith("pattern="):
-            return parts[:idx] + ["|".join(parts[idx:])]
-    return parts
+    # 2. Detección / Inferencia de Tipo de Política y Patrón
+    policy_type = "fact"
+    pattern = None
+    regex_match = re.search(r"\[REGEX:\s*(.*?)\s*\]", line, flags=re.IGNORECASE)
+    if regex_match:
+        policy_type = "regex"
+        pattern = regex_match.group(1).strip()
+        line = re.sub(r"\[REGEX:.*?\]", "", line, flags=re.IGNORECASE).strip()
+
+    # 3. Inferencia de Polaridad
+    polarity = "affirmative"
+    if "[NEGATIVE]" in line.upper():
+        polarity = "negative"
+        line = re.sub(r"\[NEGATIVE\]", "", line, flags=re.IGNORECASE).strip()
+    elif "[AFFIRMATIVE]" in line.upper():
+        polarity = "affirmative"
+        line = re.sub(r"\[AFFIRMATIVE\]", "", line, flags=re.IGNORECASE).strip()
+    else:
+        # Auto-detect using negatives keyword list
+        negation_pattern = re.compile(
+            r"\b(no|evitar|evite|prohibido|prohíbe|prohibir|nunca|jamás|ni|sin|avoid|never|forbidden|reject|not)\b",
+            re.IGNORECASE
+        )
+        if negation_pattern.search(line) or (policy_type == "regex" and not line.strip()):
+            polarity = "negative"
+
+    # 4. ID Determinista
+    text_to_hash = line if line.strip() else (pattern or "")
+    text_hash = hashlib.sha256(text_to_hash.encode("utf-8")).hexdigest()[:8]
+    policy_id = f"free_text_{line_idx+1}_{text_hash}"
+
+    policy = {
+        "id": policy_id,
+        "policy_id": policy_id,
+        "text": line if line.strip() else (pattern or "Regex constraint"),
+        "policy_type": policy_type,
+        "polarity": polarity,
+        "hardness": hardness,
+        "priority": 1,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    if pattern:
+        policy["pattern"] = pattern
+
+    return policy
 
 
 class FilePolicyLoader:
     """
-    Cargador de politicas desde un archivo (texto delimitado por '|' o JSON).
-
-    Formato delimitado:
-    texto | tipo | polaridad | dureza | prioridad
+    Cargador de políticas desde un archivo en lenguaje natural (texto libre) o JSON.
     """
 
     def __init__(self, file_path: str) -> None:
@@ -58,72 +101,17 @@ class FilePolicyLoader:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 for line_idx, line in enumerate(f):
                     line = line.strip()
-                    # Skip empty lines and comments
                     if not line or line.startswith("#"):
                         continue
-
-                    parts = split_policy_line(line)
-                    if not parts or not parts[0]:
-                        continue
-
-                    # Determinar si el formato tiene ID (al menos 6 campos y el primero no contiene '=')
-                    has_id = len(parts) >= 6 and "=" not in parts[0]
-
-                    if has_id:
-                        policy_id = parts[0]
-                        text = parts[1]
-                        policy_type = parts[2] if len(parts) > 2 else "fact"
-                        polarity = parts[3] if len(parts) > 3 else "affirmative"
-                        hardness = parts[4] if len(parts) > 4 else "soft"
-                        try:
-                            priority = int(parts[5]) if len(parts) > 5 else 1
-                        except ValueError:
-                            priority = 1
-                        extra_parts = parts[6:]
-                    else:
-                        policy_id = None
-                        text = parts[0]
-                        policy_type = parts[1] if len(parts) > 1 else "fact"
-                        polarity = parts[2] if len(parts) > 2 else "affirmative"
-                        hardness = parts[3] if len(parts) > 3 else "soft"
-                        try:
-                            priority = int(parts[4]) if len(parts) > 4 else 1
-                        except ValueError:
-                            priority = 1
-                        extra_parts = parts[5:]
-
-                    timestamp = datetime.now(timezone.utc).isoformat()
-
-                    policy: Dict[str, Any] = {
-                        "text": text,
-                        "policy_type": policy_type,
-                        "polarity": polarity,
-                        "hardness": hardness,
-                        "priority": priority,
-                        "timestamp": timestamp,
-                        "source": f"file:{os.path.basename(self.file_path)}:{line_idx+1}",
-                        "source_text": text,
-                    }
-                    if policy_id:
-                        policy["id"] = policy_id
-                        policy["policy_id"] = policy_id
-
-                    # Parse key=value metadata
-                    for ep in extra_parts:
-                        if "=" in ep:
-                            k, v = ep.split("=", 1)
-                            k = k.strip()
-                            v = v.strip().strip("'\"")
-                            if v.isdigit():
-                                policy[k] = int(v)
-                            else:
-                                try:
-                                    policy[k] = float(v)
-                                except ValueError:
-                                    policy[k] = v
-
-                    policies.append(policy)
+                    
+                    policies.append(self._parse_policy(line, line_idx))
         except Exception as e:
             logger.error(f"Error reading text policy file {self.file_path}: {e}")
-
         return policies
+
+    def _parse_policy(self, line: str, line_idx: int) -> Dict[str, Any]:
+        p = parse_policy_line(line, line_idx)
+        p["source"] = f"file:{os.path.basename(self.file_path)}:{line_idx+1}"
+        return p
+
+

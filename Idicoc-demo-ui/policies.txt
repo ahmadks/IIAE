@@ -1,12 +1,10 @@
-# POLÍTICAS UNIFICADAS DEL NOTARIO IDICOC
-# Formato: ID|Texto_descriptivo|Tipo(regex/semantic)|Polaridad(affirmative/negative)|Dureza(hard/soft)|Peso|[Opcional: key=value]
+# POLÍTICAS EN LENGUAJE NATURAL DEL NOTARIO IDICOC
+# Escribe cada política en una línea.
+# Usa el prefijo [HARD] para forzar rechazo inmediato en caso de violación.
+# Por defecto, la política es de tipo [SOFT].
 
-# ── 1. Restricciones numéricas / regex para vectores ─────────────────────────
-ax_regex_1|El primer bin no puede ser mayor que 0.5|regex|negative|hard|10|mode=numeric|pattern=^\s*\[\s*(?:0\.(?:[6-9]\d*|5\d+)|1(?:\.0*)?)\s*(?:,|\])
-ax_regex_2|La longitud del vector debe ser exactamente 4 bins|regex|affirmative|hard|10|mode=numeric|pattern=^\s*\[\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+\s*\]$
-ax_regex_3|Todos los valores del vector deben estar entre 0 y 1|regex|affirmative|hard|10|mode=numeric|pattern=^\s*\[\s*(?:0(?:\.\d+)?|1(?:\.0*)?)(?:\s*,\s*(?:0(?:\.\d+)?|1(?:\.0*)?))*\s*\]$
-
-# ── 2. Axiomas Semánticos Fundamentales ───────────────────────────────────────
-ax_sem_1|El IIAE es un Notario, debe actuar con estricta neutralidad, objetividad e imparcialidad.|semantic|affirmative|hard|10|mode=semantic
-ax_sem_2|El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.|semantic|affirmative|soft|5|mode=semantic
-ax_sem_3|El texto libre no puede contener insultos genéricos (ej: basura)|regex|negative|hard|10|mode=semantic|pattern=basura
+El IIAE es un Notario y debe actuar con estricta neutralidad, objetividad e imparcialidad.
+El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.
+[HARD] [REGEX: basura] No use la palabra basura en sus consultas.
+[HARD] [REGEX: bloqueame] No use la palabra bloqueame en sus consultas.
+[SOFT] [REGEX: lento] Evite quejas sobre la velocidad o lentitud del sistema.

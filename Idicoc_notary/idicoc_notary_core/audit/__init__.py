@@ -6,10 +6,11 @@ Exporta el auditor genérico, contratos y estrategias de disonancia.
 
 from __future__ import annotations
 
-from .base import (
+from idicoc_notary_core.base import (
     CanonicalStateDTO,
     IIAENotaryContract,
 )
+
 from .config import AuditConfig
 from .exceptions import ComplianceBreach, WrapperInitializationError
 from .ctm_client import KernelCustodyClient

@@ -94,7 +94,16 @@ def test_logic_service_with_incompatible_distribution():
     audit_distribution = np.array([-0.5, 0.8, 0.7])
     audit_input = MockAuditInput(audit_distribution)
     policy_input = [
-        "ax_negative|No negative weights are allowed|regex|negative|hard|10|mode=numeric|pattern=-"
+        {
+            "id": "ax_negative",
+            "text": "No negative weights are allowed",
+            "policy_type": "regex",
+            "polarity": "negative",
+            "hardness": "hard",
+            "priority": 10,
+            "mode": "numeric",
+            "pattern": "-",
+        }
     ]
 
     from idicoc_notary_core.audit import SemanticPayload

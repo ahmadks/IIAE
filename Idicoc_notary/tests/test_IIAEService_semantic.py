@@ -70,7 +70,7 @@ def test_semantic_service_with_hard_violation():
 
     audit_input = "Transfer 60000.00 euros, exceeding the limit."
     policy_input = [
-        "ax_violation|No transfer may exceed 50000.00 euros|regex|negative|hard|10|mode=semantic|pattern=60000\\.00"
+        "[HARD] No transfer may exceed 50000.00 euros."
     ]
 
     from idicoc_notary_core.audit import SemanticPayload

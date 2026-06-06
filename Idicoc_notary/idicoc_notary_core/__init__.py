@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from .base import (
+    CanonicalStateDTO,
+    IIAENotaryContract,
+)
 from .audit import (
     AuditConfig,
     PolicyLoader,
@@ -10,14 +14,13 @@ from .audit import (
     GraphCache,
     NoOpGraphCache,
     RedisGraphCache,
-    CanonicalStateDTO,
     IDICOCPipeline,
     IDICOCNotaryClient,
-    IIAENotaryContract,
     KernelCustodyClient,
     DissonanceStrategy,
     WrapperInitializationError,
 )
+
 
 __all__ = [
     "AuditConfig",

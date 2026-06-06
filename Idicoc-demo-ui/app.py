@@ -163,6 +163,10 @@ def load_real_phi(model_path, embedding_model_name):
 # ── Inicializar Estado ────────────────────────────────────────────────────────
 _pol_path = os.path.join(os.path.dirname(__file__), "policies.txt")
 
+current_mtime = 0.0
+if os.path.exists(_pol_path):
+    current_mtime = os.path.getmtime(_pol_path)
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "injected_attack" not in st.session_state:
@@ -173,6 +177,16 @@ if "last_audit_details" not in st.session_state:
     st.session_state.last_audit_details = None
 if "last_processed_query" not in st.session_state:
     st.session_state.last_processed_query = None
+if "pending_query" not in st.session_state:
+    st.session_state.pending_query = None
+if "policies_mtime" not in st.session_state:
+    st.session_state.policies_mtime = current_mtime
+
+# Detectar cambios en las políticas en disco
+policies_changed = False
+if st.session_state.policies_mtime != current_mtime:
+    policies_changed = True
+    st.session_state.policies_mtime = current_mtime
 
 # ── Configurar Barra Lateral ──────────────────────────────────────────────────
 with st.sidebar:
@@ -200,8 +214,8 @@ with st.sidebar:
     else:
         llm_provider = SimulatedPhiProvider("sentence-transformers/all-MiniLM-L6-v2")
 
-    # Inicializar Notario con config y provider
-    if "notary_client" not in st.session_state or st.session_state.get("current_provider") != model_mode:
+    # Inicializar Notario con config y provider (se recrea si cambia el proveedor o se modifican las políticas)
+    if "notary_client" not in st.session_state or st.session_state.get("current_provider") != model_mode or policies_changed:
         try:
             config = AuditConfig(
                 policy_file_path=_pol_path,
@@ -211,14 +225,17 @@ with st.sidebar:
             )
             st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
             st.session_state.current_provider = model_mode
+            st.session_state.policies_mtime = current_mtime
         except Exception as e:
             st.error(f"Error inicializando notario: {e}")
+
 
     st.markdown("---")
     st.markdown("### 💥 Test de Fricción")
     if st.button("Simular Ataque: Inyectar instrucción prohibida", type="primary", use_container_width=True):
         st.session_state.injected_attack = True
         st.session_state.last_processed_query = None
+        st.session_state.pending_query = None
         st.rerun()
 
     st.markdown("---")
@@ -246,6 +263,7 @@ with st.sidebar:
         st.session_state.injected_attack = False
         st.session_state.last_audit_details = None
         st.session_state.last_processed_query = None
+        st.session_state.pending_query = None
         # Limpiar ledger recreando el pipeline
         try:
             config = AuditConfig(
@@ -255,9 +273,11 @@ with st.sidebar:
                 instance_name="audit_forensic_chatbot",
             )
             st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
+            st.session_state.policies_mtime = current_mtime
         except Exception:
             pass
         st.rerun()
+
 
 # ── Encabezado & KPIs de Salud del Sistema ────────────────────────────────────
 st.markdown("<h1 class='title-font'>🛡️ Monitor de Integridad & Chatbot Premium</h1>", unsafe_allow_html=True)
@@ -317,51 +337,41 @@ with col_chat:
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
                 st.markdown(f'<div class="chat-user"><b>👤 Tú:</b> {msg["content"]}</div>', unsafe_allow_html=True)
-            elif msg["role"] == "audit":
-                status = msg["status"]
-                badge_class = "audit-badge" if status == "ADMITTED" else "audit-badge rejected"
-                d_s_val = msg.get("d_s")
-                d_s_text = "N/A" if d_s_val is None else ("∞" if d_s_val == float("inf") else f"{d_s_val:.5f}")
-                d_1_val = msg.get("d_1")
-                d_1_text = "N/A" if d_1_val is None else f"{d_1_val:.4f}"
-                d_2_val = msg.get("d_2")
-                d_2_text = "N/A" if d_2_val is None else f"{d_2_val:.4f}"
-                d_3_val = msg.get("d_3")
-                d_3_text = "N/A" if d_3_val is None else f"{d_3_val:.4f}"
-                
-                st.markdown(
-                    f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
-                    f'<b>🔍 Notaría IDICOC:</b> '
-                    f'<span class="{badge_class}">{status}</span><br>'
-                    f'<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>'
-                    f'<small>Ledger Tx Hash: <span style="font-family:\"JetBrains Mono\"; font-size:10px;">{msg["hash"][:24]}...</span></small>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-                
-                # Si hay políticas específicas que causaron el rechazo, listarlas
-                if status == "REJECTED" and msg.get("violated_policy"):
-                    st.markdown(
-                        f"<div style='background-color:rgba(239, 68, 68, 0.1); border:1px solid #EF4444; border-radius:5px; padding:10px; font-size:12px; margin-bottom:8px;'>"
-                        f"❌ <b>Política Violada</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{msg['violated_policy']}</span>"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
             elif msg["role"] == "assistant":
                 st.markdown(f'<div class="chat-assistant"><b>🤖 Asistente:</b> {msg["content"]}</div>', unsafe_allow_html=True)
+
+
+    def handle_submit():
+        val = st.session_state.chat_input.strip()
+        if val:
+            st.session_state.pending_query = val
+            st.session_state.chat_input = ""
 
     # Input de chat
     with st.container():
         input_col1, input_col2 = st.columns([0.85, 0.15])
         with input_col1:
-            chat_input_val = st.text_input("Escribe una consulta al chatbot...", value=user_query, key="chat_input", label_visibility="collapsed")
+            st.text_input(
+                "Escribe una consulta al chatbot...", 
+                value=user_query if user_query else "", 
+                key="chat_input", 
+                label_visibility="collapsed",
+                on_change=handle_submit
+            )
         with input_col2:
-            send_btn = st.button("Enviar", use_container_width=True, type="primary")
+            st.button("Enviar", use_container_width=True, type="primary", on_click=handle_submit)
 
-    is_new_query = chat_input_val.strip() and chat_input_val.strip() != st.session_state.get("last_processed_query")
-    if (send_btn or is_new_query) and chat_input_val.strip() and "notary_client" in st.session_state:
-        st.session_state.last_processed_query = chat_input_val.strip()
-        user_msg = chat_input_val.strip()
+    # Determinar consulta a procesar
+    query_to_process = None
+    if forced_response and user_query:
+        query_to_process = user_query
+    elif st.session_state.get("pending_query"):
+        query_to_process = st.session_state.pending_query
+        st.session_state.pending_query = None
+
+    if query_to_process and "notary_client" in st.session_state:
+        st.session_state.last_processed_query = query_to_process
+        user_msg = query_to_process
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
         
         # 1. Generar Respuesta
@@ -462,8 +472,49 @@ with col_chat:
         st.rerun()
 
 with col_telemetry:
+    # ── Última Auditoría IDICOC ───────────────────────────────────────────────
+    st.markdown("### 🛡️ Última Auditoría IDICOC")
+    
+    # Obtener mensajes de auditoría
+    audit_msgs = [m for m in st.session_state.chat_history if m["role"] == "audit"]
+    if audit_msgs:
+        last_audit = audit_msgs[-1]
+        status = last_audit["status"]
+        badge_class = "audit-badge" if status == "ADMITTED" else "audit-badge rejected"
+        d_s_val = last_audit.get("d_s")
+        d_s_text = "N/A" if d_s_val is None else ("∞" if d_s_val == float("inf") else f"{d_s_val:.5f}")
+        d_1_val = last_audit.get("d_1")
+        d_1_text = "N/A" if d_1_val is None else f"{d_1_val:.4f}"
+        d_2_val = last_audit.get("d_2")
+        d_2_text = "N/A" if d_2_val is None else f"{d_2_val:.4f}"
+        d_3_val = last_audit.get("d_3")
+        d_3_text = "N/A" if d_3_val is None else f"{d_3_val:.4f}"
+        
+        st.markdown(
+            f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
+            f'<b>Resultado:</b> <span class="{badge_class}">{status}</span><br>'
+            f'<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>'
+            f'<small>Ledger Tx Hash: <span style="font-family:\'JetBrains Mono\'; font-size:10px;">{last_audit["hash"]}</span></small>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        
+        # Si hay políticas específicas que causaron el rechazo, listarlas
+        if status == "REJECTED" and last_audit.get("violated_policy"):
+            st.markdown(
+                f"<div style='background-color:rgba(239, 68, 68, 0.1); border:1px solid #EF4444; border-radius:5px; padding:10px; font-size:12px; margin-bottom:8px;'>"
+                f"❌ <b>Política Violada</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{last_audit['violated_policy']}</span>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+    else:
+        st.info("Canal inactivo. Envíe un mensaje para iniciar la auditoría en tiempo real.")
+
+    st.markdown("---")
+
     # ── Manifold de Invariancia (Scatter Plot) ────────────────────────────────
     st.markdown("### 📊 Manifold de Invariancia ($D_s$ vs $\varepsilon$)")
+
     
     # Filtrar mensajes de auditoría
     audit_msgs = [m for m in st.session_state.chat_history if m["role"] == "audit"]

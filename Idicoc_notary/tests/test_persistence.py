@@ -3,7 +3,7 @@ import json
 import pytest
 import tempfile
 from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.base import CanonicalStateDTO
+from idicoc_notary_core.base import CanonicalStateDTO
 from idicoc_notary_core.audit.persistence.file_backend import FileCTMStorage
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
 from idicoc_notary_core.kernel.custody.merkle_dag import CustodialTraceManager, MerkleDAG
