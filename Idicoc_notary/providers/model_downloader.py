@@ -180,6 +180,7 @@ def ensure_phi_downloaded(
 
 # Alias backward compatibility
 ensure_llama_downloaded = ensure_phi_downloaded
+ensure_model_downloaded = ensure_phi_downloaded
 
 
 class ModelDownloader:
@@ -187,6 +188,13 @@ class ModelDownloader:
         self.cache_dir = cache_dir
         self.token = token
         _ensure_cache_dir(self.cache_dir)
+
+    def download_model(
+        self,
+        model_name: str = "microsoft/Phi-3.5-mini-instruct",
+        force_update: bool = False,
+    ) -> None:
+        ensure_model_downloaded(model_name, self.cache_dir, self.token, force_update=force_update)
 
     def download_phi(
         self,
@@ -204,4 +212,9 @@ class ModelDownloader:
         self.download_phi(llama_model_name, force_update=force_update)
 
 
-__all__ = ["ensure_phi_downloaded", "ensure_llama_downloaded", "ModelDownloader"]
+__all__ = [
+    "ensure_phi_downloaded",
+    "ensure_llama_downloaded",
+    "ensure_model_downloaded",
+    "ModelDownloader",
+]

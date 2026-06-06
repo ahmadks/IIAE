@@ -23,7 +23,7 @@ sys.path.insert(
 from idicoc_notary_core.audit.config import AuditConfig
 from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient, SemanticPayload
 from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
-from providers.phi_provider import PhiProvider
+from providers.factory import get_provider
 from idicoc_notary_core.utils.hashing import sha256_dict, sha256_hex
 
 # ── Configuración de Página ───────────────────────────────────────────────────
@@ -137,7 +137,7 @@ class SimulatedPhiProvider:
         except Exception:
             pass
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, **kwargs) -> str:
         prompt_lower = prompt.lower()
         if "saldo" in prompt_lower or "cuenta" in prompt_lower:
             return "Su saldo actual en la cuenta corriente es de USD 2,500. El estado es normal y verificado."
@@ -148,14 +148,35 @@ class SimulatedPhiProvider:
         else:
             return f"He recibido su consulta: '{prompt}'. De acuerdo con los datos indexados por RAG, la transacción ha sido confirmada."
 
+    def get_embedding(self, text: str) -> list[float]:
+        if self.embedding_provider is None:
+            import numpy as np
+            import hashlib
+            import struct
+            h = hashlib.sha256(text.encode('utf-8')).digest()
+            floats = []
+            for i in range(384):
+                val = struct.unpack('<f', h[(i*4)%32 : (i*4)%32 + 4])[0]
+                if not np.isfinite(val):
+                    val = 0.1
+                floats.append(val)
+            norm = np.linalg.norm(floats)
+            if norm > 0:
+                floats = [f / norm for f in floats]
+            return floats
+        vec = self.embedding_provider.encode(text)
+        return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+
 @st.cache_resource
-def load_real_phi(model_path, embedding_model_name):
+def load_real_model(provider_type, model_path, embedding_model_name):
     try:
-        provider = PhiProvider(
+        provider = get_provider(
+            provider_type=provider_type,
             model_path=model_path,
             embedding_model_name=embedding_model_name
         )
-        provider._ensure_model()
+        if hasattr(provider, "_ensure_model"):
+            provider._ensure_model()
         return provider, "Listo"
     except Exception as e:
         return None, str(e)
@@ -202,7 +223,8 @@ with st.sidebar:
     llm_provider = None
     if model_mode == "Real (Phi-3.5-mini local)":
         with st.spinner("⏳ Cargando Phi-3.5-mini (Safetensors)..."):
-            llm_provider, status = load_real_phi(
+            llm_provider, status = load_real_model(
+                provider_type="phi",
                 model_path="models_cache/Phi-3.5-mini-instruct",
                 embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
             )

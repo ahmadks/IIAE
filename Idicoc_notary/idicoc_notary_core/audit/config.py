@@ -139,10 +139,15 @@ class AuditConfig:
     input_field_user: str = "user_input"  # Fase 2: User Prompt (instruction) - NUEVO
     input_field_policies: str = "context_policies"  # Fase 1: Políticas para compilación
 
-    # Configuración de Llama para Fase 1 (Cold Loop) y Fase 3 (Hot Loop)
-    llama_model_name: str = "microsoft/Phi-3.5-mini-instruct"
-    llama_tokenizer: Any = None  # Se carga en __post_init__ si es necesario
-    llama_model: Any = None  # Se carga en __post_init__ si es necesario
+    # Configuración del LLM para Fase 1 (Cold Loop) y Fase 3 (Hot Loop)
+    llm_model_name: str = "microsoft/Phi-3.5-mini-instruct"
+    llm_tokenizer: Any = None  # Se carga en __post_init__ si es necesario
+    llm_model: Any = None  # Se carga en __post_init__ si es necesario
+
+    # Campos heredados (llama_*) para compatibilidad con código anterior (Deprecated)
+    llama_model_name: str | None = None
+    llama_tokenizer: Any = None
+    llama_model: Any = None
 
     # Procesador de logits para contención sub-simbólica (Fase 3)
     logits_processor: Any = None  # Se inicializa en __post_init__
@@ -175,6 +180,16 @@ class AuditConfig:
         Implementa Fase 1 (Cold Loop): compilación de políticas → W_bank.
         """
         import os
+        import warnings
+
+        # Sincronización e inferencia para campos heredados (llama_*)
+        if self.llama_model_name is not None:
+            warnings.warn("llama_model_name está deprecado. Use llm_model_name en su lugar.", DeprecationWarning)
+            self.llm_model_name = self.llama_model_name
+        if self.llama_tokenizer is not None:
+            self.llm_tokenizer = self.llama_tokenizer
+        if self.llama_model is not None:
+            self.llm_model = self.llama_model
 
         from idicoc_notary_core.utils.embedding_service import EmbeddingService
 
@@ -297,8 +312,8 @@ class AuditConfig:
                 self.w_bank = {}
                 return
 
-            # Cargar tokenizador de Llama si no está ya cargado
-            if self.llama_tokenizer is None:
+            # Cargar tokenizador del LLM si no está ya cargado
+            if self.llm_tokenizer is None:
                 try:
                     from transformers import AutoTokenizer
 
@@ -307,28 +322,28 @@ class AuditConfig:
                     force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
                     
                     print(
-                        f"[Fase 1 - Cold Loop] Cargando tokenizador Llama: {self.llama_model_name}"
+                        f"[Fase 1 - Cold Loop] Cargando tokenizador LLM: {self.llm_model_name}"
                     )
                     if force_update:
-                        self.llama_tokenizer = AutoTokenizer.from_pretrained(
-                            self.llama_model_name,
+                        self.llm_tokenizer = AutoTokenizer.from_pretrained(
+                            self.llm_model_name,
                             cache_dir="models_cache",
                             token=auth_token,
                             local_files_only=False,
                         )
                     else:
                         try:
-                            self.llama_tokenizer = AutoTokenizer.from_pretrained(
-                                self.llama_model_name,
+                            self.llm_tokenizer = AutoTokenizer.from_pretrained(
+                                self.llm_model_name,
                                 cache_dir="models_cache",
                                 token=auth_token,
                                 local_files_only=True,
                             )
                         except Exception:
                             # Fallback si no está en cache
-                            print(f"[Fase 1 - Cold Loop] Tokenizador Llama no encontrado en caché local. Descargando...")
-                            self.llama_tokenizer = AutoTokenizer.from_pretrained(
-                                self.llama_model_name,
+                            print(f"[Fase 1 - Cold Loop] Tokenizador LLM no encontrado en caché local. Descargando...")
+                            self.llm_tokenizer = AutoTokenizer.from_pretrained(
+                                self.llm_model_name,
                                 cache_dir="models_cache",
                                 token=auth_token,
                                 local_files_only=False,
@@ -337,7 +352,7 @@ class AuditConfig:
                     import warnings
 
                     warnings.warn(
-                        f"[Fase 1 - Cold Loop] Error cargando tokenizador Llama: {e}. "
+                        f"[Fase 1 - Cold Loop] Error cargando tokenizador LLM: {e}. "
                         "Se omitirá compilación de W_bank.",
                         UserWarning,
                     )
@@ -356,7 +371,7 @@ class AuditConfig:
                 pass  # Sin servicio de embeddings, igual funciona
 
             self.invariant_synthesizer = InvariantSynthesizer(
-                tokenizer=self.llama_tokenizer,
+                tokenizer=self.llm_tokenizer,
                 embedding_service=embedding_service,
             )
 
@@ -388,6 +403,10 @@ class AuditConfig:
                 f"[Fase 1 - Cold Loop] Error durante inicialización: {e}\n{traceback.format_exc()}",
                 UserWarning,
             )
+        finally:
+            self.llama_model_name = self.llm_model_name
+            self.llama_tokenizer = self.llm_tokenizer
+            self.llama_model = self.llm_model
 
     def _initialize_hot_loop_processor(self) -> None:
         """
