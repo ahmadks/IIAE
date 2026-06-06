@@ -60,3 +60,25 @@ def test_notary_client_hardware_containment_rejection(monkeypatch):
     assert res.is_admitted is False
     assert res.dissonance_ds == float("inf")
     assert "Stage 2: Hardware Mask Containment Breach" in res.violated_policies
+
+
+def test_notary_client_aem_counters():
+    config = AuditConfig(ctm_mode="disabled")
+    client = NotaryClient(config)
+
+    # Initial defaults should be 1.0 (as float) for both total and valid
+    assert client.y_total == 1.0
+    assert client.y_valid == 1.0
+    assert client.pipeline.aem.y_total == 1.0
+    assert client.pipeline.aem.y_valid == 1.0
+
+    counters = client.get_aem_counters()
+    assert counters["y_total"] == 1.0
+    assert counters["y_valid"] == 1.0
+
+    # Simulate manual setting for down-stream checks or SLT overrides
+    client.pipeline.aem.y_total = 100.0
+    client.pipeline.aem.y_valid = 95.0
+    assert client.y_total == 100.0
+    assert client.y_valid == 95.0
+

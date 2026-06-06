@@ -58,12 +58,13 @@ class MemoryLogHandler(logging.Handler):
 if "notary_logs" not in st.session_state:
     st.session_state.notary_logs = []
 
-iiae_logger = logging.getLogger("IIAE")
-iiae_logger.handlers = [
-    h for h in iiae_logger.handlers if not isinstance(h, MemoryLogHandler)
-]
-iiae_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
-iiae_logger.setLevel(logging.INFO)
+for logger_name in ["idicoc_core", "IIAE"]:
+    core_logger = logging.getLogger(logger_name)
+    core_logger.handlers = [
+        h for h in core_logger.handlers if not isinstance(h, MemoryLogHandler)
+    ]
+    core_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
+    core_logger.setLevel(logging.INFO)
 
 # Estilos Premium (Outfit/Inter, Dark Theme, Glassmorphism)
 st.markdown(

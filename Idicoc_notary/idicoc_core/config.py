@@ -8,8 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
+import os
+
 if TYPE_CHECKING:
     from idicoc_core.isg.loader import PolicyLoader
+
+_DEFAULT_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_CTM_NODES_PATH = os.path.join(_DEFAULT_BASE, "tests", "results", "ctm_nodes.json")
+_DEFAULT_CTM_ROOT_PATH = os.path.join(_DEFAULT_BASE, "ctm_root.txt")
 
 # Default configuration values
 # NOTE: λ_1 (d_1: Axiom of Uniqueness) is a KL-divergence metric for probability
@@ -45,8 +51,8 @@ class AuditConfig:
     instance_name: str = "ai_comercial"
 
     # Paths de persistencia inyectables para CTM.
-    ctm_nodes_path: str = "./tests/results/ctm_nodes.json"
-    ctm_root_path: str = "./ctm_root.txt"
+    ctm_nodes_path: str = _DEFAULT_CTM_NODES_PATH
+    ctm_root_path: str = _DEFAULT_CTM_ROOT_PATH
     ctm_wal_path: str | None = None  # Si es None, se deriva automáticamente de ctm_nodes_path
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False

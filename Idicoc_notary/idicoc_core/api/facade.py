@@ -35,5 +35,26 @@ class NotaryClient:
             epsilon_override=epsilon_override
         )
 
+    def get_aem_counters(self) -> dict[str, float]:
+        """
+        Retorna los contadores de auditoría del AEM:
+          - y_total: total de señales procesadas por el DQE
+          - y_valid: señales válidas/corregidas
+        """
+        return {
+            "y_total": self.pipeline.aem.y_total,
+            "y_valid": self.pipeline.aem.y_valid,
+        }
+
+    @property
+    def y_total(self) -> float:
+        """Total signals processed by DQE (as float)"""
+        return self.pipeline.aem.y_total
+
+    @property
+    def y_valid(self) -> float:
+        """Signals validated/corrected by DQE (as float)"""
+        return self.pipeline.aem.y_valid
+
     # Alias funcional para compatibilidad
     audit = auditar

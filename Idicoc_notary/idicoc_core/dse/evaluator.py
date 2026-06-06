@@ -470,36 +470,15 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         s0_str = getattr(audit_input, "text_content", "")
         d0 = _compute_d_0(s0_str, "")
 
-        try:
-            n_ref = mu.size
-            if n_ref > 0:
-                from idicoc_core.utils.embedding_service import EmbeddingService
-
-                embed_service = EmbeddingService()
-                axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
-                k_vector = embed_service.encode(axiom_of_uniqueness_text)
-
-                if k_vector.size < n_ref:
-                    target_state = np.pad(k_vector, (0, n_ref - k_vector.size), mode="constant")
-                else:
-                    target_state = k_vector[:n_ref]
-
-                total_k = target_state.sum()
-                if total_k > 1e-14:
-                    target_state = target_state / total_k
-                else:
-                    target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-
-                d1 = _compute_d_1(mu, target_state)
-            else:
-                d1 = 0.0
-        except Exception:
-            n_ref = mu.size
-            if n_ref > 0:
-                target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-                d1 = _compute_d_1(mu, target_state)
-            else:
-                d1 = 0.0
+        n_ref = mu.size
+        if n_ref > 0:
+            # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
+            # es la distribución uniforme. No se debe calcular usando el embedding de texto de la unicidad,
+            # ya que la dimensionalidad y semántica son incompatibles.
+            target_state = np.ones(n_ref, dtype=float) / float(n_ref)
+            d1 = _compute_d_1(mu, target_state)
+        else:
+            d1 = 0.0
 
         d2 = 0.0
         if self._graph is not None:
@@ -788,23 +767,9 @@ class DissonanceStateEvaluator:
                 mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
                 n_ref = mu.size
 
-                from idicoc_core.utils.embedding_service import EmbeddingService
-
-                embed_service = EmbeddingService()
-                axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
-                k_vector = embed_service.encode(axiom_of_uniqueness_text)
-
-                if k_vector.size < n_ref:
-                    target_state = np.pad(k_vector, (0, n_ref - k_vector.size), mode="constant")
-                else:
-                    target_state = k_vector[:n_ref]
-
-                total_k = target_state.sum()
-                if total_k > 1e-14:
-                    target_state = target_state / total_k
-                else:
-                    target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-
+                # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
+                # es la distribución uniforme.
+                target_state = np.ones(n_ref, dtype=float) / float(n_ref)
                 d1 = _compute_d_1(mu, target_state)
             # else: text input → d_1 = 0.0 (see docstring above)
         except Exception as ex:

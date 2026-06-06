@@ -151,7 +151,29 @@ def _compute_context_contradiction(
     if not context_input:
         return 0.0, []
 
+    import numpy as np
+    # Si la entrada es un array numérico, distribución o lista de números, no se realiza
+    # análisis semántico de contradicción RAG→LLM ya que no representa texto en lenguaje natural.
+    if (
+        isinstance(y, np.ndarray)
+        or hasattr(y, "distribution")
+        or (isinstance(y, list) and len(y) > 0 and isinstance(y[0], (int, float, np.number)))
+    ):
+        return 0.0, []
+
     text_y = str(getattr(y, "content", getattr(y, "text_content", y)))
+    
+    # También ignorar representaciones de arrays/listas de floats en formato string
+    trimmed = text_y.strip()
+    if trimmed.startswith("[") and trimmed.endswith("]"):
+        try:
+            import ast
+            parsed = ast.literal_eval(trimmed)
+            if isinstance(parsed, (list, tuple)) and len(parsed) > 0 and isinstance(parsed[0], (int, float)):
+                return 0.0, []
+        except Exception:
+            pass
+
     if not text_y or str(text_y).strip() == "" or "array(" in text_y or "tensor(" in text_y:
         return 0.0, []
 
