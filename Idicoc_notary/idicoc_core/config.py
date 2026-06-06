@@ -12,14 +12,17 @@ if TYPE_CHECKING:
     from idicoc_core.isg.loader import PolicyLoader
 
 # Default configuration values
+# NOTE: λ_1 (d_1: Axiom of Uniqueness) is a KL-divergence metric for probability
+# distributions ONLY. For text LLM outputs, d_1 is always 0.0 (correct per formalism).
+# Therefore λ_2 (d_2: policy graph violations) carries the primary weight for text auditing.
 DEFAULT_DISSONANCE_WEIGHTS = (
-    0.0,  # λ0
-    0.5,  # λ1
-    0.4,  # λ2
-    0.1,  # λ3
-    0.0,  # λ4
-    0.0,  # λ5
-    0.0,  # λ6
+    0.0,  # λ0: discrete edit distance (unused for text)
+    0.0,  # λ1: KL-div to canonical state (only for distribution inputs)
+    0.9,  # λ2: policy graph violations — primary metric for text auditing
+    0.1,  # λ3: temporal constraint violations
+    0.0,  # λ4: hash indexing (unused)
+    0.0,  # λ5: consensus (unused)
+    0.0,  # λ6: sealing/verification (unused)
 )
 
 DEFAULT_SEMANTIC_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

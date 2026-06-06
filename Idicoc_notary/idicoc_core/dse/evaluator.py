@@ -763,18 +763,25 @@ class DissonanceStateEvaluator:
         for ctx_text in contradictory_contexts:
             violations.append(f"Contradicción RAG: {ctx_text} (SOFT)")
 
-        # Compute Ds based on weights
+        # ── D_s: Normalized weights from config ──────────────────────────────────
         weights = self.config._normalized_weights
 
-        # Determine d1 (distance to uniqueness axiom)
+        # ── d_1: Axiom of Uniqueness (KL-divergence for distributions only) ──────
+        # Per IDICOC formalism, d_1 is a measure-theoretic (Kantorovich) metric
+        # defined over probability distributions mu ∈ M(Σ). It is NOT a semantic
+        # distance for natural language text. For text LLM outputs, d_1 = 0.0
+        # because the audit of textual content is the sole responsibility of d_2
+        # (PropertyGraph policy violations) and d_context (RAG contradiction).
+        # Applying d_1 to text would create a permanent baseline dissonance for any
+        # response unrelated to the Axiom of Uniqueness — a category error.
         d1 = 0.0
         try:
-            # If the input is distribution/numerical
             if (
                 isinstance(eval_input, np.ndarray)
                 or hasattr(eval_input, "distribution")
                 or isinstance(eval_input, list)
             ):
+                # Numeric/distribution input: compute KL-divergence to canonical state
                 mu_raw = self.strategy._validate_input(eval_input, 4)
                 total = mu_raw.sum()
                 mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
@@ -798,33 +805,26 @@ class DissonanceStateEvaluator:
                     target_state = np.ones(n_ref, dtype=float) / float(n_ref)
 
                 d1 = _compute_d_1(mu, target_state)
-            else:
-                # Text input: compute distance relative to uniqueness axiom text
-                # d1 is cosine distance of text to uniqueness text
-                from idicoc_core.utils.embedding_service import EmbeddingService
-                from idicoc_core.utils.data_converter import DataConverter
-
-                embed_service = EmbeddingService()
-                axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
-
-                y_text = DataConverter.to_text(eval_input)
-                y_vec = embed_service.encode(y_text)
-                k_vector = embed_service.encode(axiom_of_uniqueness_text)
-                d1 = _cosine_distance(y_vec, k_vector)
+            # else: text input → d_1 = 0.0 (see docstring above)
         except Exception as ex:
-            logger.warning(f"Error computing uniqueness distance: {ex}")
+            logger.warning(f"Error computing d_1 (uniqueness distance): {ex}")
 
+        # ── D_s: Weighted Coalgebraic Dissonance ─────────────────────────────────
+        # For text auditing, only d_2 (policy violations) and d_3 (temporal) are
+        # non-trivially populated. When d_1=0, the normalized weights ensure d_2
+        # and d_3 still use their relative proportions. If d_2=inf (HARD breach),
+        # D_s=inf regardless of weights.
         if d_logic == float("inf") or d_temporal == float("inf"):
             d_s = float("inf")
         else:
             d_s = (
-                weights[0] * 0.0  # d0
-                + weights[1] * d1
-                + weights[2] * d_logic
-                + weights[3] * d_temporal
-                + weights[4] * 0.0  # d4
-                + weights[5] * 0.0  # d5
-                + weights[6] * 0.0  # d6
+                weights[0] * 0.0       # d0: edit distance (unused for text)
+                + weights[1] * d1      # d1: KL-div to canonical (0.0 for text)
+                + weights[2] * d_logic   # d2: policy graph violations
+                + weights[3] * d_temporal  # d3: temporal constraints
+                + weights[4] * 0.0     # d4: hash mismatch (unused)
+                + weights[5] * 0.0     # d5: consensus (unused)
+                + weights[6] * 0.0     # d6: sealing (unused)
             )
             d_s = max(d_s, d_context)
 

@@ -859,10 +859,12 @@ with col_telemetry:
     st.markdown("### 📋 Casos Registrados en AEM")
     if "notary_client" in st.session_state and st.session_state.notary_client.pipeline:
         aem_trail = st.session_state.notary_client.pipeline.aem.get_audit_trail()
-        if not aem_trail:
+        # Filter only rejected cases for the AEM breach log
+        rejected_cases = [c for c in aem_trail if c.get("admission_breach", False)]
+        if not rejected_cases:
             st.info("No se han registrado rechazos o violaciones en el AEM aún.")
         else:
-            for idx, case in enumerate(reversed(aem_trail)):
+            for idx, case in enumerate(reversed(rejected_cases)):
                 d_s_val = case.get("d_s", 0.0)
                 d_s_text = "∞" if d_s_val == float("inf") else f"{d_s_val:.4f}"
                 user_in = case.get("user_input") or "N/A"
@@ -877,15 +879,15 @@ with col_telemetry:
                     )
 
                 vps = case.get("violated_policies") or []
-                vps_text = ", ".join(vps) if vps else "Desviación/Disonancia alta"
+                vps_text = ", ".join(vps) if vps else "Disonancia superior a ε"
 
                 st.markdown(
                     f"<div style='background-color:#1e293b; padding:12px; border-radius:8px; border:1px solid #ef4444; margin-bottom:8px;'>"
-                    f"<b>Caso #{len(aem_trail)-idx}</b> - <span style='color:#ef4444; font-weight:bold;'>RECHAZADO</span><br>"
+                    f"<b>Caso #{len(rejected_cases)-idx}</b> - <span style='color:#ef4444; font-weight:bold;'>RECHAZADO</span><br>"
                     f"<small>Fecha: {case.get('timestamp', '')[:19]}</small><br>"
                     f"💬 <b>Input Usuario:</b> {user_in}<br>"
                     f"🤖 <b>Output Interceptado:</b> {output_text}<br>"
-                    f"📊 <b>Disonancia:</b> {d_s_text}<br>"
+                    f"📊 <b>Disonancia D_s:</b> {d_s_text} &gt; ε={case.get('epsilon', '?')}<br>"
                     f"❌ <b>Políticas Violadas:</b> {vps_text}"
                     f"</div>",
                     unsafe_allow_html=True,
