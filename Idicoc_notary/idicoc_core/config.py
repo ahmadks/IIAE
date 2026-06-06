@@ -13,31 +13,27 @@ import os
 if TYPE_CHECKING:
     from idicoc_core.isg.loader import PolicyLoader
 
+# ── Rutas por defecto ────────────────────────────────────────────────────────
 _DEFAULT_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_CTM_NODES_PATH = os.path.join(_DEFAULT_BASE, "tests", "results", "ctm_nodes.json")
 _DEFAULT_CTM_ROOT_PATH = os.path.join(_DEFAULT_BASE, "ctm_root.txt")
 
-# Default configuration values
-# NOTE: λ_1 (d_1: Axiom of Uniqueness) is a KL-divergence metric for probability
-# distributions ONLY. For text LLM outputs, d_1 is always 0.0 (correct per formalism).
-# Therefore λ_2 (d_2: policy graph violations) carries the primary weight for text auditing.
+# ── Pesos de disonancia por defecto ─────────────────────────────────────────
+# NOTE: λ_1 (d_1: Axiom of Uniqueness) es KL-divergence sólo para distribuciones
+# de probabilidad. Para salidas de texto LLM, d_1 = 0.0 (correcto por formalismo).
+# Por eso λ_2 (d_2: violaciones del grafo) lleva el peso principal en texto.
 DEFAULT_DISSONANCE_WEIGHTS = (
-    0.0,  # λ0: discrete edit distance (unused for text)
-    0.2,  # λ1: KL-div to canonical state (only for distribution inputs)
-    0.5,  # λ2: policy graph violations — primary metric for text auditing
-    0.3,  # λ3: temporal constraint violations
-    0.0,  # λ4: hash indexing (unused)
-    0.0,  # λ5: consensus (unused)
-    0.0,  # λ6: sealing/verification (unused)
+    0.0,  # λ0: distancia de edición discreta (no usada para texto)
+    0.2,  # λ1: KL-div al estado canónico (solo para entradas de distribución)
+    0.5,  # λ2: violaciones del grafo de políticas — métrica principal para texto
+    0.3,  # λ3: violaciones de restricciones temporales
+    0.0,  # λ4: indexación por hash (no usada)
+    0.0,  # λ5: consenso (no usado)
+    0.0,  # λ6: sellado/verificación (no usado)
 )
 
 DEFAULT_SEMANTIC_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_SEMANTIC_NLI_MODEL = "facebook/bart-large-mnli"
-DEFAULT_SEMANTIC_NLI_CONFLICT_THRESHOLD = 0.5
-DEFAULT_SEMANTIC_NLI_WARNING_THRESHOLD = 0.75
-DEFAULT_SEMANTIC_MIN_RAG_SCORE = 0.1
-DEFAULT_TERMINAL_RIGIDITY_THRESHOLD = 0.01
-DEFAULT_EMBEDDING_MAX_CHUNKS = 10
 
 _NLI_PIPELINES_CACHE: dict[str, Any] = {}
 
@@ -46,135 +42,128 @@ _NLI_PIPELINES_CACHE: dict[str, Any] = {}
 class AuditConfig:
     """Configuración completa del auditor IDICOC."""
 
-    # Tolerancias y umbrales configurables.
+    # ── 1. Umbrales de decisión ──────────────────────────────────────────────
+    # correction_base_tolerance: umbral base D_s ≤ base + epsilon → ADMITTED
     correction_base_tolerance: float = 0.15
+    # rigidity_epsilon: epsilon adicional inyectable por llamada (legado, se mapea a allowed_epsilon)
     rigidity_epsilon: float = 0.0
-    allowed_epsilon: float = 0.15  # Added allowed_epsilon for new orchestrator design
-    instance_name: str = "ai_comercial"
+    # allowed_epsilon: epsilon efectivo usado por el pipeline
+    allowed_epsilon: float = 0.15
 
-    # Paths de persistencia inyectables para CTM.
-    ctm_nodes_path: str = _DEFAULT_CTM_NODES_PATH
-    ctm_root_path: str = _DEFAULT_CTM_ROOT_PATH
-    ctm_wal_path: str | None = None  # Si es None, se deriva automáticamente de ctm_nodes_path
-    hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
-    require_hardware_seal: bool = False
+    # ── 2. Parámetros RAG / Integridad de contexto ───────────────────────────
+    # λ_context ∈ [0,1]: peso de d_context en D_s.
+    #   D_s = (1 - λ_context) × D_policy + λ_context × d_context
+    #   0.0 → el RAG no influye; 1.0 → solo RAG; 0.4 → equilibrio recomendado.
+    lambda_context: float = 0.4
 
-    # Configuración de backends de persistencia avanzados para CTM
-    ctm_storage_backend: Any = "file"
-    ctm_storage_kwargs: dict[str, Any] = field(default_factory=dict)
+    # Umbral de alerta para etiquetar un chunk RAG como "contradictorio".
+    # Solo afecta el etiquetado en trazabilidad, NO el valor numérico de d_context.
+    #   0.20 → muy estricto; 0.35 → moderado (defecto); 0.50 → permisivo.
+    rag_contradiction_alert_threshold: float = 0.35
 
-    # Pesos de disonancia
+    # Similitud coseno mínima entre un chunk RAG y una política HARD para
+    # considerar ese chunk como "crítico" en _is_chunk_critical.
+    rag_critical_chunk_similarity_threshold: float = 0.6
+
+    # Penalización por omisión: cuando el LLM no incluye todo el contexto RAG
+    # pero tampoco lo contradice (soft omission, no hard contradiction).
+    omission_penalty: float = 0.05
+
+    # Similitud coseno mínima entre el output LLM y el chunk primario del RAG
+    # para considerar que el "hecho principal" está presente en la respuesta.
+    rag_primary_presence_threshold: float = 0.70
+
+    # Factor de reducción del coverage_score para chunks no-críticos del RAG.
+    rag_non_critical_coverage_damper: float = 0.1
+
+    # Factor de reducción del coverage_score cuando el hecho primario está presente.
+    rag_primary_present_coverage_damper: float = 0.3
+
+    # Umbral de contradicción HARD: si max_contradiction_score supera este valor
+    # se aplica penalización fuerte directa (d_context = max_contradiction_score).
+    rag_hard_contradiction_threshold: float = 0.8
+
+    # Factor de contribución del coverage_score a d_context cuando no hay
+    # contradicción hard: d_context = coverage_score * factor.
+    rag_coverage_contribution_factor: float = 0.2
+
+    # Límite superior (cap) de d_context para respetar el umbral de corrección.
+    rag_d_context_cap: float = 0.15
+
+    # ── 3. Pesos de disonancia y estrategia ─────────────────────────────────
     dissonance_weights: tuple[float, float, float, float, float, float, float] = (
         DEFAULT_DISSONANCE_WEIGHTS
     )
 
-    # Estrategia de disonancia inyectable.
-    dissonance_strategy: Any = None
+    # Multiplicador de peso para políticas con hardness=hard en el evaluador.
+    policy_hard_weight_multiplier: float = 2.0
 
-    # Parámetros específicos de evaluación semántica
+    # ── 4. Embeddings y NLI ──────────────────────────────────────────────────
     semantic_embedding_model: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
     semantic_nli_model: str = DEFAULT_SEMANTIC_NLI_MODEL
-    semantic_nli_conflict_threshold: float = DEFAULT_SEMANTIC_NLI_CONFLICT_THRESHOLD
-    semantic_nli_warning_threshold: float = DEFAULT_SEMANTIC_NLI_WARNING_THRESHOLD
-    semantic_nli_warning_geom_threshold: float = 0.1
-    semantic_nli_label_mapping: dict[str, str] = field(
-        default_factory=lambda: {
-            "contradiction": "contradiction",
-            "entailment": "entailment",
-            "neutral": "neutral",
-        }
-    )
-    semantic_embedding_model_signature: str | None = None
-    semantic_embedding_model_signature_algo: str = "sha256"
-    semantic_max_rag_results: int = 5
-    semantic_min_rag_score: float = DEFAULT_SEMANTIC_MIN_RAG_SCORE
+
+    # Umbral de score NLI para clasificar una respuesta como contradicción.
+    semantic_nli_conflict_threshold: float = 0.5
+
+    # Firma del modelo de embeddings para verificación de integridad.
     embedding_signature: str | None = None
+    # Si True, rechaza la configuración cuando la firma del embedder no coincide.
     strict_embedding_signature: bool = False
-    terminal_rigidity_threshold: float = DEFAULT_TERMINAL_RIGIDITY_THRESHOLD
-    embedding_max_chunks: int = DEFAULT_EMBEDDING_MAX_CHUNKS
+    # Número máximo de chunks en que se divide un texto largo antes de embeberse.
+    embedding_max_chunks: int = 10
 
-    ctm_mode: str = "full"
+    # Proveedor de embeddings inyectable (mock en tests, modelo real en producción).
+    embedding_provider: Any = None
+    # Pipeline NLI cargado en __post_init__ (no configurar manualmente).
+    nli_pipeline: Any = None
 
-    # Sistema de inyección de politicas
+    # ── 5. ISG: políticas ────────────────────────────────────────────────────
     policy_loader: "PolicyLoader | None" = None
     policy_file_path: str = "policies.txt"
 
-    # Proveedor de embeddings mockeable inyectable opcional.
-    embedding_provider: Any = None
-    # Canal centralizado para el pipeline NLI (cargado en __post_init__)
-    nli_pipeline: Any = None
+    # ── 6. CTM: trazabilidad criptográfica ───────────────────────────────────
+    ctm_mode: str = "full"  # "full" | "disabled"
+    ctm_nodes_path: str = _DEFAULT_CTM_NODES_PATH
+    ctm_root_path: str = _DEFAULT_CTM_ROOT_PATH
+    ctm_wal_path: str | None = None  # None → se deriva de ctm_nodes_path
+    hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
+    require_hardware_seal: bool = False
 
-    # El wrapper notario nunca debe bloquear, pero mantenemos el parámetro por compatibilidad.
-    enable_hard_halt: bool = False
+    # ── 7. Hot Loop: logits interception (LLM en tiempo real) ───────────────
+    # Habilita la interceptación de logits durante la generación del LLM.
+    enable_logits_interception: bool = False
+    # El procesador de logits compilado (se inicializa en _initialize_hot_loop_processor).
+    logits_processor: Any = None
+    # Si True, solo aplica la máscara a tokens marcados como hard.
+    logits_processor_hard_only: bool = False
+    # Si True, registra un audit trail de cada intercepción de logits.
+    logits_processor_audit_trace: bool = False
 
-    # ── Parámetros del Middleware de Integridad RAG→LLM ──────────────────────
-    #
-    # lambda_context (λ_context) ∈ [0.0, 1.0]
-    #   Peso de la Disonancia de Fase Semántica (d_context) en la fórmula de D_s:
-    #     D_s = (1 - λ_context) × D_policy  +  λ_context × d_context
-    #   • 0.0 → el RAG no influye en D_s; solo cuentan las políticas del grafo.
-    #   • 1.0 → D_s es puramente la distancia RAG→LLM; las políticas no cuentan.
-    #   • 0.4 → equilibrio recomendado: 60 % políticas, 40 % coherencia con el RAG.
-    lambda_context: float = 0.4
+    # ── 8. Cold Loop: compilación de políticas en W_bank ────────────────────
+    compile_policies_on_init: bool = True
+    # Banco de tokens prohibidos compilados {token_id: (hardness, priority)}.
+    w_bank: dict[int, tuple[str, int]] | None = None
+    invariant_synthesizer: Any = None
 
-    # rag_contradiction_alert_threshold ∈ [0.0, 1.0]
-    #   Umbral de alerta para etiquetar un chunk del RAG como "contradictorio"
-    #   en el log de auditoría y en la lista de violated_policies.
-    #
-    #   ¿Qué es?
-    #     Es la distancia coseno mínima entre el output del LLM y un chunk del
-    #     contexto RAG para que ese chunk se considere "en contradicción semántica".
-    #     distancia = 1 - cosine_similarity(embedding_LLM, embedding_chunk_RAG)
-    #
-    #   ¿Para qué sirve?
-    #     Solo controla el ETIQUETADO en trazabilidad (qué chunks aparecen en
-    #     `contradictory_contexts` y en el AEM trail). NO afecta al valor numérico
-    #     de d_context, que siempre es la distancia máxima real observada.
-    #
-    #   Ejemplos de calibración:
-    #     0.20 → solo alerta si el LLM contradice casi literalmente el RAG (muy estricto).
-    #     0.35 → alerta si hay divergencia semántica moderada (valor por defecto).
-    #     0.50 → alerta solo si hay divergencia semántica fuerte (permisivo).
-    #
-    #   Nota: reducir este umbral aumenta el número de chunks etiquetados como
-    #   contradictorios pero NO cambia D_s ni el veredicto ADMITTED/REJECTED.
-    rag_contradiction_alert_threshold: float = 0.35
-
-    # Trazabilidad externa opcional para auditorías y reportes.
-    client_id: str | None = None
-    trace_input: str | None = None
-
-    # Mapeo configurable de campos de entrada
-    input_field_audit: str = "audit_input"
-    input_field_context: str = "context_input"
-    input_field_user: str = "user_input"
-    input_field_policies: str = "context_policies"
-
-    # Configuración del LLM
+    # ── 9. LLM (tokenizador para compilación de W_bank) ─────────────────────
+    # Estos campos sólo se usan durante _initialize_cold_loop para compilar W_bank.
     llm_model_name: str = "microsoft/Phi-3.5-mini-instruct"
     llm_tokenizer: Any = None
     llm_model: Any = None
 
-    # Campos heredados (llama_*) para compatibilidad con código anterior (Deprecated)
+    # Campos deprecados (compatibilidad con código anterior que usaba llama_*)
     llama_model_name: str | None = None
     llama_tokenizer: Any = None
     llama_model: Any = None
 
-    # Procesador de logits
-    logits_processor: Any = None
-    logits_processor_hard_only: bool = False
-    logits_processor_audit_trace: bool = False
+    # ── 10. Metadatos de instancia ───────────────────────────────────────────
+    instance_name: str = "ai_comercial"
 
-    # Matriz compilada de tokens prohibidos
-    w_bank: dict[int, tuple[str, int]] | None = None
-    invariant_synthesizer: Any = None
+    # ── 11. Compatibilidad / legado ──────────────────────────────────────────
+    # enable_hard_halt: el wrapper notario nunca bloquea (forzado a False en __post_init__).
+    enable_hard_halt: bool = False
 
-    # Control de compilación Cold/Hot Loop
-    compile_policies_on_init: bool = True
-    enable_logits_interception: bool = False
-
-    extra_metadata: dict[str, Any] = field(default_factory=dict)
-
+    # ── Propiedad calculada ──────────────────────────────────────────────────
     @property
     def _normalized_weights(self) -> tuple[float, ...]:
         raw_weights = list(self.dissonance_weights)
@@ -187,7 +176,7 @@ class AuditConfig:
         import os
         import warnings
 
-        # Sync deprecated llama_* variables
+        # Sincronizar campos deprecados llama_* → llm_*
         if self.llama_model_name is not None:
             warnings.warn(
                 "llama_model_name está deprecado. Use llm_model_name en su lugar.",
@@ -200,11 +189,9 @@ class AuditConfig:
             self.llm_model = self.llama_model
 
         from idicoc_core.utils.embedding_service import EmbeddingService
-
-        # Set globally
         EmbeddingService.set_provider(self.embedding_provider)
 
-        # Build NLI pipeline
+        # Cargar / cachear pipeline NLI
         global _NLI_PIPELINES_CACHE
         if self.semantic_nli_model in _NLI_PIPELINES_CACHE:
             self.nli_pipeline = _NLI_PIPELINES_CACHE[self.semantic_nli_model]
@@ -242,19 +229,18 @@ class AuditConfig:
                 _NLI_PIPELINES_CACHE[self.semantic_nli_model] = self.nli_pipeline
             except Exception as e:
                 warnings.warn(
-                    f"[Fase 1 - Cold Loop] No se pudo cargar pipeline NLI ({self.semantic_nli_model}): {e}. "
-                    "Operaciones basadas en NLI se omitirán.",
+                    f"[Fase 1 - Cold Loop] No se pudo cargar pipeline NLI "
+                    f"({self.semantic_nli_model}): {e}. Operaciones NLI se omitirán.",
                     UserWarning,
                 )
                 self.nli_pipeline = None
 
-        # Resolve paths
+        # Resolver rutas relativas
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-        # Calculate signature
+        # Calcular firma del modelo de embeddings si no se proporcionó
         if not self.embedding_signature:
             from idicoc_core.utils.embedding_utils import compute_embedding_signature
-
             self.embedding_signature = compute_embedding_signature(self.semantic_embedding_model)
 
         if not os.path.isabs(self.ctm_nodes_path):
@@ -268,13 +254,7 @@ class AuditConfig:
                 policy_path = os.path.abspath(os.path.join(package_root, policy_path))
             if os.path.exists(policy_path):
                 from idicoc_core.isg.loader import FilePolicyLoader
-
                 self.policy_loader = FilePolicyLoader(policy_path)
-
-        if self.dissonance_strategy is None:
-            from idicoc_core.dse.evaluator import StructuralDissonanceStrategy
-
-            self.dissonance_strategy = StructuralDissonanceStrategy
 
         if self.enable_hard_halt:
             warnings.warn(
@@ -297,7 +277,6 @@ class AuditConfig:
 
             if not policies:
                 import warnings
-
                 warnings.warn(
                     "[Fase 1 - Cold Loop] No se encontraron políticas. "
                     "W_bank estará vacío y no se aplicará contención.",
@@ -313,9 +292,7 @@ class AuditConfig:
                     hf_token = os.getenv("HF_TOKEN")
                     auth_token = hf_token if hf_token else True
                     force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in (
-                        "true",
-                        "1",
-                        "yes",
+                        "true", "1", "yes",
                     )
 
                     print(f"[Fase 1 - Cold Loop] Cargando tokenizador LLM: {self.llm_model_name}")
@@ -343,7 +320,6 @@ class AuditConfig:
                             )
                 except Exception as e:
                     import warnings
-
                     warnings.warn(
                         f"[Fase 1 - Cold Loop] Error cargando tokenizador LLM: {e}. "
                         "Se omitirá compilación de W_bank.",
@@ -358,7 +334,7 @@ class AuditConfig:
             embedding_service = None
             try:
                 embedding_service = EmbeddingService()
-            except:
+            except Exception:
                 pass
 
             self.invariant_synthesizer = InvariantSynthesizer(
@@ -370,14 +346,15 @@ class AuditConfig:
             self.w_bank = self.invariant_synthesizer.compile_policies(
                 policies=policies,
                 include_variants=True,
-                hardness_multiplier=2.0,
+                hardness_multiplier=self.policy_hard_weight_multiplier,
             )
 
             report = self.invariant_synthesizer.get_compilation_report()
             print(
                 f"[Fase 1 - Cold Loop] ✓ Compilación completada. "
                 f"W_bank size: {report['w_bank_size']}, "
-                f"Políticas: success={report['successful']}, warnings={report['warnings']}, errors={report['errors']}"
+                f"Políticas: success={report['successful']}, "
+                f"warnings={report['warnings']}, errors={report['errors']}"
             )
 
             if self.enable_logits_interception and self.w_bank:
@@ -386,12 +363,12 @@ class AuditConfig:
         except Exception as e:
             import warnings
             import traceback
-
             warnings.warn(
                 f"[Fase 1 - Cold Loop] Error durante inicialización: {e}\n{traceback.format_exc()}",
                 UserWarning,
             )
         finally:
+            # Mantener sincronización de campos deprecados
             self.llama_model_name = self.llm_model_name
             self.llama_tokenizer = self.llm_tokenizer
             self.llama_model = self.llm_model
@@ -399,7 +376,6 @@ class AuditConfig:
     def _initialize_hot_loop_processor(self) -> None:
         if not self.w_bank:
             import warnings
-
             warnings.warn(
                 "[Fase 3 - Hot Loop] W_bank está vacío. "
                 "No se inicializará procesador de logits.",
@@ -421,12 +397,11 @@ class AuditConfig:
                 audit_trace=self.logits_processor_audit_trace,
             )
 
-            print(f"[Fase 3 - Hot Loop] ✓ Procesador de logits inicializado.")
+            print("[Fase 3 - Hot Loop] ✓ Procesador de logits inicializado.")
 
         except Exception as e:
             import warnings
             import traceback
-
             warnings.warn(
                 f"[Fase 3 - Hot Loop] Error inicializando procesador: {e}\n{traceback.format_exc()}",
                 UserWarning,

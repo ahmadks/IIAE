@@ -120,7 +120,9 @@ def test_logic_service_with_partial_dissonance():
     )
 
     assert res.dissonance_ds >= 0.0
-    assert res.allowed_epsilon == 0.1
+    # allowed_epsilon in the result is the effective_threshold =
+    # correction_base_tolerance (0.15) + epsilon_override (0.1) = 0.25
+    assert res.allowed_epsilon == pytest.approx(0.25)
 
 
 def test_logic_service_lambda_composition():

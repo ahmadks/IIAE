@@ -40,8 +40,9 @@ class PropertyGraphEvaluator:
     Computes dissonance scores using deterministic logical/temporal evaluations.
     """
 
-    def __init__(self, graph: PropertyGraph):
+    def __init__(self, graph: PropertyGraph, config: Any = None):
         self.graph = graph
+        self.config = config
 
     def evaluate(self, y: Any) -> float:
         """
@@ -68,7 +69,7 @@ class PropertyGraphEvaluator:
             if hardness == "hard" and raw_penalty > 0:
                 return float("inf")
 
-            weight = self._policy_weight(ax)
+            weight = self._policy_weight(ax, self.config)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
 
@@ -122,7 +123,7 @@ class PropertyGraphEvaluator:
             if hardness == "hard" and raw_penalty > 0:
                 return float("inf")
 
-            weight = self._policy_weight(ax)
+            weight = self._policy_weight(ax, self.config)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
 
@@ -343,9 +344,10 @@ class PropertyGraphEvaluator:
         return None
 
     @staticmethod
-    def _policy_weight(policy: Dict[str, Any]) -> float:
+    def _policy_weight(policy: Dict[str, Any], config: Any = None) -> float:
         priority = max(1, min(10, int(policy.get("priority", 1))))
-        hardness_mult = 2.0 if policy.get("hardness") == "hard" else 1.0
+        hard_mult = float(getattr(config, "policy_hard_weight_multiplier", 2.0))
+        hardness_mult = hard_mult if policy.get("hardness") == "hard" else 1.0
         return (priority / 10.0) * hardness_mult
 
 
@@ -483,7 +485,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         d2 = 0.0
         if self._graph is not None:
             try:
-                evaluator = PropertyGraphEvaluator(self._graph)
+                evaluator = PropertyGraphEvaluator(self._graph, self.config)
                 d2 = float(evaluator.evaluate(audit_input))
             except Exception:
                 pass
@@ -491,7 +493,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         d3 = 0.0
         if self._graph is not None:
             try:
-                evaluator = PropertyGraphEvaluator(self._graph)
+                evaluator = PropertyGraphEvaluator(self._graph, self.config)
                 d3 = float(evaluator.compute_temporal(audit_input))
             except Exception:
                 pass
@@ -502,7 +504,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
 
         evaluator_instance = None
         if self._graph is not None:
-            evaluator_instance = PropertyGraphEvaluator(self._graph)
+            evaluator_instance = PropertyGraphEvaluator(self._graph, self.config)
 
         d_context, contradictory_contexts = _compute_context_contradiction(
             audit_input, context_input, self.config, evaluator=evaluator_instance
@@ -574,7 +576,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         d2 = 0.0
         d3 = 0.0
         if G_t is not None:
-            evaluator = PropertyGraphEvaluator(G_t)
+            evaluator = PropertyGraphEvaluator(G_t, self.config)
             d2 = float(evaluator.evaluate(y))
             d3 = float(evaluator.compute_temporal(y))
 
@@ -585,7 +587,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
 
         d_context = 0.0
         if context_input:
-            evaluator_instance = PropertyGraphEvaluator(G_t) if G_t is not None else None
+            evaluator_instance = PropertyGraphEvaluator(G_t, self.config) if G_t is not None else None
             d_context, _ = _compute_context_contradiction(
                 y, context_input, self.config, evaluator=evaluator_instance
             )
@@ -729,7 +731,7 @@ class DissonanceStateEvaluator:
             pass
 
         # Evaluate logic disonancia using PropertyGraphEvaluator
-        evaluator = PropertyGraphEvaluator(active_graph)
+        evaluator = PropertyGraphEvaluator(active_graph, self.config)
         violations = []
         try:
             violated_nodes = evaluator.get_violated_policies(eval_input)
