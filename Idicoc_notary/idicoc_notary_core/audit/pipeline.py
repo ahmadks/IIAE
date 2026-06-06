@@ -454,6 +454,9 @@ class IDICOCPipeline:
                 "trace_input": trace_input or self.config.trace_input,
                 "invariant_state_hash": invariant_hash,
                 "property_graph_hash": graph_hash,
+                "user_input": user_input or "",
+                "context_input": context_input or [],
+                "hardware_contained": True,
                 "aem_counters": {
                     "total_signals": total_sigs,
                     "valid_signals": valid_sigs,
@@ -496,6 +499,9 @@ class IDICOCPipeline:
                     "invariant_state_hash": invariant_hash,
                     "property_graph_hash": graph_hash,
                     "timestamp": timestamp,
+                    "admitted": admitted,
+                    "violated_policies": violated_list,
+                    "user_input": user_input or "",
                 }
 
                 # Escribir al WAL local antes de interactuar con DB/Red síncrona
