@@ -256,7 +256,7 @@ class AuditPipeline:
                 }
                 self.wal.write(tx_id, wal_payload)
                 try:
-                    self.ctm.commit_trace(context, llm_output, d_s, is_admitted, violations)
+                    self.ctm.commit_trace(context, llm_output, d_s, is_admitted, violations, transaction_id=tx_id)
                     self.wal.mark_completed(tx_id)
                 except Exception as exc:
                     logger.error(f"CTM commit failure: {exc}")

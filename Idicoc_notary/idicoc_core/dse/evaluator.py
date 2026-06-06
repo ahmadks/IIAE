@@ -789,16 +789,37 @@ class DissonanceStateEvaluator:
         if d_logic == float("inf") or d_temporal == float("inf"):
             d_s = float("inf")
         else:
-            # Suma ponderada base (política + temporal)
-            policy_dissonance = (
-                weights[0] * 0.0        # d0: edit distance (unused)
-                + weights[1] * d1       # d1: KL-div (0.0 para texto)
-                + weights[2] * d_logic  # d2: violaciones de políticas
-                + weights[3] * d_temporal  # d3: restricciones temporales
-                + weights[4] * 0.0      # d4: hash (unused)
-                + weights[5] * 0.0      # d5: consenso (unused)
-                + weights[6] * 0.0      # d6: sellado (unused)
-            )
+            if active_graph is not None:
+                if hasattr(active_graph, "nodes") and isinstance(active_graph.nodes, dict):
+                    has_logic_policies = any(ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values())
+                    has_temporal_policies = any(ax.get("policy_type") == "temporal" for ax in active_graph.nodes.values())
+                else:
+                    has_logic_policies = True
+                    has_temporal_policies = True
+            else:
+                has_logic_policies = False
+                has_temporal_policies = False
+
+            # Graph-based policy weights sum and dissonance
+            graph_weights_sum = 0.0
+            graph_dissonance = 0.0
+
+            if has_logic_policies:
+                graph_dissonance += weights[2] * d_logic
+                graph_weights_sum += weights[2]
+            if has_temporal_policies:
+                graph_dissonance += weights[3] * d_temporal
+                graph_weights_sum += weights[3]
+
+            if graph_weights_sum > 0.0:
+                normalized_graph_dissonance = graph_dissonance / graph_weights_sum
+            else:
+                normalized_graph_dissonance = 0.0
+
+            # policy_dissonance combines uniqueness axiom (d1) and graph policies (logic/temporal):
+            # We keep weights[1] * d1 as absolute, and normalize the graph policies over their combined weight (weights[2] + weights[3])
+            total_graph_weight = weights[2] + weights[3]
+            policy_dissonance = weights[1] * d1 + total_graph_weight * normalized_graph_dissonance
 
             # Integrar d_context como término ponderado + floor de seguridad
             # D_s = (1 - λ_context) * D_policy + λ_context * d_context

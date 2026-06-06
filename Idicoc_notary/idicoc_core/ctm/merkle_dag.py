@@ -239,6 +239,14 @@ class CustodialTraceManager:
             return self._dag.get_node(self._dag.root_hash)
         return self._dag.create_genesis(metadata=metadata, timestamp=timestamp)
 
+    @staticmethod
+    def _strip_distribution(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: CustodialTraceManager._strip_distribution(v) for k, v in obj.items() if k != "distribution"}
+        if isinstance(obj, list):
+            return [CustodialTraceManager._strip_distribution(v) for v in obj]
+        return obj
+
     def commit(
         self,
         canonical_state: Any,
@@ -249,14 +257,35 @@ class CustodialTraceManager:
         invariant_state_hash: Optional[str] = None,
         property_graph_hash: Optional[str] = None,
         aem_counters: Optional[Dict[str, int]] = None,
+        transaction_id: Optional[str] = None,
+        violations: Optional[List[str]] = None,
     ) -> MerkleNode:
         pg_val = getattr(property_graph, "nodes", property_graph)
+        
+        # Compute canonical state hash (includes distribution vector if present)
+        cs_hash = invariant_state_hash or self._hash_commitment(canonical_state)
+        pg_hash = property_graph_hash or self._hash_commitment(pg_val)
+
         if self.zkp_mode:
-            cs_payload = self._hash_commitment(canonical_state)
-            pg_payload = self._hash_commitment(pg_val)
+            cs_payload = cs_hash
+            pg_payload = pg_hash
         else:
-            cs_payload = self._safe_serialize(canonical_state)
-            pg_payload = self._safe_serialize(pg_val)
+            # Build lightweight forensic fingerprint instead of serializing the full state
+            import math
+            from datetime import datetime, timezone
+            integrity_score = max(0.0, 1.0 - dissonance)
+            if math.isinf(dissonance) or math.isnan(dissonance):
+                integrity_score = 0.0
+
+            cs_payload = {
+                "transaction_id": transaction_id or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
+                "integrity_score": integrity_score,
+                "canonical_state_hash": cs_hash,
+                "violated_policies": violations or [],
+                "is_admitted": float(dissonance) <= float(epsilon) if not (math.isinf(dissonance) or math.isnan(dissonance)) else False
+            }
+            # Strip distribution from property graph as well
+            pg_payload = self._strip_distribution(self._safe_serialize(pg_val))
 
         logical_payload = {
             "type": "COMMIT",
@@ -273,8 +302,8 @@ class CustodialTraceManager:
         return self._dag.append(
             logical_payload,
             timestamp=timestamp,
-            invariant_state_hash=invariant_state_hash,
-            property_graph_hash=property_graph_hash,
+            invariant_state_hash=cs_hash,
+            property_graph_hash=pg_hash,
             deviation_score=dissonance,
             correction_flag=False,
         )
@@ -285,7 +314,8 @@ class CustodialTraceManager:
         output: str,
         d_s: float,
         is_admitted: bool,
-        violations: List[str]
+        violations: List[str],
+        transaction_id: Optional[str] = None
     ) -> None:
         """
         Commit a trace to the cryptographic Merkle DAG.
@@ -297,9 +327,11 @@ class CustodialTraceManager:
         if isinstance(context, dict):
             user_prompt = context.get("user_prompt", "")
             rag_context = context.get("rag_context", "")
+            metadata = context.get("metadata", {})
         else:
             user_prompt = context.user_prompt
             rag_context = context.rag_context
+            metadata = context.metadata or {}
 
         logical_payload = {
             "user_prompt": user_prompt,
@@ -311,6 +343,10 @@ class CustodialTraceManager:
             "timestamp": timestamp
         }
 
+        # Include distribution vector in metadata if present for the full state hash
+        if "distribution" in metadata:
+            logical_payload["distribution"] = metadata["distribution"]
+
         invariant_state_hash = sha256_hex(canonical_json(logical_payload))
 
         if is_admitted:
@@ -318,19 +354,40 @@ class CustodialTraceManager:
                 canonical_state=logical_payload,
                 timestamp=timestamp,
                 dissonance=d_s,
-                invariant_state_hash=invariant_state_hash
+                invariant_state_hash=invariant_state_hash,
+                transaction_id=transaction_id,
+                violations=violations
             )
         else:
             self.seal_failure(
                 snapshot=logical_payload,
-                timestamp=timestamp
+                timestamp=timestamp,
+                transaction_id=transaction_id,
+                violations=violations
             )
 
-    def seal_failure(self, snapshot: Dict[str, Any], timestamp: str) -> MerkleNode:
+    def seal_failure(
+        self,
+        snapshot: Dict[str, Any],
+        timestamp: str,
+        transaction_id: Optional[str] = None,
+        violations: Optional[List[str]] = None
+    ) -> MerkleNode:
+        # Calculate full hash first
+        snapshot_hash = self._hash_commitment(snapshot)
+
         if self.zkp_mode:
-            snapshot_payload = self._hash_commitment(snapshot)
+            snapshot_payload = snapshot_hash
         else:
-            snapshot_payload = self._safe_serialize(snapshot)
+            # Build lightweight forensic fingerprint instead of serializing the full state
+            from datetime import datetime, timezone
+            snapshot_payload = {
+                "transaction_id": transaction_id or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
+                "integrity_score": 0.0,
+                "canonical_state_hash": snapshot_hash,
+                "violated_policies": violations or snapshot.get("violations") or [],
+                "is_admitted": False
+            }
 
         logical_payload = {
             "type": "FAILURE",
@@ -338,7 +395,12 @@ class CustodialTraceManager:
             "timestamp": timestamp,
             "snapshot": snapshot_payload,
         }
-        return self._dag.append(logical_payload, timestamp=timestamp)
+        return self._dag.append(
+            logical_payload,
+            timestamp=timestamp,
+            deviation_score=1.0,
+            correction_flag=True,
+        )
 
     def get_node(self, node_hash: str) -> Optional[MerkleNode]:
         return self._dag.get_node(node_hash)

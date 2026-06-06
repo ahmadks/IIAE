@@ -220,7 +220,8 @@ def _compute_context_contradiction(
             return 0.0, []
         audit_emb = audit_emb / audit_norm
 
-        max_contradiction = 0.0
+        max_similarity = -1.0
+        min_similarity = 1.0
         contradictory_contexts = []
 
         for ctx in context_input:
@@ -241,21 +242,61 @@ def _compute_context_contradiction(
                 continue
             ctx_emb = ctx_emb / ctx_norm
 
-            # Cosine similarity → distance (phase dissonance)
+            # Cosine similarity between LLM output and this RAG chunk
             similarity = float(np.dot(audit_emb, ctx_emb))
-            contradiction_score = float(1.0 - max(-1.0, min(1.0, similarity)))
+            similarity = max(-1.0, min(1.0, similarity))
 
-            if contradiction_score > max_contradiction:
-                max_contradiction = contradiction_score
+            if similarity > max_similarity:
+                max_similarity = similarity
+            if similarity < min_similarity:
+                min_similarity = similarity
 
-            # Etiquetar chunks que superan el umbral de alerta para trazabilidad
-            if contradiction_score > contradiction_alert_threshold:
+            is_contradiction = False
+            
+            # 1. Try NLI pipeline first
+            nli_pipeline = getattr(config, "nli_pipeline", None)
+            if nli_pipeline is not None:
+                try:
+                    nli_res = nli_pipeline(
+                        sequences=text_y,
+                        candidate_labels=["entailment", "contradiction", "neutral"],
+                        hypothesis_template=f"Based on the context: {ctx}, this statement is {{}}."
+                    )
+                    idx_contra = nli_res["labels"].index("contradiction")
+                    score_contra = nli_res["scores"][idx_contra]
+                    top_label = nli_res["labels"][0]
+                    nli_threshold = float(getattr(config, "semantic_nli_conflict_threshold", 0.5))
+                    if top_label == "contradiction" or score_contra > nli_threshold:
+                        is_contradiction = True
+                except Exception as nli_err:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Error calling NLI pipeline for contradiction check: {nli_err}")
+
+            # 2. Fallback to embedding distance/similarity
+            contradiction_score = float(1.0 - similarity)
+            if not is_contradiction:
+                if getattr(config, "nli_pipeline", None) is None:
+                    if contradiction_score > contradiction_alert_threshold:
+                        is_contradiction = True
+                else:
+                    if similarity < 0.0 and contradiction_score > contradiction_alert_threshold:
+                        is_contradiction = True
+
+            if is_contradiction:
                 contradictory_contexts.append(ctx)
 
-        # SIEMPRE retornar el max_contradiction real — nunca descartar la señal.
-        # Antes retornaba 0.0 si ningún chunk superaba el umbral, lo cual
-        # ocultaba disonancias de fase reales (e.g., 0.32 queda invisible).
-        return max_contradiction, contradictory_contexts
+        # Groundedness/Coverage distance: how much of C is present in Y (1.0 - max_similarity)
+        # We clip max_similarity to [0.0, 1.0] for coverage, so if the most similar chunk has S <= 0.0, coverage distance is 1.0.
+        coverage_dist = 1.0 - max(0.0, max_similarity)
+
+        # Contradiction distance: active contradiction (max(0.0, -min_similarity))
+        # If any chunk has a negative similarity (contradiction), we penalize it.
+        contradiction_dist = max(0.0, -min_similarity)
+
+        # d_context is the maximum of the two distances, bounded between 0.0 and 1.0
+        d_context = max(coverage_dist, contradiction_dist)
+
+        return d_context, contradictory_contexts
     except Exception:
         return 0.0, []
 
