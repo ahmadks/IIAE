@@ -118,7 +118,6 @@ def test_pipeline_with_persistence():
             context_policies=["test transaction 123"],
         )
         
-        # Verify CTM nodes saved on disk
         assert os.path.exists(ctm_nodes)
         assert os.path.exists(ctm_root)
         with open(ctm_root, "r") as f:
@@ -161,3 +160,64 @@ def test_ctm_modes():
     result_dis = wrapper_dis.pipeline.execute("test log", ["test log"], ["test log"])
     assert result_dis["kernel_result"] == {"status": "disabled"}
     assert result_dis["audit_receipt"] == {"status": "disabled"}
+
+def test_lightweight_ledger_excluding_distribution():
+    import numpy as np
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ctm_nodes = os.path.join(tmpdir, "ctm_nodes.json")
+        ctm_root = os.path.join(tmpdir, "ctm_root.txt")
+        ctm_wal = os.path.join(tmpdir, "ctm_wal.log")
+        
+        config = AuditConfig(
+            rigidity_epsilon=0.5,
+            ctm_mode="full",
+            ctm_nodes_path=ctm_nodes,
+            ctm_root_path=ctm_root,
+            ctm_wal_path=ctm_wal,
+        )
+        
+        wrapper = NotaryClient(config)
+        
+        # Directly invoke the pipeline with a stringified distribution vector as llm_output
+        audit_res = wrapper.pipeline.pipeline.execute_audit(
+            user_prompt="test transaction with vector",
+            rag_context="test transaction with vector",
+            llm_output="[0.25, 0.25, 0.25, 0.25]",
+        )
+        
+        # Verify that ctm_nodes.json exists and does NOT contain "distribution" inside node payload
+        assert os.path.exists(ctm_nodes)
+        nodes_data = []
+        with open(ctm_nodes, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    nodes_data.append(json.loads(line))
+            
+        for node in nodes_data:
+            # Genesis has metadata, COMMIT has payload
+            payload_dict = node.get("payload", {})
+            logical_payload = payload_dict.get("payload", {})
+            if logical_payload.get("type") == "COMMIT":
+                # Ensure no distribution vector in the committed state of the Ledger node
+                assert "distribution" not in logical_payload
+                assert "distribution" not in logical_payload.get("canonical_state", {})
+                
+                # Check that it contains the forensic summary and dissonance components instead
+                assert "canonical_state_hash" in logical_payload.get("canonical_state", {})
+                assert "dissonance_components" in logical_payload.get("canonical_state", {})
+                
+        # Verify that the WAL log file contains the full CanonicalState including the distribution
+        assert os.path.exists(ctm_wal)
+        with open(ctm_wal, "r") as f:
+            wal_lines = f.readlines()
+            
+        found_distribution = False
+        for line in wal_lines:
+            if "test transaction with vector" in line:
+                entry = json.loads(line)
+                tx_payload = entry.get("payload", {})
+                if "distribution" in tx_payload:
+                    assert tx_payload["distribution"] == [0.25, 0.25, 0.25, 0.25]
+                    found_distribution = True
+                    
+        assert found_distribution is True
