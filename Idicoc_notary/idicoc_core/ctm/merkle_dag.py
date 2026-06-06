@@ -259,6 +259,7 @@ class CustodialTraceManager:
         aem_counters: Optional[Dict[str, int]] = None,
         transaction_id: Optional[str] = None,
         violations: Optional[List[str]] = None,
+        dissonance_components: Optional[Dict[str, float]] = None,
     ) -> MerkleNode:
         pg_val = getattr(property_graph, "nodes", property_graph)
         
@@ -284,6 +285,8 @@ class CustodialTraceManager:
                 "violated_policies": violations or [],
                 "is_admitted": float(dissonance) <= float(epsilon) if not (math.isinf(dissonance) or math.isnan(dissonance)) else False
             }
+            if dissonance_components is not None:
+                cs_payload["dissonance_components"] = dissonance_components
             # Strip distribution from property graph as well
             pg_payload = self._strip_distribution(self._safe_serialize(pg_val))
 
@@ -315,23 +318,28 @@ class CustodialTraceManager:
         d_s: float,
         is_admitted: bool,
         violations: List[str],
-        transaction_id: Optional[str] = None
+        transaction_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
+        dissonance_components: Optional[Dict[str, float]] = None,
     ) -> None:
         """
         Commit a trace to the cryptographic Merkle DAG.
         This represents the forensic immutable trace logging.
         """
         from datetime import datetime, timezone
-        timestamp = datetime.now(timezone.utc).isoformat()
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc).isoformat()
 
         if isinstance(context, dict):
             user_prompt = context.get("user_prompt", "")
             rag_context = context.get("rag_context", "")
             metadata = context.get("metadata", {})
+            dist_val = context.get("distribution") or metadata.get("distribution")
         else:
             user_prompt = context.user_prompt
             rag_context = context.rag_context
             metadata = context.metadata or {}
+            dist_val = getattr(context, "distribution", None) or metadata.get("distribution")
 
         logical_payload = {
             "user_prompt": user_prompt,
@@ -343,11 +351,37 @@ class CustodialTraceManager:
             "timestamp": timestamp
         }
 
-        # Include distribution vector in metadata if present for the full state hash
-        if "distribution" in metadata:
-            logical_payload["distribution"] = metadata["distribution"]
+        # Extract/Include distribution vector if present for the full state hash
+        if dist_val is None:
+            try:
+                if isinstance(output, str) and (output.startswith("[") or "array" in output):
+                    import ast
+                    parsed = ast.literal_eval(output)
+                    if isinstance(parsed, (list, tuple)):
+                        dist_val = list(parsed)
+            except Exception:
+                pass
+
+        if dist_val is not None:
+            if hasattr(dist_val, "tolist"):
+                dist_val = dist_val.tolist()
+            logical_payload["distribution"] = dist_val
 
         invariant_state_hash = sha256_hex(canonical_json(logical_payload))
+
+        if dissonance_components is None:
+            dissonance_components = {
+                "d_axiomatic": d_s,
+                "d_context": 0.0
+            }
+            if isinstance(context, dict):
+                metrics = context.get("metrics") or context.get("metadata", {}).get("audit_metrics")
+            else:
+                metrics = getattr(context, "metrics", None) or (context.metadata or {}).get("audit_metrics")
+            
+            if isinstance(metrics, dict):
+                dissonance_components["d_context"] = float(metrics.get("d_context", 0.0))
+                dissonance_components["d_axiomatic"] = float(metrics.get("d_logic", metrics.get("d_2", d_s)))
 
         if is_admitted:
             self.commit(
@@ -356,14 +390,16 @@ class CustodialTraceManager:
                 dissonance=d_s,
                 invariant_state_hash=invariant_state_hash,
                 transaction_id=transaction_id,
-                violations=violations
+                violations=violations,
+                dissonance_components=dissonance_components
             )
         else:
             self.seal_failure(
                 snapshot=logical_payload,
                 timestamp=timestamp,
                 transaction_id=transaction_id,
-                violations=violations
+                violations=violations,
+                dissonance_components=dissonance_components
             )
 
     def seal_failure(
@@ -371,7 +407,8 @@ class CustodialTraceManager:
         snapshot: Dict[str, Any],
         timestamp: str,
         transaction_id: Optional[str] = None,
-        violations: Optional[List[str]] = None
+        violations: Optional[List[str]] = None,
+        dissonance_components: Optional[Dict[str, float]] = None,
     ) -> MerkleNode:
         # Calculate full hash first
         snapshot_hash = self._hash_commitment(snapshot)
@@ -388,6 +425,8 @@ class CustodialTraceManager:
                 "violated_policies": violations or snapshot.get("violations") or [],
                 "is_admitted": False
             }
+            if dissonance_components is not None:
+                snapshot_payload["dissonance_components"] = dissonance_components
 
         logical_payload = {
             "type": "FAILURE",

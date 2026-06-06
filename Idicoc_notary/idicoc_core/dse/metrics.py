@@ -133,8 +133,53 @@ def _compute_d_6(s6_dist_k: float, s6_prime_dist_k: float) -> float:
     return s6_dist_k + s6_prime_dist_k
 
 
+def _is_chunk_critical(ctx: str, evaluator: Any) -> bool:
+    if evaluator is None or not hasattr(evaluator, "graph") or not evaluator.graph:
+        return False
+    # Get all hard policies in the graph
+    hard_policies = [ax for ax in evaluator.graph.nodes.values() if ax.get("hardness") == "hard"]
+    if not hard_policies:
+        return False
+    
+    # Try to encode ctx for semantic similarity checks
+    ctx_emb = None
+    try:
+        from idicoc_core.utils.embedding_service import EmbeddingService
+        embed_service = EmbeddingService()
+        ctx_emb = embed_service.encode(ctx)
+    except Exception:
+        pass
+    
+    import re
+    for ax in hard_policies:
+        a_type = ax.get("policy_type", "fact")
+        if a_type in ("regex", "numeric"):
+            pattern = ax.get("pattern", ax.get("text", ""))
+            if pattern:
+                try:
+                    if re.search(pattern, ctx, re.IGNORECASE):
+                        return True
+                except Exception:
+                    pass
+        elif ctx_emb is not None:
+            ax_emb = ax.get("embedding")
+            if ax_emb is not None:
+                try:
+                    ctx_emb_arr = np.asarray(ctx_emb, dtype=float)
+                    ax_emb_arr = np.asarray(ax_emb, dtype=float)
+                    norm_a = np.linalg.norm(ctx_emb_arr)
+                    norm_b = np.linalg.norm(ax_emb_arr)
+                    if norm_a > 1e-12 and norm_b > 1e-12:
+                        sim = float(np.dot(ctx_emb_arr / norm_a, ax_emb_arr / norm_b))
+                        if sim >= 0.6:
+                            return True
+                except Exception:
+                    pass
+    return False
+
+
 def _compute_context_contradiction(
-    y: Any, context_input: List[str], config: Any
+    y: Any, context_input: List[str], config: Any, user_prompt: str = "", evaluator: Any = None
 ) -> Tuple[float, List[str]]:
     """
     Middleware de Integridad RAG→LLM: mide la disonancia de fase entre la
@@ -220,29 +265,60 @@ def _compute_context_contradiction(
             return 0.0, []
         audit_emb = audit_emb / audit_norm
 
-        max_similarity = -1.0
-        min_similarity = 1.0
-        contradictory_contexts = []
+        prompt_emb = None
+        if user_prompt:
+            try:
+                prompt_emb = _encode_text(user_prompt)
+                prompt_norm = np.linalg.norm(prompt_emb)
+                if prompt_norm > 1e-12:
+                    prompt_emb = prompt_emb / prompt_norm
+                else:
+                    prompt_emb = None
+            except Exception:
+                pass
 
+        context_embs = []
         for ctx in context_input:
             if not ctx.strip():
+                context_embs.append(None)
                 continue
-
             try:
                 ctx_emb = _encode_text(ctx)
+                ctx_norm = np.linalg.norm(ctx_emb)
+                if ctx_norm > 1e-12:
+                    context_embs.append(ctx_emb / ctx_norm)
+                else:
+                    context_embs.append(None)
             except Exception:
-                try:
-                    ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
-                except TypeError:
-                    ctx_emb = embedder.encode(ctx)
+                context_embs.append(None)
 
-            ctx_emb = np.asarray(ctx_emb, dtype=float)
-            ctx_norm = np.linalg.norm(ctx_emb)
-            if ctx_norm < 1e-12:
+        # 1. Determine if the primary fact is present
+        primary_idx = 0
+        if prompt_emb is not None and len(context_embs) > 1:
+            prompt_similarities = []
+            for c_emb in context_embs:
+                if c_emb is not None:
+                    prompt_similarities.append(float(np.dot(prompt_emb, c_emb)))
+                else:
+                    prompt_similarities.append(-1.0)
+            primary_idx = int(np.argmax(prompt_similarities))
+
+        is_primary_present = False
+        if primary_idx < len(context_embs) and context_embs[primary_idx] is not None:
+            primary_sim = float(np.dot(audit_emb, context_embs[primary_idx]))
+            is_primary_present = primary_sim >= 0.70
+
+        max_similarity = -1.0
+        min_similarity = 1.0
+        max_contradiction_score = 0.0
+        max_coverage_score = 0.0
+        contradictory_contexts = []
+
+        for idx, ctx in enumerate(context_input):
+            if idx >= len(context_embs) or context_embs[idx] is None:
                 continue
-            ctx_emb = ctx_emb / ctx_norm
 
-            # Cosine similarity between LLM output and this RAG chunk
+            ctx_emb = context_embs[idx]
             similarity = float(np.dot(audit_emb, ctx_emb))
             similarity = max(-1.0, min(1.0, similarity))
 
@@ -284,17 +360,19 @@ def _compute_context_contradiction(
 
             if is_contradiction:
                 contradictory_contexts.append(ctx)
-
-        # Groundedness/Coverage distance: how much of C is present in Y (1.0 - max_similarity)
-        # We clip max_similarity to [0.0, 1.0] for coverage, so if the most similar chunk has S <= 0.0, coverage distance is 1.0.
-        coverage_dist = 1.0 - max(0.0, max_similarity)
-
-        # Contradiction distance: active contradiction (max(0.0, -min_similarity))
-        # If any chunk has a negative similarity (contradiction), we penalize it.
-        contradiction_dist = max(0.0, -min_similarity)
+                max_contradiction_score = max(max_contradiction_score, contradiction_score)
+            else:
+                coverage_score = 1.0 - max(0.0, similarity)
+                is_critical = _is_chunk_critical(ctx, evaluator)
+                if not is_critical:
+                    coverage_score *= 0.1
+                elif is_primary_present:
+                    coverage_score *= 0.3
+                max_coverage_score = max(max_coverage_score, coverage_score)
 
         # d_context is the maximum of the two distances, bounded between 0.0 and 1.0
-        d_context = max(coverage_dist, contradiction_dist)
+        d_context = max(max_coverage_score, max_contradiction_score, max(0.0, -min_similarity))
+        d_context = max(0.0, min(1.0, d_context))
 
         return d_context, contradictory_contexts
     except Exception:

@@ -500,24 +500,47 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         d5 = 0.0
         d6 = 0.0
 
+        evaluator_instance = None
+        if self._graph is not None:
+            evaluator_instance = PropertyGraphEvaluator(self._graph)
+
         d_context, contradictory_contexts = _compute_context_contradiction(
-            audit_input, context_input, self.config
+            audit_input, context_input, self.config, evaluator=evaluator_instance
         )
 
         if d2 == float("inf") or d3 == float("inf"):
             d_s = float("inf")
         else:
-            d_s = (
-                self.lambda_0 * d0
-                + self.lambda_1 * d1
-                + self.lambda_2 * d2
-                + self.lambda_3 * d3
-                + self.lambda_4 * d4
-                + self.lambda_5 * d5
-                + self.lambda_6 * d6
-            )
+            active_weights_sum = 0.0
+            policy_dissonance_sum = 0.0
 
-        d_s = max(d_s, d_context)
+            has_logic_policies = False
+            has_temporal_policies = False
+            if self._graph is not None:
+                has_logic_policies = any(ax.get("policy_type") != "temporal" for ax in self._graph.nodes.values())
+                has_temporal_policies = any(ax.get("policy_type") == "temporal" for ax in self._graph.nodes.values())
+
+            if d0 > 0.0 and self.lambda_0 > 0.0:
+                policy_dissonance_sum += self.lambda_0 * d0
+                active_weights_sum += self.lambda_0
+            if d1 > 0.0 and self.lambda_1 > 0.0:
+                policy_dissonance_sum += self.lambda_1 * d1
+                active_weights_sum += self.lambda_1
+            if has_logic_policies and self.lambda_2 > 0.0:
+                policy_dissonance_sum += self.lambda_2 * d2
+                active_weights_sum += self.lambda_2
+            if has_temporal_policies and self.lambda_3 > 0.0:
+                policy_dissonance_sum += self.lambda_3 * d3
+                active_weights_sum += self.lambda_3
+
+            if active_weights_sum > 0.0:
+                policy_dissonance = policy_dissonance_sum / active_weights_sum
+            else:
+                policy_dissonance = 0.0
+
+            lambda_context = float(getattr(self.config, "lambda_context", 0.4))
+            d_s = (1.0 - lambda_context) * policy_dissonance + lambda_context * d_context
+            d_s = max(d_s, d_context * lambda_context)
 
         effective_threshold = self.correction_base_tolerance + epsilon
         is_compliant = d_s <= effective_threshold
@@ -577,13 +600,43 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         if d2 == float("inf") or d3 == float("inf"):
             d_s = float("inf")
         else:
-            d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
+            active_weights_sum = 0.0
+            policy_dissonance_sum = 0.0
+
+            has_logic_policies = False
+            has_temporal_policies = False
+            if G_t is not None:
+                has_logic_policies = any(ax.get("policy_type") != "temporal" for ax in G_t.nodes.values())
+                has_temporal_policies = any(ax.get("policy_type") == "temporal" for ax in G_t.nodes.values())
+
+            policy_dissonance_sum += self.lambda_1 * d1
+            active_weights_sum += self.lambda_1
+
+            if has_logic_policies:
+                policy_dissonance_sum += self.lambda_2 * d2
+                active_weights_sum += self.lambda_2
+            if has_temporal_policies:
+                policy_dissonance_sum += self.lambda_3 * d3
+                active_weights_sum += self.lambda_3
+
+            if active_weights_sum > 0.0:
+                d_s = policy_dissonance_sum / active_weights_sum
+            else:
+                d_s = 0.0
 
         d_context = 0.0
         if context_input:
-            d_context, _ = _compute_context_contradiction(y, context_input, self.config)
+            evaluator_instance = PropertyGraphEvaluator(G_t) if G_t is not None else None
+            d_context, _ = _compute_context_contradiction(
+                y, context_input, self.config, evaluator=evaluator_instance
+            )
 
-        return max(d_s, d_context)
+        if d_s == float("inf"):
+            return float("inf")
+
+        lambda_context = float(getattr(self.config, "lambda_context", 0.4))
+        d_s_final = (1.0 - lambda_context) * d_s + lambda_context * d_context
+        return max(d_s_final, d_context * lambda_context)
 
     def select_canonical_input(self, canonical_state: Any) -> np.ndarray:
         return canonical_state.measure_vector
@@ -737,7 +790,7 @@ class DissonanceStateEvaluator:
 
         # Semantic/RAG contradiction
         d_context, contradictory_contexts = _compute_context_contradiction(
-            eval_input, context_input, self.config
+            eval_input, context_input, self.config, session_context.user_prompt, evaluator
         )
 
         for ctx_text in contradictory_contexts:
@@ -800,26 +853,33 @@ class DissonanceStateEvaluator:
                 has_logic_policies = False
                 has_temporal_policies = False
 
-            # Graph-based policy weights sum and dissonance
-            graph_weights_sum = 0.0
-            graph_dissonance = 0.0
+            active_weights_sum = 0.0
+            policy_dissonance_sum = 0.0
+
+            has_d1 = False
+            if (
+                isinstance(eval_input, np.ndarray)
+                or hasattr(eval_input, "distribution")
+                or isinstance(eval_input, list)
+            ):
+                has_d1 = True
+
+            if has_d1:
+                policy_dissonance_sum += weights[1] * d1
+                active_weights_sum += weights[1]
 
             if has_logic_policies:
-                graph_dissonance += weights[2] * d_logic
-                graph_weights_sum += weights[2]
+                policy_dissonance_sum += weights[2] * d_logic
+                active_weights_sum += weights[2]
+
             if has_temporal_policies:
-                graph_dissonance += weights[3] * d_temporal
-                graph_weights_sum += weights[3]
+                policy_dissonance_sum += weights[3] * d_temporal
+                active_weights_sum += weights[3]
 
-            if graph_weights_sum > 0.0:
-                normalized_graph_dissonance = graph_dissonance / graph_weights_sum
+            if active_weights_sum > 0.0:
+                policy_dissonance = policy_dissonance_sum / active_weights_sum
             else:
-                normalized_graph_dissonance = 0.0
-
-            # policy_dissonance combines uniqueness axiom (d1) and graph policies (logic/temporal):
-            # We keep weights[1] * d1 as absolute, and normalize the graph policies over their combined weight (weights[2] + weights[3])
-            total_graph_weight = weights[2] + weights[3]
-            policy_dissonance = weights[1] * d1 + total_graph_weight * normalized_graph_dissonance
+                policy_dissonance = 0.0
 
             # Integrar d_context como término ponderado + floor de seguridad
             # D_s = (1 - λ_context) * D_policy + λ_context * d_context

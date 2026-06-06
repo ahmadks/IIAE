@@ -121,8 +121,11 @@ class AuditPipeline:
                     try:
                         self.ctm.commit(
                             canonical_state=payload,
+                            timestamp=payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
                             dissonance=payload.get("dissonance", 0.0),
-                            timestamp=payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+                            transaction_id=tx_id,
+                            violations=payload.get("violations"),
+                            dissonance_components=payload.get("dissonance_components")
                         )
                         self.wal.mark_completed(tx_id)
                     except Exception as exc:
@@ -246,6 +249,7 @@ class AuditPipeline:
             # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
             if self.config.ctm_mode == "full":
                 tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
+                timestamp = datetime.now(timezone.utc).isoformat()
                 wal_payload = {
                     "user_prompt": user_prompt,
                     "rag_context": rag_context,
@@ -253,10 +257,49 @@ class AuditPipeline:
                     "dissonance": d_s,
                     "is_admitted": is_admitted,
                     "violations": violations,
+                    "timestamp": timestamp,
                 }
+
+                # Check for distribution to include in WAL payload
+                dist_val = None
+                if isinstance(context, dict):
+                    dist_val = context.get("distribution") or context.get("metadata", {}).get("distribution")
+                else:
+                    dist_val = getattr(context, "distribution", None) or (context.metadata or {}).get("distribution")
+                
+                if dist_val is None:
+                    try:
+                        if isinstance(llm_output, str) and (llm_output.startswith("[") or "array" in llm_output):
+                            import ast
+                            parsed = ast.literal_eval(llm_output)
+                            if isinstance(parsed, (list, tuple)):
+                                dist_val = list(parsed)
+                    except Exception:
+                        pass
+
+                if dist_val is not None:
+                    if hasattr(dist_val, "tolist"):
+                        dist_val = dist_val.tolist()
+                    wal_payload["distribution"] = dist_val
+
+                dissonance_components = {
+                    "d_axiomatic": float(raw_metrics.get("d_logic", d_s)),
+                    "d_context": float(raw_metrics.get("d_context", 0.0))
+                }
+                wal_payload["dissonance_components"] = dissonance_components
+
                 self.wal.write(tx_id, wal_payload)
                 try:
-                    self.ctm.commit_trace(context, llm_output, d_s, is_admitted, violations, transaction_id=tx_id)
+                    self.ctm.commit_trace(
+                        context,
+                        llm_output,
+                        d_s,
+                        is_admitted,
+                        violations,
+                        transaction_id=tx_id,
+                        timestamp=timestamp,
+                        dissonance_components=dissonance_components
+                    )
                     self.wal.mark_completed(tx_id)
                 except Exception as exc:
                     logger.error(f"CTM commit failure: {exc}")
