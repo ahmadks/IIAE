@@ -22,9 +22,10 @@ class EmbeddingService:
     @classmethod
     def set_provider(cls, provider: Any) -> None:
         """Configura un proveedor de embeddings mockeable de forma global."""
-        cls._provider = provider
-        if cls._instance is not None:
-            cls._instance._models.clear()
+        if cls._provider is not provider:
+            cls._provider = provider
+            if cls._instance is not None:
+                cls._instance._models.clear()
 
     def __new__(cls) -> "EmbeddingService":
         with cls._lock:

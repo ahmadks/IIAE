@@ -352,7 +352,7 @@ def _compute_context_contradiction(
             contradiction_score = float(1.0 - similarity)
             if not is_contradiction:
                 if getattr(config, "nli_pipeline", None) is None:
-                    if contradiction_score > contradiction_alert_threshold:
+                    if similarity < 0.0 and contradiction_score > contradiction_alert_threshold:
                         is_contradiction = True
                 else:
                     if (similarity < 0.0 or len(context_input) == 1) and contradiction_score > contradiction_alert_threshold:
