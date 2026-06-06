@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from idicoc_notary.api.schemas import SessionContext
+from idicoc_core.api.schemas import SessionContext
 
 class HardwareMask:
     """

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from idicoc_notary.utils import BaseLLMProvider
+from idicoc_core.utils import BaseLLMProvider
 import os
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from idicoc_notary.isg.loader import PolicyLoader
+    from idicoc_core.isg.loader import PolicyLoader
 
 # Default configuration values
 DEFAULT_DISSONANCE_WEIGHTS = (
@@ -42,8 +42,8 @@ class AuditConfig:
     instance_name: str = "ai_comercial"
 
     # Paths de persistencia inyectables para CTM.
-    ctm_nodes_path: str = "tests/results/ctm_nodes.json"
-    ctm_root_path: str = "ctm_root.txt"
+    ctm_nodes_path: str = "./tests/results/ctm_nodes.json"
+    ctm_root_path: str = "./ctm_root.txt"
     ctm_wal_path: str | None = None  # Si es None, se deriva automáticamente de ctm_nodes_path
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False
@@ -155,7 +155,7 @@ class AuditConfig:
         if self.llama_model is not None:
             self.llm_model = self.llama_model
 
-        from idicoc_notary.utils.embedding_service import EmbeddingService
+        from idicoc_core.utils.embedding_service import EmbeddingService
 
         # Set globally
         EmbeddingService.set_provider(self.embedding_provider)
@@ -204,7 +204,7 @@ class AuditConfig:
 
         # Calculate signature
         if not self.embedding_signature:
-            from idicoc_notary.utils.embedding_utils import compute_embedding_signature
+            from idicoc_core.utils.embedding_utils import compute_embedding_signature
 
             self.embedding_signature = compute_embedding_signature(self.semantic_embedding_model)
 
@@ -218,12 +218,12 @@ class AuditConfig:
             if not os.path.isabs(policy_path):
                 policy_path = os.path.abspath(os.path.join(package_root, policy_path))
             if os.path.exists(policy_path):
-                from idicoc_notary.isg.loader import FilePolicyLoader
+                from idicoc_core.isg.loader import FilePolicyLoader
 
                 self.policy_loader = FilePolicyLoader(policy_path)
 
         if self.dissonance_strategy is None:
-            from idicoc_notary.dse.evaluator import StructuralDissonanceStrategy
+            from idicoc_core.dse.evaluator import StructuralDissonanceStrategy
 
             self.dissonance_strategy = StructuralDissonanceStrategy
 
@@ -303,8 +303,8 @@ class AuditConfig:
                     self.w_bank = {}
                     return
 
-            from idicoc_notary.isg.loader import InvariantSynthesizer
-            from idicoc_notary.utils.embedding_service import EmbeddingService
+            from idicoc_core.isg.loader import InvariantSynthesizer
+            from idicoc_core.utils.embedding_service import EmbeddingService
 
             embedding_service = None
             try:
@@ -359,7 +359,7 @@ class AuditConfig:
             return
 
         try:
-            from idicoc_notary.dse.evaluator import DeterministicMUXLogitsProcessor
+            from idicoc_core.dse.evaluator import DeterministicMUXLogitsProcessor
 
             print(
                 f"[Fase 3 - Hot Loop] Inicializando DeterministicMUXLogitsProcessor. "

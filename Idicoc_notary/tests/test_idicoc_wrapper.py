@@ -2,9 +2,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.api.facade import NotaryClient
-from idicoc_notary.api.schemas import NotaryAuditResult
+from idicoc_core.config import AuditConfig
+from idicoc_core.api.facade import NotaryClient
+from idicoc_core.api.schemas import NotaryAuditResult
 
 def test_audit_config_properties():
     # Instantiating with default values
@@ -19,7 +19,7 @@ def test_audit_config_properties():
     assert config_warn.enable_hard_halt is False
 
 
-@patch('idicoc_notary.dse.evaluator.DissonanceStateEvaluator.evaluate')
+@patch('idicoc_core.dse.evaluator.DissonanceStateEvaluator.evaluate')
 def test_notary_client_auditar_success(mock_evaluate):
     mock_evaluate.return_value = (0.05, [], {"d_s": 0.05})
     config = AuditConfig(

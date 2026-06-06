@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Any, List, Optional
 
-from idicoc_notary.api.schemas import NotaryAuditResult
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
-from idicoc_notary.config import AuditConfig
+from idicoc_core.api.schemas import NotaryAuditResult
+from idicoc_core.pipeline.orchestrator import AuditPipeline
+from idicoc_core.config import AuditConfig
 
 
 class NotaryClient:

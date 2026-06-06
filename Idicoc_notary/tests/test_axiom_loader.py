@@ -1,6 +1,6 @@
 import os
 import pytest
-from idicoc_notary.isg import FilePolicyLoader, InlinePolicyLoader
+from idicoc_core.isg import FilePolicyLoader, InlinePolicyLoader
 
 def test_inline_policy_loader():
     policies = [{"id": "ax1", "text": "Test policy", "type": "fact"}]

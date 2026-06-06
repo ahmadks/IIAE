@@ -4,17 +4,36 @@ import math
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Dict, Tuple
 
-from idicoc_notary.api.schemas import NotaryAuditResult, SessionContext
-from idicoc_notary.dqe.context_parser import ContextParser
-from idicoc_notary.gating.hardware_mask import HardwareMask
-from idicoc_notary.isg.graph_manager import PropertyGraph
-from idicoc_notary.isg.loader import parse_policy_line
-from idicoc_notary.dse.evaluator import DissonanceStateEvaluator
-from idicoc_notary.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, EnvHardwareSealer, FileCTMStorage
-from idicoc_notary.ctm.wal_logger import WriteAheadLogger
-from idicoc_notary.utils.logger import get_logger
+from idicoc_core.api.schemas import NotaryAuditResult, SessionContext
+from idicoc_core.dqe.context_parser import ContextParser
+from idicoc_core.gating.hardware_mask import HardwareMask
+from idicoc_core.isg.graph_manager import PropertyGraph
+from idicoc_core.isg.loader import parse_policy_line
+from idicoc_core.dse.evaluator import DissonanceStateEvaluator
+from idicoc_core.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, EnvHardwareSealer, FileCTMStorage
+from idicoc_core.ctm.wal_logger import WriteAheadLogger
+from idicoc_core.utils.logger import get_logger
 
 logger = get_logger("pipeline.orchestrator")
+
+
+class AuditEntropyModule:
+    """Audit Entropy Module (AEM) to track the audit history and rejections."""
+
+    def __init__(self) -> None:
+        self.trail: List[Dict[str, Any]] = []
+
+    def record(self, case: Dict[str, Any]) -> None:
+        self.trail.append(case)
+
+    def get_audit_trail(self) -> List[Dict[str, Any]]:
+        return self.trail
+
+    def get_counters(self) -> Tuple[int, int, int]:
+        total = len(self.trail)
+        rejected = sum(1 for c in self.trail if c.get("admission_breach"))
+        valid = total - rejected
+        return total, valid, rejected
 
 
 class AuditPipeline:
@@ -85,6 +104,9 @@ class AuditPipeline:
         except Exception as exc:
             logger.error(f"WAL recovery failed: {exc}")
 
+        # 6. Initialize AEM (Audit Entropy Module)
+        self.aem = AuditEntropyModule()
+
         # Load initial policies
         self._load_initial_policies()
 
@@ -94,7 +116,7 @@ class AuditPipeline:
 
         try:
             policies_data = self.config.policy_loader.load_policies()
-            from idicoc_notary.utils.embedding_service import EmbeddingService
+            from idicoc_core.utils.embedding_service import EmbeddingService
             embed_service = EmbeddingService()
 
             for idx, policy_dict in enumerate(policies_data):
@@ -139,7 +161,7 @@ class AuditPipeline:
         added_dynamic_ids = []
         if context_policies:
             try:
-                from idicoc_notary.utils.embedding_service import EmbeddingService
+                from idicoc_core.utils.embedding_service import EmbeddingService
                 embed_service = EmbeddingService()
 
                 for idx, ax_item in enumerate(context_policies):
@@ -217,7 +239,7 @@ class AuditPipeline:
             # 6. Return Clean DTO
             integrity_score = float(max(0.0, 1.0 - d_s) if d_s != float('inf') and not math.isnan(d_s) else 0.0)
 
-            return NotaryAuditResult(
+            result = NotaryAuditResult(
                 is_admitted=is_admitted,
                 integrity_score=integrity_score,
                 dissonance_ds=d_s,
@@ -226,6 +248,20 @@ class AuditPipeline:
                 session_context=session_context,
                 metrics=raw_metrics
             )
+
+            # Record in AEM
+            self.aem.record({
+                "admission_breach": not is_admitted,
+                "d_s": d_s,
+                "violated_policies": violations,
+                "epsilon_used": allowed_eps,
+                "epsilon": allowed_eps,
+                "user_input": user_prompt,
+                "audit_input": llm_output,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            return result
         finally:
             # Remove dynamic policies to prevent mutating the graph permanently
             if added_dynamic_ids:
@@ -235,7 +271,7 @@ class AuditPipeline:
 
     def _build_rejection(self, reason: str, session_context: SessionContext) -> NotaryAuditResult:
         allowed_eps = self.config.allowed_epsilon
-        return NotaryAuditResult(
+        result = NotaryAuditResult(
             is_admitted=False,
             integrity_score=0.0,
             dissonance_ds=float("inf"),
@@ -244,3 +280,14 @@ class AuditPipeline:
             session_context=session_context,
             metrics={"error": reason}
         )
+        self.aem.record({
+            "admission_breach": True,
+            "d_s": float("inf"),
+            "violated_policies": [reason],
+            "epsilon_used": allowed_eps,
+            "epsilon": allowed_eps,
+            "user_input": session_context.user_prompt,
+            "audit_input": "Stage 2: Hardware Mask Containment Breach",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        return result

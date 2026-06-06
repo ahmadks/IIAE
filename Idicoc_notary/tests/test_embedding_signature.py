@@ -1,6 +1,6 @@
 import pytest
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.utils.embedding_utils import compute_embedding_signature
+from idicoc_core.config import AuditConfig
+from idicoc_core.utils.embedding_utils import compute_embedding_signature
 import hashlib
 import json
 

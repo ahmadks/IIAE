@@ -7,8 +7,8 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.dse.evaluator import StructuralDissonanceStrategy
+from idicoc_core.config import AuditConfig
+from idicoc_core.dse.evaluator import StructuralDissonanceStrategy
 
 
 class MockAuditInput:

@@ -4,7 +4,7 @@ import json
 import hashlib
 import threading
 from typing import Any, Dict
-from idicoc_notary.utils.logger import get_logger
+from idicoc_core.utils.logger import get_logger
 
 class WriteAheadLogger:
     """

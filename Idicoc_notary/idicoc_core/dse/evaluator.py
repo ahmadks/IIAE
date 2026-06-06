@@ -8,11 +8,11 @@ import numpy as np
 import torch
 from transformers import LogitsProcessor
 
-from idicoc_notary.isg.graph_manager import PropertyGraph
-from idicoc_notary.api.schemas import SessionContext
-from idicoc_notary.utils.logger import get_logger
-from idicoc_notary.utils.string_utils import StringUtils
-from idicoc_notary.dse.metrics import (
+from idicoc_core.isg.graph_manager import PropertyGraph
+from idicoc_core.api.schemas import SessionContext
+from idicoc_core.utils.logger import get_logger
+from idicoc_core.utils.string_utils import StringUtils
+from idicoc_core.dse.metrics import (
     _cosine_distance,
     _compute_d_0,
     _compute_d_1,
@@ -245,7 +245,7 @@ class PropertyGraphEvaluator:
 
         ax_embedding: Optional[list] = policy.get("embedding")
         if ax_embedding is None:
-            from idicoc_notary.utils.embedding_service import EmbeddingService
+            from idicoc_core.utils.embedding_service import EmbeddingService
             try:
                 ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
                 policy["embedding"] = ax_embedding
@@ -255,7 +255,7 @@ class PropertyGraphEvaluator:
                 ) from e
 
         if y_vec is None:
-            from idicoc_notary.utils.embedding_service import EmbeddingService
+            from idicoc_core.utils.embedding_service import EmbeddingService
             try:
                 y_text = self._to_str(y)
                 y_vec = EmbeddingService().encode(y_text).tolist()
@@ -264,7 +264,7 @@ class PropertyGraphEvaluator:
                     f"Failed to generate embedding for input text: '{y_text}' due to: {e}"
                 ) from e
         elif ax_embedding is not None and len(y_vec) != len(ax_embedding):
-            from idicoc_notary.utils.embedding_service import EmbeddingService
+            from idicoc_core.utils.embedding_service import EmbeddingService
             try:
                 y_text = self._to_str(y)
                 y_vec = EmbeddingService().encode(y_text).tolist()
@@ -463,7 +463,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         try:
             n_ref = mu.size
             if n_ref > 0:
-                from idicoc_notary.utils.embedding_service import EmbeddingService
+                from idicoc_core.utils.embedding_service import EmbeddingService
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
                 k_vector = embed_service.encode(axiom_of_uniqueness_text)
@@ -762,7 +762,7 @@ class DissonanceStateEvaluator:
                 mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
                 n_ref = mu.size
                 
-                from idicoc_notary.utils.embedding_service import EmbeddingService
+                from idicoc_core.utils.embedding_service import EmbeddingService
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
                 k_vector = embed_service.encode(axiom_of_uniqueness_text)
@@ -782,8 +782,8 @@ class DissonanceStateEvaluator:
             else:
                 # Text input: compute distance relative to uniqueness axiom text
                 # d1 is cosine distance of text to uniqueness text
-                from idicoc_notary.utils.embedding_service import EmbeddingService
-                from idicoc_notary.utils.data_converter import DataConverter
+                from idicoc_core.utils.embedding_service import EmbeddingService
+                from idicoc_core.utils.data_converter import DataConverter
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
                 

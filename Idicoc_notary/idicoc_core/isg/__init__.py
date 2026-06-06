@@ -1,5 +1,5 @@
-from idicoc_notary.isg.graph_manager import PropertyGraph
-from idicoc_notary.isg.loader import (
+from idicoc_core.isg.graph_manager import PropertyGraph
+from idicoc_core.isg.loader import (
     PolicyLoader,
     InlinePolicyLoader,
     FilePolicyLoader,

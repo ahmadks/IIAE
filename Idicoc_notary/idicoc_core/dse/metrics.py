@@ -148,7 +148,7 @@ def _compute_context_contradiction(
         return 0.0, []
 
     try:
-        from idicoc_notary.utils.embedding_service import EmbeddingService
+        from idicoc_core.utils.embedding_service import EmbeddingService
 
         embed_service = EmbeddingService()
         model_name = getattr(

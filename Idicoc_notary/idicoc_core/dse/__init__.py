@@ -1,4 +1,4 @@
-from idicoc_notary.dse.metrics import (
+from idicoc_core.dse.metrics import (
     _cosine_distance,
     _compute_d_0,
     _compute_d_1,
@@ -10,7 +10,7 @@ from idicoc_notary.dse.metrics import (
     _compute_d_6,
     _compute_context_contradiction,
 )
-from idicoc_notary.dse.evaluator import (
+from idicoc_core.dse.evaluator import (
     DissonanceStateEvaluator,
     PropertyGraphEvaluator,
     StructuralDissonanceStrategy,

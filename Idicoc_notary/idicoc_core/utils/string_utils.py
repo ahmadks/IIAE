@@ -10,7 +10,7 @@ class StringUtils:
     @classmethod
     def get_embedding_model(cls, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> Any:
         """Carga y devuelve el modelo de embeddings usando el servicio central."""
-        from idicoc_notary.utils.embedding_service import EmbeddingService
+        from idicoc_core.utils.embedding_service import EmbeddingService
 
         return EmbeddingService().get_embedder(model_name)
 

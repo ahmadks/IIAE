@@ -4,9 +4,9 @@ import pytest
 import tempfile
 import sys
 from types import ModuleType
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
-from idicoc_notary.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, FileCTMStorage
+from idicoc_core.config import AuditConfig
+from idicoc_core.pipeline.orchestrator import AuditPipeline
+from idicoc_core.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, FileCTMStorage
 
 class SemanticPayload:
     def __init__(self, source_text):
@@ -62,9 +62,9 @@ class IDICOCNotaryClientWrapper:
 
 IDICOCNotaryClient = IDICOCNotaryClientWrapper
 
-audit_mock = ModuleType("idicoc_notary_core.audit")
+audit_mock = ModuleType("idicoc_core.audit")
 audit_mock.SemanticPayload = SemanticPayload
-sys.modules["idicoc_notary_core.audit"] = audit_mock
+sys.modules["idicoc_core.audit"] = audit_mock
 
 
 def test_ctm_file_persistence():
@@ -111,7 +111,7 @@ def test_pipeline_with_persistence():
         wrapper = IDICOCNotaryClient(config)
         
         # Process a valid interaction
-        from idicoc_notary_core.audit import SemanticPayload
+        from idicoc_core.audit import SemanticPayload
         state = wrapper.process_interaction(
             audit_input=SemanticPayload("test transaction 123"),
             context_input=["test transaction 123"],
@@ -143,7 +143,7 @@ def test_ctm_modes():
     wrapper_log = IDICOCNotaryClient(config_log)
     
     # Process interaction
-    from idicoc_notary_core.audit import SemanticPayload
+    from idicoc_core.audit import SemanticPayload
     state_log = wrapper_log.process_interaction(
         SemanticPayload("test log"), ["test log"], ["test log"]
     )

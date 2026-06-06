@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from idicoc_notary.dse.evaluator import DeterministicMUXLogitsProcessor
-from idicoc_notary.isg.loader import InvariantSynthesizer
+from idicoc_core.dse.evaluator import DeterministicMUXLogitsProcessor
+from idicoc_core.isg.loader import InvariantSynthesizer
 
 
 class DummyTokenizer:

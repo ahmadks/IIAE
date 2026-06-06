@@ -30,12 +30,12 @@ Quick commands
 --------------
 - Run vulture (local):
     pip install vulture
-    vulture idicoc_notary/idicoc_notary_core --min-confidence 60
+    vulture idicoc_core/idicoc_core --min-confidence 60
 
 - Run ruff & mypy:
     pip install ruff mypy
-    ruff check idicoc_notary
-    mypy idicoc_notary
+    ruff check idicoc_core
+    mypy idicoc_core
 
 If you want, I can:
 - Scaffold Sphinx documentation with autodoc and add a CI workflow to build docs.

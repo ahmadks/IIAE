@@ -1,4 +1,4 @@
-# idicoc_notary/ctm/merkle_dag.py
+# idicoc_core/ctm/merkle_dag.py
 from __future__ import annotations
 import os
 import json
@@ -10,14 +10,14 @@ try:
 except ImportError:
     fcntl = None
 
-from idicoc_notary.utils.hashing import (
+from idicoc_core.utils.hashing import (
     canonical_json,
     hmac_sha256_hex,
     sha256_dict,
     sha256_hex,
 )
-from idicoc_notary.exceptions import DataCorruptionError, PersistenceError
-from idicoc_notary.api.schemas import SessionContext
+from idicoc_core.exceptions import DataCorruptionError, PersistenceError
+from idicoc_core.api.schemas import SessionContext
 
 
 class HardwareSealer(Protocol):

@@ -6,8 +6,8 @@ import math
 import numpy as np
 import pytest
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary import IDICOCNotaryClient
+from idicoc_core.config import AuditConfig
+from idicoc_core import IDICOCNotaryClient
 
 
 class DummyEmbedder:

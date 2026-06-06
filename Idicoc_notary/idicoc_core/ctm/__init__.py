@@ -1,4 +1,4 @@
-from idicoc_notary.ctm.merkle_dag import (
+from idicoc_core.ctm.merkle_dag import (
     CustodialTraceManager,
     MerkleDAG,
     MerkleNode,
@@ -8,7 +8,7 @@ from idicoc_notary.ctm.merkle_dag import (
     FileCTMStorage,
     CTMStorageBackend,
 )
-from idicoc_notary.ctm.wal_logger import WriteAheadLogger
+from idicoc_core.ctm.wal_logger import WriteAheadLogger
 
 __all__ = [
     "CustodialTraceManager",

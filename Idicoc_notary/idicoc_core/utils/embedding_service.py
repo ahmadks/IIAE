@@ -1,8 +1,8 @@
 from typing import Any, Dict
 import threading
 import logging
-from idicoc_notary.utils.logger import get_logger
-from idicoc_notary.utils.embedding_utils import compute_embedding_signature
+from idicoc_core.utils.logger import get_logger
+from idicoc_core.utils.embedding_utils import compute_embedding_signature
 
 
 class EmbeddingService:

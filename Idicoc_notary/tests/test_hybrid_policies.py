@@ -2,10 +2,10 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.dse.evaluator import PropertyGraphEvaluator
-from idicoc_notary.isg.graph_manager import PropertyGraph
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
+from idicoc_core.config import AuditConfig
+from idicoc_core.dse.evaluator import PropertyGraphEvaluator
+from idicoc_core.isg.graph_manager import PropertyGraph
+from idicoc_core.pipeline.orchestrator import AuditPipeline
 
 class ResultWrapper:
     def __init__(self, metadata, data=None):
@@ -22,7 +22,7 @@ class IDICOCPipelineWrapper:
         pass
 
     def execute(self, audit_input, context_input=None, context_policies=None, epsilon_override=None):
-        from idicoc_notary.utils.data_converter import DataConverter
+        from idicoc_core.utils.data_converter import DataConverter
         normalized_data = DataConverter.normalize_payload(audit_input)
         
         # Determine raw output text

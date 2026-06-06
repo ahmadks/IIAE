@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Protocol
 from dataclasses import dataclass
 import numpy as np
 
-from idicoc_notary.utils.logger import get_logger
+from idicoc_core.utils.logger import get_logger
 
 logger = get_logger("isg.policy_loader")
 

@@ -16,11 +16,11 @@ import math
 import pytest
 import numpy as np
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.api.facade import NotaryClient
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
-from idicoc_notary.dse.evaluator import PropertyGraphEvaluator
-from idicoc_notary.isg.graph_manager import PropertyGraph
+from idicoc_core.config import AuditConfig
+from idicoc_core.api.facade import NotaryClient
+from idicoc_core.pipeline.orchestrator import AuditPipeline
+from idicoc_core.dse.evaluator import PropertyGraphEvaluator
+from idicoc_core.isg.graph_manager import PropertyGraph
 
 class SemanticPayload:
     def __init__(self, source_text):

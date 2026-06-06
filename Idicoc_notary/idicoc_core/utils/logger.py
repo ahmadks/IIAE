@@ -136,11 +136,11 @@ def configure_logging(log_destination: str = "stdout") -> None:
     global _CONFIGURED_DESTINATION
     dest = log_destination or "stdout"
     if _CONFIGURED_DESTINATION == dest:
-        root = logging.getLogger("idicoc_notary")
+        root = logging.getLogger("idicoc_core")
         if root.handlers:
             return
 
-    root = logging.getLogger("idicoc_notary")
+    root = logging.getLogger("idicoc_core")
     root.handlers.clear()
     handler = _build_handler(dest)
     if not isinstance(handler, logging.NullHandler):
@@ -155,8 +155,8 @@ def get_logger(name: str) -> logging.Logger:
     if _CONFIGURED_DESTINATION is None:
         configure_logging(os.getenv("IIAE_LOG_DESTINATION", "stdout"))
 
-    if not name.startswith("idicoc_notary"):
-        name = f"idicoc_notary.{name}"
+    if not name.startswith("idicoc_core"):
+        name = f"idicoc_core.{name}"
 
     child = logging.getLogger(name)
     child.handlers.clear()

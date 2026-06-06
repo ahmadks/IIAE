@@ -26,13 +26,13 @@ Quickstart — Install, Tests & Demo
 6) Generate dead-code report (static scan)
 
     pip install vulture
-    vulture Idicoc_notary/idicoc_notary_core --min-confidence 60
+    vulture Idicoc_notary/idicoc_core --min-confidence 60
 
 7) Run full linter/static analysis
 
     pip install ruff mypy
     ruff check .
-    mypy idicoc_notary_core
+    mypy idicoc_core
 
 Notes & troubleshooting
 -----------------------
@@ -42,7 +42,7 @@ Notes & troubleshooting
 How to Add a New Provider
 -------------------------
 
-This project uses a provider abstraction for LLMs and embedding models. Providers must implement the `BaseLLMProvider` interface located in `idicoc_notary_core/audit/llm_interface.py`.
+This project uses a provider abstraction for LLMs and embedding models. Providers must implement the `BaseLLMProvider` interface located in `idicoc_core/audit/llm_interface.py`.
 
 Required steps to add a new Provider:
 

@@ -1,7 +1,7 @@
 import pytest
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
-from idicoc_notary.isg.loader import InlinePolicyLoader
+from idicoc_core.config import AuditConfig
+from idicoc_core.pipeline.orchestrator import AuditPipeline
+from idicoc_core.isg.loader import InlinePolicyLoader
 
 def test_pipeline_loads_policies_on_init():
     policies = [{"id": "test_ax_1", "text": "Test policy", "policy_type": "world"}]

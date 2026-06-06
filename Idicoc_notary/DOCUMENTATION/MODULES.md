@@ -1,23 +1,23 @@
 IDICOC Notary — Module Summary
 
-This file lists the primary packages and files in `idicoc_notary_core` with short descriptions and where to find the public API.
+This file lists the primary packages and files in `idicoc_core` with short descriptions and where to find the public API.
 
 Top-level packages
 ------------------
-- idicoc_notary_core.audit
+- idicoc_core.audit
   - `wrapper_pipeline.py` — `IDICOCNotaryClient`: primary public client for both numeric and semantic auditing.
   - `config.py` — `AuditConfig`: central configuration object; bootstraps cold-loop compilation.
   - `dse/` — Dynamic Schema Extractor: policy extraction, structural and semantic dissonance strategies.
   - `graph/` — Policy graph (PropertyGraph), loaders (Inline/File), invariant synth.
   - `persistence/` — CTM WAL and file backend for custody persistence.
 
-- idicoc_notary_core.kernel
+- idicoc_core.kernel
   - `pipeline/` — Kernel orchestrator implementing the 7-stage transform.
   - `custody/merkle_dag.py` — Merkle DAG custody and receipts.
   - `manifold/` — Manifold/CMC construction utilities.
   - `verification/` — Verifier registry and projection helpers.
 
-- idicoc_notary_core.utils
+- idicoc_core.utils
   - `embedding_service.py` — Centralized EmbeddingService used across DSE and synth.
   - `hashing.py` — SHA-256 helpers for structural signatures.
   - `logger.py` — Lightweight logger wrapper used throughout the codebase.

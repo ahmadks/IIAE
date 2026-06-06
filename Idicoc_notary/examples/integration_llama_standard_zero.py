@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 # Agregar directorio raíz al path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from idicoc_notary.config import AuditConfig
-from idicoc_notary import IDICOCNotaryClient
-from idicoc_notary.utils.logger import get_logger
+from idicoc_core.config import AuditConfig
+from idicoc_core import IDICOCNotaryClient
+from idicoc_core.utils.logger import get_logger
 from providers.model_downloader import ensure_llama_downloaded
 
 logger = get_logger("example.integration")

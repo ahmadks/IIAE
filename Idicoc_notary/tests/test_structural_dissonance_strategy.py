@@ -2,18 +2,18 @@ import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
-from idicoc_notary.dse.evaluator import StructuralDissonanceStrategy, PropertyGraphEvaluator
-from idicoc_notary.config import AuditConfig
-from idicoc_notary.pipeline.orchestrator import AuditPipeline
-from idicoc_notary.isg.graph_manager import PropertyGraph
+from idicoc_core.dse.evaluator import StructuralDissonanceStrategy, PropertyGraphEvaluator
+from idicoc_core.config import AuditConfig
+from idicoc_core.pipeline.orchestrator import AuditPipeline
+from idicoc_core.isg.graph_manager import PropertyGraph
 
 @pytest.fixture
 def strategy():
     config = AuditConfig()
     return StructuralDissonanceStrategy(config)
 
-@patch('idicoc_notary.utils.string_utils.StringUtils.to_vector')
-@patch('idicoc_notary.dse.evaluator._compute_d_1_vectorized')
+@patch('idicoc_core.utils.string_utils.StringUtils.to_vector')
+@patch('idicoc_core.dse.evaluator._compute_d_1_vectorized')
 def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, strategy):
     """
     Verifica que StructuralDissonanceStrategy combina correctamente las métricas
@@ -36,8 +36,8 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
     mock_d1_vec.return_value = 0.2
     
     # Mock the PropertyGraphEvaluator methods since the strategy now instantiates it
-    with patch('idicoc_notary.dse.evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
-         patch('idicoc_notary.dse.evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
+    with patch('idicoc_core.dse.evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
+         patch('idicoc_core.dse.evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
         
         d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
         
@@ -49,7 +49,7 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
         mock_temp.assert_called_once_with("candidato")
 
 
-@patch('idicoc_notary.dse.evaluator.DissonanceStateEvaluator.evaluate')
+@patch('idicoc_core.dse.evaluator.DissonanceStateEvaluator.evaluate')
 def test_pipeline_graph_integration(mock_evaluate):
     """
     Verifica que el pipeline delega la ejecución de la disonancia al DQE/Estrategia.
