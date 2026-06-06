@@ -39,6 +39,8 @@ DEFAULT_SEMANTIC_MIN_RAG_SCORE = 0.1
 DEFAULT_TERMINAL_RIGIDITY_THRESHOLD = 0.01
 DEFAULT_EMBEDDING_MAX_CHUNKS = 10
 
+_NLI_PIPELINES_CACHE: dict[str, Any] = {}
+
 
 @dataclass
 class AuditConfig:
@@ -203,43 +205,48 @@ class AuditConfig:
         EmbeddingService.set_provider(self.embedding_provider)
 
         # Build NLI pipeline
-        try:
-            from transformers import pipeline as hf_pipeline
+        global _NLI_PIPELINES_CACHE
+        if self.semantic_nli_model in _NLI_PIPELINES_CACHE:
+            self.nli_pipeline = _NLI_PIPELINES_CACHE[self.semantic_nli_model]
+        else:
+            try:
+                from transformers import pipeline as hf_pipeline
 
-            hf_token = os.getenv("HF_TOKEN")
-            auth = hf_token if hf_token else True
-            force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+                hf_token = os.getenv("HF_TOKEN")
+                auth = hf_token if hf_token else True
+                force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
 
-            print(f"[Fase 1 - Cold Loop] Cargando pipeline NLI: {self.semantic_nli_model}")
-            if force_update:
-                self.nli_pipeline = hf_pipeline(
-                    "zero-shot-classification",
-                    model=self.semantic_nli_model,
-                    token=auth,
-                    local_files_only=False,
-                )
-            else:
-                try:
-                    self.nli_pipeline = hf_pipeline(
-                        "zero-shot-classification",
-                        model=self.semantic_nli_model,
-                        token=auth,
-                        local_files_only=True,
-                    )
-                except Exception:
+                print(f"[Fase 1 - Cold Loop] Cargando pipeline NLI: {self.semantic_nli_model}")
+                if force_update:
                     self.nli_pipeline = hf_pipeline(
                         "zero-shot-classification",
                         model=self.semantic_nli_model,
                         token=auth,
                         local_files_only=False,
                     )
-        except Exception as e:
-            warnings.warn(
-                f"[Fase 1 - Cold Loop] No se pudo cargar pipeline NLI ({self.semantic_nli_model}): {e}. "
-                "Operaciones basadas en NLI se omitirán.",
-                UserWarning,
-            )
-            self.nli_pipeline = None
+                else:
+                    try:
+                        self.nli_pipeline = hf_pipeline(
+                            "zero-shot-classification",
+                            model=self.semantic_nli_model,
+                            token=auth,
+                            local_files_only=True,
+                        )
+                    except Exception:
+                        self.nli_pipeline = hf_pipeline(
+                            "zero-shot-classification",
+                            model=self.semantic_nli_model,
+                            token=auth,
+                            local_files_only=False,
+                        )
+                _NLI_PIPELINES_CACHE[self.semantic_nli_model] = self.nli_pipeline
+            except Exception as e:
+                warnings.warn(
+                    f"[Fase 1 - Cold Loop] No se pudo cargar pipeline NLI ({self.semantic_nli_model}): {e}. "
+                    "Operaciones basadas en NLI se omitirán.",
+                    UserWarning,
+                )
+                self.nli_pipeline = None
 
         # Resolve paths
         package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

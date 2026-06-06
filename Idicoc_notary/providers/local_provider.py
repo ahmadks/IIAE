@@ -126,7 +126,9 @@ class LocalModelProvider(BaseLLMProvider):
             if hasattr(self._model, "generate"):
                 from transformers import AutoTokenizer, LogitsProcessorList
                 import torch
-                tokenizer = AutoTokenizer.from_pretrained(self.model_path, local_files_only=True)
+                if not hasattr(self, "_tokenizer") or self._tokenizer is None:
+                    self._tokenizer = AutoTokenizer.from_pretrained(self.model_path, local_files_only=True)
+                tokenizer = self._tokenizer
                 
                 # Format prompt using chat template if supported
                 try:

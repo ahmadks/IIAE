@@ -58,13 +58,32 @@ class MemoryLogHandler(logging.Handler):
 if "notary_logs" not in st.session_state:
     st.session_state.notary_logs = []
 
-for logger_name in ["idicoc_core", "IIAE"]:
-    core_logger = logging.getLogger(logger_name)
-    core_logger.handlers = [
-        h for h in core_logger.handlers if not isinstance(h, MemoryLogHandler)
-    ]
-    core_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
-    core_logger.setLevel(logging.INFO)
+def ensure_memory_log_handler():
+    for logger_name in ["idicoc_core", "IIAE"]:
+        core_logger = logging.getLogger(logger_name)
+        has_handler = any(isinstance(h, MemoryLogHandler) for h in core_logger.handlers)
+        if not has_handler:
+            core_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
+            core_logger.setLevel(logging.INFO)
+
+ensure_memory_log_handler()
+
+def read_wal_log_content():
+    if "notary_client" not in st.session_state:
+        return ""
+    try:
+        config = st.session_state.notary_client.pipeline.config
+        wal_path = config.ctm_wal_path
+        if not wal_path:
+            wal_path = os.path.join(os.path.dirname(config.ctm_nodes_path or "."), "ctm_wal.log")
+        
+        if os.path.exists(wal_path):
+            with open(wal_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            return "".join(lines[-50:])
+    except Exception as e:
+        return f"Error al leer WAL: {e}"
+    return ""
 
 # Estilos Premium (Outfit/Inter, Dark Theme, Glassmorphism)
 st.markdown(
@@ -238,11 +257,15 @@ if "llm_provider" not in st.session_state:
 
         # Initialize NotaryClient immediately on load
         try:
+            ui_dir = os.path.dirname(os.path.abspath(__file__))
             config = AuditConfig(
                 policy_file_path=_pol_path,
                 compile_policies_on_init=True,
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
+                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
+                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
+                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
             )
             st.session_state.notary_client = NotaryClient(
                 config, llm_provider=llm_provider
@@ -305,12 +328,16 @@ with st.sidebar:
     # Inicializar Notario con config y provider (se recrea si se modifican las políticas)
     if "notary_client" not in st.session_state or policies_changed:
         try:
+            ui_dir = os.path.dirname(os.path.abspath(__file__))
             config = AuditConfig(
                 policy_file_path=_pol_path,
                 compile_policies_on_init=True,
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
                 lambda_context=st.session_state.get("lambda_context", 0.4),
+                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
+                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
+                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
             )
             st.session_state.notary_client = NotaryClient(
                 config, llm_provider=llm_provider
@@ -373,11 +400,15 @@ with st.sidebar:
         st.session_state.pending_query = None
         # Limpiar ledger recreando el pipeline
         try:
+            ui_dir = os.path.dirname(os.path.abspath(__file__))
             config = AuditConfig(
                 policy_file_path=_pol_path,
                 compile_policies_on_init=True,
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
+                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
+                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
+                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
             )
             st.session_state.notary_client = NotaryClient(
                 config, llm_provider=llm_provider
@@ -459,22 +490,19 @@ with col_chat:
     # Renderizar burbujas de chat
     chat_container = st.container(height=450)
     with chat_container:
-        if not st.session_state.chat_history:
+        has_chat = any(msg["role"] in ("user", "assistant") for msg in st.session_state.chat_history)
+        if not has_chat:
             st.info(
                 "Canal seguro establecido. Inicie la conversación con el asistente."
             )
 
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
-                st.markdown(
-                    f'<div class="chat-user"><b>👤 Tú:</b> {msg["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+                with st.chat_message("user"):
+                    st.markdown(msg["content"])
             elif msg["role"] == "assistant":
-                st.markdown(
-                    f'<div class="chat-assistant"><b>🤖 Asistente:</b> {msg["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+                with st.chat_message("assistant"):
+                    st.markdown(msg["content"])
 
     def handle_submit():
         val = st.session_state.chat_input.strip()
@@ -510,6 +538,7 @@ with col_chat:
         st.session_state.pending_query = None
 
     if query_to_process and "notary_client" in st.session_state:
+        ensure_memory_log_handler()
         st.session_state.last_processed_query = query_to_process
         user_msg = query_to_process
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
@@ -713,6 +742,29 @@ with col_telemetry:
         st.info(
             "Canal inactivo. Envíe un mensaje para iniciar la auditoría en tiempo real."
         )
+
+    st.markdown("---")
+    st.markdown("### 📊 Métricas de Auditoría AEM")
+    if "notary_client" in st.session_state and st.session_state.notary_client.pipeline:
+        aem_total, aem_valid, aem_rejected = (
+            st.session_state.notary_client.pipeline.aem.get_counters()
+        )
+        col_aem1, col_aem2, col_aem3 = st.columns(3)
+        with col_aem1:
+            st.markdown(
+                f"<div class='kpi-card'><div class='kpi-title'>Total Procesados</div><div class='kpi-val'>{aem_total}</div></div>",
+                unsafe_allow_html=True,
+            )
+        with col_aem2:
+            st.markdown(
+                f"<div class='kpi-card'><div class='kpi-title'>Admitidos</div><div class='kpi-val' style='color:#10B981'>{aem_valid}</div></div>",
+                unsafe_allow_html=True,
+            )
+        with col_aem3:
+            st.markdown(
+                f"<div class='kpi-card'><div class='kpi-title'>Rechazados</div><div class='kpi-val' style='color:#EF4444'>{aem_rejected}</div></div>",
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
@@ -937,14 +989,30 @@ with st.expander(
         st.info("Envíe mensajes para desplegar el análisis matemático de la auditoría.")
 
 with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
+    ensure_memory_log_handler()
+    wal_content = read_wal_log_content()
     log_text = "\n".join(st.session_state.notary_logs)
-    if not log_text:
-        st.markdown(
-            "<div class='term'>Sin mensajes de log registrados en esta sesión.</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(f"<div class='term'>{log_text}</div>", unsafe_allow_html=True)
+
+    col_log_1, col_log_2 = st.columns(2)
+    with col_log_1:
+        st.markdown("<b>Logs de Consola (Python Logger):</b>", unsafe_allow_html=True)
+        if not log_text:
+            st.markdown(
+                "<div class='term'>Sin mensajes de log registrados en esta sesión.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"<div class='term'>{log_text}</div>", unsafe_allow_html=True)
+
+    with col_log_2:
+        st.markdown("<b>Transacciones CTM (Ledger WAL Log):</b>", unsafe_allow_html=True)
+        if not wal_content:
+            st.markdown(
+                "<div class='term'>Sin transacciones registradas en WAL.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"<div class='term'>{wal_content}</div>", unsafe_allow_html=True)
 
 # ── Exportación Forense ───────────────────────────────────────────────────────
 if st.session_state.chat_history:
