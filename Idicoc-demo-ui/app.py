@@ -59,12 +59,21 @@ if "notary_logs" not in st.session_state:
     st.session_state.notary_logs = []
 
 def ensure_memory_log_handler():
-    for logger_name in ["idicoc_core", "IIAE"]:
-        core_logger = logging.getLogger(logger_name)
-        has_handler = any(isinstance(h, MemoryLogHandler) for h in core_logger.handlers)
+    # Attach to root logger so ALL sub-loggers (kernel.*, idicoc_core.*, etc.) propagate here
+    _log_list = st.session_state.notary_logs
+    root_logger = logging.getLogger()
+    has_root = any(isinstance(h, MemoryLogHandler) for h in root_logger.handlers)
+    if not has_root:
+        root_logger.addHandler(MemoryLogHandler(_log_list))
+        root_logger.setLevel(logging.INFO)
+    # Also explicitly attach to known namespaces in case propagation is disabled
+    for logger_name in ["idicoc_core", "IIAE", "kernel", "idicoc_core.dse", "idicoc_core.pipeline", "idicoc_core.ctm"]:
+        ns_logger = logging.getLogger(logger_name)
+        has_handler = any(isinstance(h, MemoryLogHandler) for h in ns_logger.handlers)
         if not has_handler:
-            core_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
-            core_logger.setLevel(logging.INFO)
+            ns_logger.addHandler(MemoryLogHandler(_log_list))
+        ns_logger.setLevel(logging.INFO)
+        ns_logger.propagate = True
 
 ensure_memory_log_handler()
 
@@ -155,8 +164,12 @@ st.markdown(
     .term {
         font-family: 'JetBrains Mono', monospace; background: #020617; 
         border: 1px solid #1E293B; border-radius: 8px; padding: 14px;
-        color: #38BDF8 !important; font-size: 11px; max-height: 250px;
+        color: #38BDF8 !important; font-size: 11px; max-height: 280px;
         overflow-y: auto; white-space: pre-wrap;
+        display: flex; flex-direction: column;
+    }
+    .term .term-inner {
+        margin-top: auto;
     }
     
     .block-card {
@@ -939,44 +952,7 @@ with col_telemetry:
                     unsafe_allow_html=True,
                 )
 
-    # ── Casos del AEM (Audit Entropy Module) ──────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 📋 Casos Registrados en AEM")
-    if "notary_client" in st.session_state and st.session_state.notary_client.pipeline:
-        aem_trail = st.session_state.notary_client.pipeline.aem.get_audit_trail()
-        # Filter only rejected cases for the AEM breach log
-        rejected_cases = [c for c in aem_trail if c.get("admission_breach", False)]
-        if not rejected_cases:
-            st.info("No se han registrado rechazos o violaciones en el AEM aún.")
-        else:
-            for idx, case in enumerate(reversed(rejected_cases)):
-                d_s_val = case.get("d_s", 0.0)
-                d_s_text = "∞" if d_s_val == float("inf") else f"{d_s_val:.4f}"
-                user_in = case.get("user_input") or "N/A"
 
-                audit_in = case.get("audit_input")
-                output_text = "N/A"
-                if audit_in:
-                    output_text = getattr(
-                        audit_in,
-                        "text_content",
-                        getattr(audit_in, "source_text", str(audit_in)),
-                    )
-
-                vps = case.get("violated_policies") or []
-                vps_text = ", ".join(vps) if vps else "Disonancia superior a ε"
-
-                st.markdown(
-                    f"<div style='background-color:#1e293b; padding:12px; border-radius:8px; border:1px solid #ef4444; margin-bottom:8px;'>"
-                    f"<b>Caso #{len(rejected_cases)-idx}</b> - <span style='color:#ef4444; font-weight:bold;'>RECHAZADO</span><br>"
-                    f"<small>Fecha: {case.get('timestamp', '')[:19]}</small><br>"
-                    f"💬 <b>Input Usuario:</b> {user_in}<br>"
-                    f"🤖 <b>Output Interceptado:</b> {output_text}<br>"
-                    f"📊 <b>Disonancia D_s:</b> {d_s_text} &gt; ε={case.get('epsilon', '?')}<br>"
-                    f"❌ <b>Políticas Violadas:</b> {vps_text}"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
 
 # ── Detalle del Último Análisis de Auditoría (Expander) ───────────────────────
 st.markdown("---")
@@ -991,28 +967,38 @@ with st.expander(
 with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
     ensure_memory_log_handler()
     wal_content = read_wal_log_content()
-    log_text = "\n".join(st.session_state.notary_logs)
+    import html as _html
+    log_text = _html.escape("\n".join(st.session_state.notary_logs))
+    wal_text = _html.escape(wal_content) if wal_content else ""
 
     col_log_1, col_log_2 = st.columns(2)
     with col_log_1:
         st.markdown("<b>Logs de Consola (Python Logger):</b>", unsafe_allow_html=True)
         if not log_text:
             st.markdown(
-                "<div class='term'>Sin mensajes de log registrados en esta sesión.</div>",
+                "<div class='term'><span style='opacity:0.4'>Sin mensajes de log registrados en esta sesión.</span></div>",
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(f"<div class='term'>{log_text}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='term' id='termlog'><div class='term-inner'>{log_text}</div></div>"
+                "<script>var t=document.getElementById('termlog');if(t)t.scrollTop=t.scrollHeight;</script>",
+                unsafe_allow_html=True,
+            )
 
     with col_log_2:
         st.markdown("<b>Transacciones CTM (Ledger WAL Log):</b>", unsafe_allow_html=True)
-        if not wal_content:
+        if not wal_text:
             st.markdown(
-                "<div class='term'>Sin transacciones registradas en WAL.</div>",
+                "<div class='term'><span style='opacity:0.4'>Sin transacciones registradas en WAL.</span></div>",
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(f"<div class='term'>{wal_content}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='term' id='termwal'><div class='term-inner'>{wal_text}</div></div>"
+                "<script>var w=document.getElementById('termwal');if(w)w.scrollTop=w.scrollHeight;</script>",
+                unsafe_allow_html=True,
+            )
 
 # ── Exportación Forense ───────────────────────────────────────────────────────
 if st.session_state.chat_history:
