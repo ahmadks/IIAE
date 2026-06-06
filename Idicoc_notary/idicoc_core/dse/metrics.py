@@ -3,11 +3,10 @@ import math
 from typing import Any, List, Tuple
 import numpy as np
 
+
 def _cosine_distance(a: list | np.ndarray, b: list | np.ndarray) -> float:
     if len(a) != len(b):
-        raise ValueError(
-            f"Dimensionality mismatch between vectors: {len(a)} vs {len(b)}."
-        )
+        raise ValueError(f"Dimensionality mismatch between vectors: {len(a)} vs {len(b)}.")
     dot = sum(x * z for x, z in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
@@ -30,13 +29,12 @@ def _compute_d_0(s0: Any, s0_prime: Any) -> float:
 def _compute_d_1(mu: np.ndarray, target_state: np.ndarray) -> float:
     """d_1: Stage 1 (Normalization/Invariant Distance)."""
     is_prob_mu = np.all(mu >= 0) and np.isclose(np.sum(mu), 1.0, atol=1e-5)
-    is_prob_target = np.all(target_state >= 0) and np.isclose(
-        np.sum(target_state), 1.0, atol=1e-5
-    )
+    is_prob_target = np.all(target_state >= 0) and np.isclose(np.sum(target_state), 1.0, atol=1e-5)
 
     if is_prob_mu and is_prob_target:
         try:
             from scipy.special import rel_entr
+
             eps = 1e-12
             p = np.clip(mu, eps, 1.0)
             q = np.clip(target_state, eps, 1.0)
@@ -73,6 +71,7 @@ def _compute_d_1_vectorized(mu_raw: np.ndarray, ref_raw: np.ndarray) -> float:
 
             try:
                 from scipy.special import rel_entr
+
                 eps = 1e-12
                 p_safe = np.clip(p, eps, 1.0)
                 q_safe = np.clip(q, eps, 1.0)
@@ -152,7 +151,9 @@ def _compute_context_contradiction(
 
         embed_service = EmbeddingService()
         model_name = getattr(
-            config, "semantic_embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+            config,
+            "semantic_embedding_model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         )
         embedder = embed_service.get_embedder(model_name)
 

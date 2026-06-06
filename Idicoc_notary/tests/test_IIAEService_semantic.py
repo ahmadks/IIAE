@@ -65,9 +65,7 @@ def test_semantic_service_with_hard_violation():
     service = _build_semantic_service()
 
     audit_input = "Transfer 60000.00 euros, exceeding the limit."
-    policy_input = [
-        "[HARD] No transfer may exceed 50000.00 euros."
-    ]
+    policy_input = ["[HARD] [NEGATIVE] No transfer may exceed 50000.00 euros."]
 
     res = service.audit(
         user_prompt="Incompatible transfer request",

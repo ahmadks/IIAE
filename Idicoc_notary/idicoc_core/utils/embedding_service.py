@@ -33,7 +33,9 @@ class EmbeddingService:
                 cls._instance.logger = get_logger("kernel.embedding_service")
             return cls._instance
 
-    def get_embedder(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> Any:
+    def get_embedder(
+        self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    ) -> Any:
         """
         Devuelve el modelo de embeddings especificado.
         Si no está cargado, lo carga y lo almacena en caché.
@@ -49,7 +51,11 @@ class EmbeddingService:
                         import os
 
                         cache_dir = os.getenv("IIAE_CACHE_DIR", "models_cache")
-                        force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+                        force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in (
+                            "true",
+                            "1",
+                            "yes",
+                        )
 
                         if force_update:
                             model = SentenceTransformer(
@@ -65,7 +71,9 @@ class EmbeddingService:
                                     local_files_only=True,
                                 )
                             except Exception:
-                                self.logger.info(f"Modelo {model_name} no encontrado en caché local. Iniciando descarga...")
+                                self.logger.info(
+                                    f"Modelo {model_name} no encontrado en caché local. Iniciando descarga..."
+                                )
                                 model = SentenceTransformer(
                                     model_name,
                                     cache_folder=cache_dir,
@@ -83,14 +91,16 @@ class EmbeddingService:
 
         return self._models[model_name]
 
-    def get_signature(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> str:
+    def get_signature(
+        self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    ) -> str:
         """Devuelve la firma determinista del modelo y sus parámetros."""
         return compute_embedding_signature(model_name)
 
     def encode(
         self,
         text: str | list[str],
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     ) -> Any:
         """Envoltorio para generar embeddings usando el modelo cacheados."""
         if self._provider is not None:

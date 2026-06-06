@@ -30,6 +30,7 @@ logger = get_logger("dse.evaluator")
 
 class DimensionalityMismatchError(ValueError):
     """Excepción para discordancia de dimensiones en cálculo de distancias."""
+
     pass
 
 
@@ -90,12 +91,14 @@ class PropertyGraphEvaluator:
 
             raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
             if raw_penalty > 0.0:
-                violated.append({
-                    "id": ax.get("id"),
-                    "text": ax.get("text", ax.get("description", "")),
-                    "hardness": ax.get("hardness", "hard"),
-                    "penalty": raw_penalty
-                })
+                violated.append(
+                    {
+                        "id": ax.get("id"),
+                        "text": ax.get("text", ax.get("description", "")),
+                        "hardness": ax.get("hardness", "hard"),
+                        "penalty": raw_penalty,
+                    }
+                )
         return violated
 
     def compute_temporal(self, y: Any) -> float:
@@ -137,6 +140,7 @@ class PropertyGraphEvaluator:
             return y
         try:
             import numpy as np
+
             if isinstance(y, np.ndarray):
                 return str(y.tolist())
         except Exception:
@@ -157,6 +161,7 @@ class PropertyGraphEvaluator:
             return "semantic"
         try:
             import numpy as np
+
             if isinstance(y, np.ndarray):
                 return "numeric"
         except Exception:
@@ -202,6 +207,7 @@ class PropertyGraphEvaluator:
     def _to_vec(y: Any) -> Optional[list]:
         try:
             import numpy as np
+
             candidate = getattr(y, "measure_vector", getattr(y, "distribution", y))
             if isinstance(candidate, str):
                 nums = [float(m.group(0)) for m in re.finditer(r"[-+]?[0-9]*\.?[0-9]+", candidate)]
@@ -246,6 +252,7 @@ class PropertyGraphEvaluator:
         ax_embedding: Optional[list] = policy.get("embedding")
         if ax_embedding is None:
             from idicoc_core.utils.embedding_service import EmbeddingService
+
             try:
                 ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
                 policy["embedding"] = ax_embedding
@@ -256,6 +263,7 @@ class PropertyGraphEvaluator:
 
         if y_vec is None:
             from idicoc_core.utils.embedding_service import EmbeddingService
+
             try:
                 y_text = self._to_str(y)
                 y_vec = EmbeddingService().encode(y_text).tolist()
@@ -265,6 +273,7 @@ class PropertyGraphEvaluator:
                 ) from e
         elif ax_embedding is not None and len(y_vec) != len(ax_embedding):
             from idicoc_core.utils.embedding_service import EmbeddingService
+
             try:
                 y_text = self._to_str(y)
                 y_vec = EmbeddingService().encode(y_text).tolist()
@@ -292,6 +301,7 @@ class PropertyGraphEvaluator:
                 try:
                     ttl_val = float(policy["ttl_seconds"])
                     from datetime import timedelta
+
                     valid_until = base + timedelta(seconds=ttl_val)
                 except (ValueError, TypeError):
                     pass
@@ -464,6 +474,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
             n_ref = mu.size
             if n_ref > 0:
                 from idicoc_core.utils.embedding_service import EmbeddingService
+
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
                 k_vector = embed_service.encode(axiom_of_uniqueness_text)
@@ -567,7 +578,9 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None
     ) -> float:
         model_name = getattr(
-            self.config, "semantic_embedding_model", "sentence-transformers/all-MiniLM-L6-v2"
+            self.config,
+            "semantic_embedding_model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         )
         y_vec = StringUtils.to_vector(y, model_name=model_name)
         v_hat_vec = StringUtils.to_vector(V_hat, model_name=model_name)
@@ -708,9 +721,7 @@ class DissonanceStateEvaluator:
         context_input = []
         if session_context.rag_context:
             context_input = [
-                ctx.strip()
-                for ctx in session_context.rag_context.split("\n")
-                if ctx.strip()
+                ctx.strip() for ctx in session_context.rag_context.split("\n") if ctx.strip()
             ]
 
         # In case the input is numeric/distribution (e.g. from logic service tests),
@@ -718,9 +729,12 @@ class DissonanceStateEvaluator:
         eval_input: Any = llm_output
         try:
             # Check if llm_output is actually a list or array encoded as string
-            if isinstance(llm_output, str) and (llm_output.startswith("[") or "array" in llm_output):
+            if isinstance(llm_output, str) and (
+                llm_output.startswith("[") or "array" in llm_output
+            ):
                 # Import ast safely to evaluate literal lists
                 import ast
+
                 parsed = ast.literal_eval(llm_output)
                 if isinstance(parsed, (list, tuple)):
                     eval_input = np.array(parsed, dtype=float)
@@ -751,42 +765,48 @@ class DissonanceStateEvaluator:
 
         # Compute Ds based on weights
         weights = self.config._normalized_weights
-        
+
         # Determine d1 (distance to uniqueness axiom)
         d1 = 0.0
         try:
             # If the input is distribution/numerical
-            if isinstance(eval_input, np.ndarray) or hasattr(eval_input, "distribution") or isinstance(eval_input, list):
+            if (
+                isinstance(eval_input, np.ndarray)
+                or hasattr(eval_input, "distribution")
+                or isinstance(eval_input, list)
+            ):
                 mu_raw = self.strategy._validate_input(eval_input, 4)
                 total = mu_raw.sum()
                 mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
                 n_ref = mu.size
-                
+
                 from idicoc_core.utils.embedding_service import EmbeddingService
+
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
                 k_vector = embed_service.encode(axiom_of_uniqueness_text)
-                
+
                 if k_vector.size < n_ref:
                     target_state = np.pad(k_vector, (0, n_ref - k_vector.size), mode="constant")
                 else:
                     target_state = k_vector[:n_ref]
-                
+
                 total_k = target_state.sum()
                 if total_k > 1e-14:
                     target_state = target_state / total_k
                 else:
                     target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-                
+
                 d1 = _compute_d_1(mu, target_state)
             else:
                 # Text input: compute distance relative to uniqueness axiom text
                 # d1 is cosine distance of text to uniqueness text
                 from idicoc_core.utils.embedding_service import EmbeddingService
                 from idicoc_core.utils.data_converter import DataConverter
+
                 embed_service = EmbeddingService()
                 axiom_of_uniqueness_text = "Axiom of Uniqueness: Absolute Unicity. Leibniz's law. Say, 'He is Allah, [who is] One, Allah, the Eternal Refuge.'"
-                
+
                 y_text = DataConverter.to_text(eval_input)
                 y_vec = embed_service.encode(y_text)
                 k_vector = embed_service.encode(axiom_of_uniqueness_text)
@@ -857,4 +877,3 @@ class AuditEntropyModule:
 
     def get_audit_trail(self) -> List[Dict[str, Any]]:
         return self.audit_trail_map
-

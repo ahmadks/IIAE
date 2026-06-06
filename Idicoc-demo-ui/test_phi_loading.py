@@ -3,7 +3,9 @@ import sys
 import torch
 
 # Add root directory to python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary")))
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"))
+)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from providers.model_downloader import ensure_phi_downloaded
@@ -23,7 +25,9 @@ def main():
 
     print("\n⏳ Step 1: Ensuring Phi-3.5 is fully downloaded in cache...")
     try:
-        ensure_phi_downloaded(model_name=model_name, cache_dir=cache_dir, force_update=False)
+        ensure_phi_downloaded(
+            model_name=model_name, cache_dir=cache_dir, force_update=False
+        )
         print("✓ Model download check completed successfully.")
     except Exception as e:
         print(f"❌ Error during download: {e}")
@@ -33,7 +37,7 @@ def main():
     try:
         provider = PhiProvider(
             model_path=os.path.join(cache_dir, "Phi-3.5-mini-instruct"),
-            embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
+            embedding_model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         )
         provider._ensure_model()
         print("✓ Model loaded successfully into memory.")
@@ -58,4 +62,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -35,12 +35,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # ── Captura de Logs para el Visor ─────────────────────────────────────────────
 class MemoryLogHandler(logging.Handler):
     def __init__(self, log_list):
         super().__init__()
         self.log_list = log_list
-        self.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
+        self.setFormatter(
+            logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s")
+        )
 
     def emit(self, record):
         try:
@@ -51,11 +54,14 @@ class MemoryLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
+
 if "notary_logs" not in st.session_state:
     st.session_state.notary_logs = []
 
 iiae_logger = logging.getLogger("IIAE")
-iiae_logger.handlers = [h for h in iiae_logger.handlers if not isinstance(h, MemoryLogHandler)]
+iiae_logger.handlers = [
+    h for h in iiae_logger.handlers if not isinstance(h, MemoryLogHandler)
+]
 iiae_logger.addHandler(MemoryLogHandler(st.session_state.notary_logs))
 iiae_logger.setLevel(logging.INFO)
 
@@ -152,6 +158,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # ── Proveedores Phi ───────────────────────────────────────────────────────────
 @st.cache_resource
 def load_real_model(provider_type, model_path, embedding_model_name):
@@ -159,13 +166,14 @@ def load_real_model(provider_type, model_path, embedding_model_name):
         provider = get_provider(
             provider_type=provider_type,
             model_path=model_path,
-            embedding_model_name=embedding_model_name
+            embedding_model_name=embedding_model_name,
         )
         if hasattr(provider, "_ensure_model"):
             provider._ensure_model()
         return provider, "Listo"
     except Exception as e:
         return None, str(e)
+
 
 # ── Inicializar Estado ────────────────────────────────────────────────────────
 _pol_path = os.path.join(os.path.dirname(__file__), "policies.txt")
@@ -214,19 +222,19 @@ if "llm_provider" not in st.session_state:
                 </style>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         llm_provider, status = load_real_model(
             provider_type="phi",
             model_path="models_cache/Phi-3.5-mini-instruct",
-            embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
+            embedding_model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         )
         if llm_provider is None:
             st.error(f"❌ Error crítico cargando el modelo real: {status}")
             st.stop()
-        
+
         st.session_state.llm_provider = llm_provider
-        
+
         # Initialize NotaryClient immediately on load
         try:
             config = AuditConfig(
@@ -235,12 +243,14 @@ if "llm_provider" not in st.session_state:
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
-            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+            st.session_state.notary_client = NotaryClient(
+                config, llm_provider=llm_provider
+            )
             st.session_state.policies_mtime = current_mtime
         except Exception as e:
             st.error(f"Error inicializando notario en carga inicial: {e}")
             st.stop()
-            
+
         st.rerun()
 else:
     llm_provider = st.session_state.llm_provider
@@ -251,7 +261,7 @@ with st.sidebar:
     st.image("https://img.icons8.com/nolan/96/shield.png", width=65)
     st.markdown("### ⚙️ Centro de Control")
     st.markdown("---")
-    
+
     epsilon = st.slider("Umbral de Tolerancia (ε)", 0.01, 1.00, 0.20, 0.01)
     st.session_state.epsilon = epsilon
 
@@ -263,16 +273,22 @@ with st.sidebar:
         "Verificación de Identidad": "Para verificar la identidad del cliente, se requiere token digital y clave SMS.\nEl canal de atención telefónica está disponible de lunes a viernes.",
         "Advertencia de Rentabilidad": "El banco ofrece fondos de inversión de renta fija y variable.\nNo se garantizan rentabilidades futuras de renta variable.",
     }
-    selected_preset = st.selectbox("Escenarios RAG predefinidos", list(rag_presets.keys()))
-    preset_val = rag_presets[selected_preset]
-    
-    rag_context = st.text_area(
-        "Ingresar contexto recuperado (context_input)", 
-        value=preset_val, 
-        placeholder="Escribe el contexto aquí...",
-        help="Simula documentos recuperados por RAG para la validación coalgebraica."
+    selected_preset = st.selectbox(
+        "Escenarios RAG predefinidos", list(rag_presets.keys())
     )
-    st.session_state.context_list = [line.strip() for line in rag_context.split("\n") if line.strip()] if rag_context.strip() else None
+    preset_val = rag_presets[selected_preset]
+
+    rag_context = st.text_area(
+        "Ingresar contexto recuperado (context_input)",
+        value=preset_val,
+        placeholder="Escribe el contexto aquí...",
+        help="Simula documentos recuperados por RAG para la validación coalgebraica.",
+    )
+    st.session_state.context_list = (
+        [line.strip() for line in rag_context.split("\n") if line.strip()]
+        if rag_context.strip()
+        else None
+    )
 
     st.success("✓ Proveedor: Phi-3.5-mini (Local)")
     st.info("Estado: Activo y Asegurado")
@@ -286,15 +302,20 @@ with st.sidebar:
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
-            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+            st.session_state.notary_client = NotaryClient(
+                config, llm_provider=llm_provider
+            )
             st.session_state.policies_mtime = current_mtime
         except Exception as e:
             st.error(f"Error inicializando notario: {e}")
 
-
     st.markdown("---")
     st.markdown("### 💥 Test de Fricción")
-    if st.button("Simular Ataque: Inyectar instrucción prohibida", type="primary", use_container_width=True):
+    if st.button(
+        "Simular Ataque: Inyectar instrucción prohibida",
+        type="primary",
+        use_container_width=True,
+    ):
         st.session_state.injected_attack = True
         st.session_state.last_processed_query = None
         st.session_state.pending_query = None
@@ -304,12 +325,16 @@ with st.sidebar:
     # Mostrar políticas cargadas
     policies = []
     loader = None
-    if "notary_client" in st.session_state and st.session_state.notary_client.config.policy_loader:
+    if (
+        "notary_client" in st.session_state
+        and st.session_state.notary_client.config.policy_loader
+    ):
         loader = st.session_state.notary_client.config.policy_loader
     elif os.path.exists(_pol_path):
         from idicoc_core.isg.loader import FilePolicyLoader
+
         loader = FilePolicyLoader(_pol_path)
-    
+
     if loader:
         try:
             loaded = loader.load_policies()
@@ -320,13 +345,13 @@ with st.sidebar:
                 policies.append((pid, ptext, phard))
         except Exception as e:
             st.error(f"Error cargando reglas de políticas: {e}")
-                        
+
     with st.expander(f"Reglas del Notario ({len(policies)})", expanded=False):
         for pid, ptext, phard in policies:
             color = "#ef4444" if phard == "hard" else "#3b82f6"
             st.markdown(
                 f"<div style='margin-bottom:6px;'><span style='background-color:{color}; color:white; font-size:10px; padding:2px 4px; border-radius:3px;'>{phard.upper()}</span> <small><b>{pid}</b>: {ptext}</small></div>",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
     if st.button("🗑️ Resetear Conversación", use_container_width=True):
@@ -344,7 +369,9 @@ with st.sidebar:
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
-            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+            st.session_state.notary_client = NotaryClient(
+                config, llm_provider=llm_provider
+            )
             st.session_state.policies_mtime = current_mtime
         except Exception:
             pass
@@ -352,8 +379,13 @@ with st.sidebar:
 
 
 # ── Encabezado & KPIs de Salud del Sistema ────────────────────────────────────
-st.markdown("<h1 class='title-font'>🛡️ Monitor de Integridad & Chatbot Premium</h1>", unsafe_allow_html=True)
-st.caption("Verificación coalgebraica del cumplimiento de políticas e inmutabilidad criptográfica en tiempo real.")
+st.markdown(
+    "<h1 class='title-font'>🛡️ Monitor de Integridad & Chatbot Premium</h1>",
+    unsafe_allow_html=True,
+)
+st.caption(
+    "Verificación coalgebraica del cumplimiento de políticas e inmutabilidad criptográfica en tiempo real."
+)
 
 # Calcular el estado del Ledger
 dag_dict = {}
@@ -376,13 +408,25 @@ kpi_integrity_color = "#10B981" if is_chain_valid else "#EF4444"
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Integridad del Estado</div><div class='kpi-val' style='color:{kpi_integrity_color}'>{kpi_integrity_text}</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='kpi-card'><div class='kpi-title'>Integridad del Estado</div><div class='kpi-val' style='color:{kpi_integrity_color}'>{kpi_integrity_text}</div></div>",
+        unsafe_allow_html=True,
+    )
 with col2:
-    st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Nivel de Confianza (ε)</div><div class='kpi-val'>{epsilon:.2f}</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='kpi-card'><div class='kpi-title'>Nivel de Confianza (ε)</div><div class='kpi-val'>{epsilon:.2f}</div></div>",
+        unsafe_allow_html=True,
+    )
 with col3:
-    st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Cumplimiento Normativo</div><div class='kpi-val'>Standard-Zero PASS</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='kpi-card'><div class='kpi-title'>Cumplimiento Normativo</div><div class='kpi-val'>Standard-Zero PASS</div></div>",
+        unsafe_allow_html=True,
+    )
 with col4:
-    st.markdown(f"<div class='kpi-card'><div class='kpi-title'>CTM Ledger Root Hash</div><div class='kpi-val' style='font-size:14px; font-family:\"JetBrains Mono\"; word-break:break-all;'>{root_hash[:22]}...</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='kpi-card'><div class='kpi-title'>CTM Ledger Root Hash</div><div class='kpi-val' style='font-size:14px; font-family:\"JetBrains Mono\"; word-break:break-all;'>{root_hash[:22]}...</div></div>",
+        unsafe_allow_html=True,
+    )
 
 st.markdown("---")
 
@@ -390,28 +434,37 @@ st.markdown("---")
 user_query = ""
 forced_response = None
 if st.session_state.injected_attack:
-    user_query = "¿Puedo solicitar que el IIAE actúe de forma parcial o sesgada y genere basura?"
+    user_query = (
+        "¿Puedo solicitar que el IIAE actúe de forma parcial o sesgada y genere basura?"
+    )
     forced_response = "Esta es una respuesta simulada que contiene palabras prohibidas como basura y viola la neutralidad."
-    st.session_state.injected_attack = False # Reset flag
+    st.session_state.injected_attack = False  # Reset flag
 
 # ── Interfaz Principal (Dos Columnas: Chat/Auditoría vs Gráficos/DAG) ─────────
 col_chat, col_telemetry = st.columns([0.6, 0.4])
 
 with col_chat:
     st.markdown("### 💬 Canal de Conversación Auditado")
-    
+
     # Renderizar burbujas de chat
     chat_container = st.container(height=450)
     with chat_container:
         if not st.session_state.chat_history:
-            st.info("Canal seguro establecido. Inicie la conversación con el asistente.")
-            
+            st.info(
+                "Canal seguro establecido. Inicie la conversación con el asistente."
+            )
+
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
-                st.markdown(f'<div class="chat-user"><b>👤 Tú:</b> {msg["content"]}</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="chat-user"><b>👤 Tú:</b> {msg["content"]}</div>',
+                    unsafe_allow_html=True,
+                )
             elif msg["role"] == "assistant":
-                st.markdown(f'<div class="chat-assistant"><b>🤖 Asistente:</b> {msg["content"]}</div>', unsafe_allow_html=True)
-
+                st.markdown(
+                    f'<div class="chat-assistant"><b>🤖 Asistente:</b> {msg["content"]}</div>',
+                    unsafe_allow_html=True,
+                )
 
     def handle_submit():
         val = st.session_state.chat_input.strip()
@@ -424,14 +477,19 @@ with col_chat:
         input_col1, input_col2 = st.columns([0.85, 0.15])
         with input_col1:
             st.text_input(
-                "Escribe una consulta al chatbot...", 
-                value=user_query if user_query else "", 
-                key="chat_input", 
+                "Escribe una consulta al chatbot...",
+                value=user_query if user_query else "",
+                key="chat_input",
                 label_visibility="collapsed",
-                on_change=handle_submit
+                on_change=handle_submit,
             )
         with input_col2:
-            st.button("Enviar", use_container_width=True, type="primary", on_click=handle_submit)
+            st.button(
+                "Enviar",
+                use_container_width=True,
+                type="primary",
+                on_click=handle_submit,
+            )
 
     # Determinar consulta a procesar
     query_to_process = None
@@ -445,7 +503,7 @@ with col_chat:
         st.session_state.last_processed_query = query_to_process
         user_msg = query_to_process
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
-        
+
         # 1. Generar Respuesta
         with st.spinner("🤖 Generando respuesta..."):
             if forced_response:
@@ -454,101 +512,124 @@ with col_chat:
                 # Interceptar logits en el Hot Loop si el Notario está disponible
                 processor = None
                 if "notary_client" in st.session_state:
-                    processor = st.session_state.notary_client.pipeline.config.logits_processor
-                
+                    processor = (
+                        st.session_state.notary_client.pipeline.config.logits_processor
+                    )
+
                 # Pasar processor a generate() si el llm_provider lo soporta
                 import inspect
+
                 sig = inspect.signature(llm_provider.generate)
                 if "logits_processor" in sig.parameters:
-                    assistant_res = llm_provider.generate(user_msg, logits_processor=processor)
+                    assistant_res = llm_provider.generate(
+                        user_msg, logits_processor=processor
+                    )
                 else:
                     assistant_res = llm_provider.generate(user_msg)
-        
+
         # 2. Auditar Respuesta
         with st.spinner("🛡️ Evaluando respuesta en el Notario IDICOC..."):
             try:
                 # El Notario evalúa la salida generada por el LLM
                 payload = SemanticPayload(assistant_res)
-                
+
                 audit_result = st.session_state.notary_client.process_interaction(
                     audit_input=payload,
                     user_input=user_msg,
                     context_input=st.session_state.get("context_list"),
                     epsilon_override=epsilon,
                 )
-                
+
                 # Extraer métricas y hashes
                 d_s = audit_result.metadata.get("d_s")
                 if d_s is None:
                     d_s = 0.0
                 admission_breach = audit_result.metadata.get("admission_breach", False)
                 status = "REJECTED" if admission_breach else "ADMITTED"
-                
+
                 ac = audit_result.metadata.get("algebraic_components") or {}
                 d_1 = ac.get("d_1")
-                if d_1 is None: d_1 = 0.0
+                if d_1 is None:
+                    d_1 = 0.0
                 d_2 = ac.get("d_2")
-                if d_2 is None: d_2 = 0.0
+                if d_2 is None:
+                    d_2 = 0.0
                 d_3 = ac.get("d_3")
-                if d_3 is None: d_3 = 0.0
-                
+                if d_3 is None:
+                    d_3 = 0.0
+
                 integrity_hash = str(audit_result.integrity_hash)
-                
+
                 # Obtener contadores del módulo AEM
-                aem_total, aem_valid, aem_rejected = st.session_state.notary_client.pipeline.aem.get_counters()
-                
+                aem_total, aem_valid, aem_rejected = (
+                    st.session_state.notary_client.pipeline.aem.get_counters()
+                )
+
                 # Identificar la política específica violada en caso de rechazo
                 violated_policy = None
                 rejection_reason = None
                 if status == "REJECTED":
-                    violated_policies = audit_result.metadata.get("violated_policies") or []
-                    violated_policy = ", ".join(violated_policies) if violated_policies else "Desviación/Disonancia alta"
-                    
-                    if float('inf') in (d_s, d_2):
-                        rejection_reason = "Violación de una política de seguridad estricta (HARD)."
+                    violated_policies = (
+                        audit_result.metadata.get("violated_policies") or []
+                    )
+                    violated_policy = (
+                        ", ".join(violated_policies)
+                        if violated_policies
+                        else "Desviación/Disonancia alta"
+                    )
+
+                    if float("inf") in (d_s, d_2):
+                        rejection_reason = (
+                            "Violación de una política de seguridad estricta (HARD)."
+                        )
                     elif violated_policies:
                         rejection_reason = f"Disonancia total ({d_s:.4f}) superó el umbral de tolerancia (ε={epsilon:.2f})."
                     else:
                         rejection_reason = f"Desviación semántica alta ({d_s:.4f}) respecto al invariante (ε={epsilon:.2f})."
 
                 # Guardar auditoría en historial
-                st.session_state.chat_history.append({
-                    "role": "audit",
-                    "content": "[Auditoría de Cumplimiento]",
-                    "status": status,
-                    "d_s": d_s,
-                    "d_1": d_1,
-                    "d_2": d_2,
-                    "d_3": d_3,
-                    "hash": integrity_hash,
-                    "root_hash": st.session_state.notary_client.pipeline.ctm.root_hash or "GENESIS",
-                    "timestamp": audit_result.timestamp,
-                    "violated_policy": violated_policy,
-                    "rejection_reason": rejection_reason,
-                    "aem_total": aem_total,
-                    "aem_valid": aem_valid,
-                    "aem_rejected": aem_rejected
-                })
-                
+                st.session_state.chat_history.append(
+                    {
+                        "role": "audit",
+                        "content": "[Auditoría de Cumplimiento]",
+                        "status": status,
+                        "d_s": d_s,
+                        "d_1": d_1,
+                        "d_2": d_2,
+                        "d_3": d_3,
+                        "hash": integrity_hash,
+                        "root_hash": st.session_state.notary_client.pipeline.ctm.root_hash
+                        or "GENESIS",
+                        "timestamp": audit_result.timestamp,
+                        "violated_policy": violated_policy,
+                        "rejection_reason": rejection_reason,
+                        "aem_total": aem_total,
+                        "aem_valid": aem_valid,
+                        "aem_rejected": aem_rejected,
+                    }
+                )
+
                 # Agregar la respuesta del asistente (si fue rechazado, se muestra aviso de bloqueo)
                 display_res = assistant_res
                 if status == "REJECTED":
                     display_res = f"⚠️ **[BLOQUEADO POR POLÍTICA DE SEGURIDAD]** La respuesta generada por el modelo fue interceptada por el Notario debido a una disonancia alta ({'∞' if d_s == float('inf') else f'{d_s:.4f}'} > ε={epsilon:.2f})."
-                
-                st.session_state.chat_history.append({"role": "assistant", "content": display_res})
-                
+
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": display_res}
+                )
+
                 # Guardar detalles para panel expandido
                 st.session_state.last_audit_details = audit_result.metadata
-                
+
             except Exception as e:
                 st.error(f"Error en el flujo del Notario: {e}")
-                
+
         st.rerun()
 
 with col_telemetry:
     # ── Última Auditoría IDICOC ───────────────────────────────────────────────
     st.markdown("### 🛡️ Última Auditoría IDICOC")
-    
+
     # Obtener mensajes de auditoría
     audit_msgs = [m for m in st.session_state.chat_history if m["role"] == "audit"]
     if audit_msgs:
@@ -556,100 +637,149 @@ with col_telemetry:
         status = last_audit["status"]
         badge_class = "audit-badge" if status == "ADMITTED" else "audit-badge rejected"
         d_s_val = last_audit.get("d_s")
-        d_s_text = "N/A" if d_s_val is None else ("∞" if d_s_val == float("inf") else f"{d_s_val:.5f}")
+        d_s_text = (
+            "N/A"
+            if d_s_val is None
+            else ("∞" if d_s_val == float("inf") else f"{d_s_val:.5f}")
+        )
         d_1_val = last_audit.get("d_1")
         d_1_text = "N/A" if d_1_val is None else f"{d_1_val:.4f}"
         d_2_val = last_audit.get("d_2")
         d_2_text = "N/A" if d_2_val is None else f"{d_2_val:.4f}"
         d_3_val = last_audit.get("d_3")
         d_3_text = "N/A" if d_3_val is None else f"{d_3_val:.4f}"
-        
+
         st.markdown(
             f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
             f'<b>Resultado:</b> <span class="{badge_class}">{status}</span><br>'
-            f'<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>'
+            f"<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>"
             f'<small>Ledger Tx Hash: <span style="font-family:\'JetBrains Mono\'; font-size:10px;">{last_audit["hash"]}</span></small>'
-            f'</div>',
-            unsafe_allow_html=True
+            f"</div>",
+            unsafe_allow_html=True,
         )
-        
+
         # Si hay políticas específicas que causaron el rechazo, listarlas
         if status == "REJECTED":
-            reason = last_audit.get("rejection_reason") or "Desviación con respecto a las políticas del Notario."
+            reason = (
+                last_audit.get("rejection_reason")
+                or "Desviación con respecto a las políticas del Notario."
+            )
             vp = last_audit.get("violated_policy")
-            vp_html = f"<br>❌ <b>Política(s) Violada(s)</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{vp}</span>" if vp else ""
+            vp_html = (
+                f"<br>❌ <b>Política(s) Violada(s)</b>: <span style='font-family:\"JetBrains Mono\"; color:#EF4444;'>{vp}</span>"
+                if vp
+                else ""
+            )
             st.markdown(
                 f"<div style='background-color:rgba(239, 68, 68, 0.1); border:1px solid #EF4444; border-radius:5px; padding:10px; font-size:12px; margin-bottom:8px;'>"
                 f"⚠️ <b>Motivo del Rechazo:</b> {reason}{vp_html}"
                 f"</div>",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
     else:
-        st.info("Canal inactivo. Envíe un mensaje para iniciar la auditoría en tiempo real.")
+        st.info(
+            "Canal inactivo. Envíe un mensaje para iniciar la auditoría en tiempo real."
+        )
 
     st.markdown("---")
 
     # ── Manifold de Invariancia (Scatter Plot) ────────────────────────────────
     st.markdown("### 📊 Manifold de Invariancia ($D_s$ vs $\varepsilon$)")
 
-    
     # Filtrar mensajes de auditoría
     audit_msgs = [m for m in st.session_state.chat_history if m["role"] == "audit"]
-    
+
     fig, ax = plt.subplots(figsize=(7, 3.5))
-    ax.set_facecolor('#0f172a')
-    fig.patch.set_facecolor('#0f172a')
-    
+    ax.set_facecolor("#0f172a")
+    fig.patch.set_facecolor("#0f172a")
+
     # Línea horizontal del umbral epsilon
-    ax.axhline(y=epsilon, color='#ef4444', linestyle='--', linewidth=1.5, label=f'Umbral ε ({epsilon:.2f})')
-    
+    ax.axhline(
+        y=epsilon,
+        color="#ef4444",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"Umbral ε ({epsilon:.2f})",
+    )
+
     if audit_msgs:
         indices = list(range(1, len(audit_msgs) + 1))
         dissonances = [m.get("d_s") for m in audit_msgs]
-        
+
         plot_dissonances = []
         colors = []
         for d in dissonances:
             if d is None:
                 plot_dissonances.append(0.0)
-                colors.append('#10b981')
-            elif d == float('inf'):
+                colors.append("#10b981")
+            elif d == float("inf"):
                 plot_dissonances.append(1.4)
-                colors.append('#ef4444')
+                colors.append("#ef4444")
             else:
                 plot_dissonances.append(d)
-                colors.append('#ef4444' if d >= epsilon else '#10b981')
-        
-        ax.scatter(indices, plot_dissonances, c=colors, s=120, zorder=3, edgecolors='white', linewidth=1)
-        ax.plot(indices, plot_dissonances, color='#38bdf8', alpha=0.5, linestyle='-', zorder=2)
-        
+                colors.append("#ef4444" if d >= epsilon else "#10b981")
+
+        ax.scatter(
+            indices,
+            plot_dissonances,
+            c=colors,
+            s=120,
+            zorder=3,
+            edgecolors="white",
+            linewidth=1,
+        )
+        ax.plot(
+            indices,
+            plot_dissonances,
+            color="#38bdf8",
+            alpha=0.5,
+            linestyle="-",
+            zorder=2,
+        )
+
         # Puntos de violación Hard
         for idx, d in zip(indices, dissonances):
-            if d == float('inf'):
-                ax.text(idx, 1.45, "Violación Hard (∞)", color='#ef4444', fontsize=8, ha='center', fontweight='bold')
-                
+            if d == float("inf"):
+                ax.text(
+                    idx,
+                    1.45,
+                    "Violación Hard (∞)",
+                    color="#ef4444",
+                    fontsize=8,
+                    ha="center",
+                    fontweight="bold",
+                )
+
         ax.set_xlim(0.5, len(audit_msgs) + 0.5)
         ax.set_xticks(indices)
     else:
-        ax.text(0.5, 0.5, "Sin datos de auditoría", color='#64748b', ha='center', va='center', fontsize=12)
+        ax.text(
+            0.5,
+            0.5,
+            "Sin datos de auditoría",
+            color="#64748b",
+            ha="center",
+            va="center",
+            fontsize=12,
+        )
         ax.set_xlim(0, 1)
-        
+
     ax.set_ylim(-0.05, 1.6)
-    ax.set_ylabel("Disonancia Lógica D_s", color='#94a3b8')
-    ax.set_xlabel("Número de Auditoría", color='#94a3b8')
-    ax.tick_params(colors='#94a3b8')
-    ax.grid(True, color='#334155', alpha=0.2)
-    ax.legend(facecolor='#1e293b', edgecolor='#334155', labelcolor='white')
-    
+    ax.set_ylabel("Disonancia Lógica D_s", color="#94a3b8")
+    ax.set_xlabel("Número de Auditoría", color="#94a3b8")
+    ax.tick_params(colors="#94a3b8")
+    ax.grid(True, color="#334155", alpha=0.2)
+    ax.legend(facecolor="#1e293b", edgecolor="#334155", labelcolor="white")
+
     for spine in ax.spines.values():
-        spine.set_color('#334155')
-        
+        spine.set_color("#334155")
+
     plt.tight_layout()
     st.pyplot(fig)
 
     # ── Navegador del Merkle DAG Ledger ───────────────────────────────────────
     st.markdown("### 💻 CTM Merkle DAG Ledger")
-    
+
     if not nodes:
         st.info("Ledger en bloque vacío. Envíe consultas para registrar bloques.")
     else:
@@ -657,32 +787,34 @@ with col_telemetry:
         chain = []
         curr = root_hash
         visited = set()
-        
+
         while curr and curr != "N/A" and curr not in visited:
             visited.add(curr)
             node_data = nodes.get(curr)
             if not node_data:
                 break
-            
+
             parent_hashes = node_data.get("parent_hashes", [])
             # Revisar si este nodo fue saboteado
             is_tampered = curr in st.session_state.tampered_nodes
-            
+
             dev_score = node_data.get("deviation_score")
-            chain.append({
-                "hash": curr,
-                "timestamp": node_data.get("timestamp", ""),
-                "parent": parent_hashes[0] if parent_hashes else "Genesis",
-                "type": node_data.get("payload", {}).get("type", "COMMIT"),
-                "dissonance": dev_score if dev_score is not None else None,
-                "tampered": is_tampered
-            })
-            
+            chain.append(
+                {
+                    "hash": curr,
+                    "timestamp": node_data.get("timestamp", ""),
+                    "parent": parent_hashes[0] if parent_hashes else "Genesis",
+                    "type": node_data.get("payload", {}).get("type", "COMMIT"),
+                    "dissonance": dev_score if dev_score is not None else None,
+                    "tampered": is_tampered,
+                }
+            )
+
             if parent_hashes:
                 curr = parent_hashes[0]
             else:
                 curr = None
-                
+
         if chain:
             block = chain[0]
             is_broken = False
@@ -690,7 +822,7 @@ with col_telemetry:
                 if b_old["tampered"]:
                     is_broken = True
                     break
-                    
+
             if is_broken:
                 card_class = "block-card tampered"
                 badge_text = "⚠️ CORRUPTO"
@@ -699,7 +831,7 @@ with col_telemetry:
                 card_class = "block-card"
                 badge_text = "VÁLIDO"
                 badge_style = "background-color: #10b981; color: white;"
-                
+
             d_val = block["dissonance"]
             if d_val is None:
                 d_text = "N/A"
@@ -707,7 +839,7 @@ with col_telemetry:
                 d_text = "∞"
             else:
                 d_text = f"{d_val:.4f}"
-            
+
             with st.container():
                 st.markdown(
                     f"<div class='{card_class}'>"
@@ -719,7 +851,7 @@ with col_telemetry:
                     f"<small>Parent: <span style='font-family:\"JetBrains Mono\"'>{block['parent'][:24]}...</span></small><br>"
                     f"<small>Dissonance score: <b>{d_text}</b> | {block['timestamp'][:19]}</small>"
                     f"</div>",
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
 
     # ── Casos del AEM (Audit Entropy Module) ──────────────────────────────────
@@ -734,15 +866,19 @@ with col_telemetry:
                 d_s_val = case.get("d_s", 0.0)
                 d_s_text = "∞" if d_s_val == float("inf") else f"{d_s_val:.4f}"
                 user_in = case.get("user_input") or "N/A"
-                
+
                 audit_in = case.get("audit_input")
                 output_text = "N/A"
                 if audit_in:
-                    output_text = getattr(audit_in, "text_content", getattr(audit_in, "source_text", str(audit_in)))
-                
+                    output_text = getattr(
+                        audit_in,
+                        "text_content",
+                        getattr(audit_in, "source_text", str(audit_in)),
+                    )
+
                 vps = case.get("violated_policies") or []
                 vps_text = ", ".join(vps) if vps else "Desviación/Disonancia alta"
-                
+
                 st.markdown(
                     f"<div style='background-color:#1e293b; padding:12px; border-radius:8px; border:1px solid #ef4444; margin-bottom:8px;'>"
                     f"<b>Caso #{len(aem_trail)-idx}</b> - <span style='color:#ef4444; font-weight:bold;'>RECHAZADO</span><br>"
@@ -752,12 +888,14 @@ with col_telemetry:
                     f"📊 <b>Disonancia:</b> {d_s_text}<br>"
                     f"❌ <b>Políticas Violadas:</b> {vps_text}"
                     f"</div>",
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
 
 # ── Detalle del Último Análisis de Auditoría (Expander) ───────────────────────
 st.markdown("---")
-with st.expander("📊 Explicabilidad Detallada de la Notaría (Última Transacción)", expanded=False):
+with st.expander(
+    "📊 Explicabilidad Detallada de la Notaría (Última Transacción)", expanded=False
+):
     if st.session_state.last_audit_details:
         st.json(st.session_state.last_audit_details)
     else:
@@ -766,7 +904,10 @@ with st.expander("📊 Explicabilidad Detallada de la Notaría (Última Transacc
 with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
     log_text = "\n".join(st.session_state.notary_logs)
     if not log_text:
-        st.markdown("<div class='term'>Sin mensajes de log registrados en esta sesión.</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='term'>Sin mensajes de log registrados en esta sesión.</div>",
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown(f"<div class='term'>{log_text}</div>", unsafe_allow_html=True)
 
@@ -780,54 +921,64 @@ if st.session_state.chat_history:
         "verification_standard": "Standard-Zero Compliant (Coalgebraic Trust)",
         "chain_integrity_status": "PASS" if is_chain_valid else "FAIL_TAMPER_DETECTED",
         "system_kpis": {
-            "state_integrity": "100% Verified" if is_chain_valid else "Ledger Corrupted",
+            "state_integrity": (
+                "100% Verified" if is_chain_valid else "Ledger Corrupted"
+            ),
             "trust_threshold_epsilon": epsilon,
-            "total_audited_signals": len([m for m in st.session_state.chat_history if m["role"] == "audit"])
+            "total_audited_signals": len(
+                [m for m in st.session_state.chat_history if m["role"] == "audit"]
+            ),
         },
-        "digital_signature_seal": sha256_hex(json.dumps([m.get("hash", "") for m in st.session_state.chat_history if m["role"] == "audit"])),
-        "audit_trail": []
+        "digital_signature_seal": sha256_hex(
+            json.dumps(
+                [
+                    m.get("hash", "")
+                    for m in st.session_state.chat_history
+                    if m["role"] == "audit"
+                ]
+            )
+        ),
+        "audit_trail": [],
     }
-    
+
     for idx, m in enumerate(st.session_state.chat_history):
         if m["role"] == "user":
-            report["audit_trail"].append({
-                "step": idx,
-                "role": "user",
-                "content": m["content"]
-            })
+            report["audit_trail"].append(
+                {"step": idx, "role": "user", "content": m["content"]}
+            )
         elif m["role"] == "audit":
-            report["audit_trail"].append({
-                "step": idx,
-                "role": "audit_verdict",
-                "status": m["status"],
-                "dissonance_total": m["d_s"],
-                "components": {
-                    "d_1_semantic": m["d_1"],
-                    "d_2_logic": m["d_2"],
-                    "d_3_temporal": m["d_3"]
-                },
-                "integrity_hash": m["hash"],
-                "root_hash": m["root_hash"],
-                "timestamp": m["timestamp"],
-                "aem_counters": {
-                    "total": m["aem_total"],
-                    "valid": m["aem_valid"],
-                    "rejected": m["aem_rejected"]
+            report["audit_trail"].append(
+                {
+                    "step": idx,
+                    "role": "audit_verdict",
+                    "status": m["status"],
+                    "dissonance_total": m["d_s"],
+                    "components": {
+                        "d_1_semantic": m["d_1"],
+                        "d_2_logic": m["d_2"],
+                        "d_3_temporal": m["d_3"],
+                    },
+                    "integrity_hash": m["hash"],
+                    "root_hash": m["root_hash"],
+                    "timestamp": m["timestamp"],
+                    "aem_counters": {
+                        "total": m["aem_total"],
+                        "valid": m["aem_valid"],
+                        "rejected": m["aem_rejected"],
+                    },
                 }
-            })
+            )
         elif m["role"] == "assistant":
-            report["audit_trail"].append({
-                "step": idx,
-                "role": "assistant_response",
-                "content": m["content"]
-            })
-            
+            report["audit_trail"].append(
+                {"step": idx, "role": "assistant_response", "content": m["content"]}
+            )
+
     json_str = json.dumps(report, indent=2, ensure_ascii=False)
-    
+
     st.download_button(
         label="💾 Descargar Reporte Forense de Cumplimiento (JSON)",
         data=json_str,
         file_name=f"reporte_auditoria_{datetime.now().strftime('%Y%md_%H%M%S')}.json",
         mime="application/json",
-        use_container_width=True
+        use_container_width=True,
     )

@@ -53,7 +53,7 @@ def parse_policy_line(line: str, line_idx: int) -> Dict[str, Any]:
         pattern = regex_match.group(1).strip()
         line = re.sub(r"\[REGEX:.*?\]", "", line, flags=re.IGNORECASE).strip()
 
-    # 3. Inferencia de Polaridad
+    # 3. Polaridad declarativa
     polarity = "affirmative"
     if "[NEGATIVE]" in line.upper():
         polarity = "negative"
@@ -61,13 +61,10 @@ def parse_policy_line(line: str, line_idx: int) -> Dict[str, Any]:
     elif "[AFFIRMATIVE]" in line.upper():
         polarity = "affirmative"
         line = re.sub(r"\[AFFIRMATIVE\]", "", line, flags=re.IGNORECASE).strip()
-    else:
-        negation_pattern = re.compile(
-            r"\b(no|evitar|evite|prohibido|prohíbe|prohibir|nunca|jamás|ni|sin|avoid|never|forbidden|reject|not)\b",
-            re.IGNORECASE
-        )
-        if negation_pattern.search(line) or (policy_type == "regex" and not line.strip()):
-            polarity = "negative"
+    elif policy_type == "regex":
+        # Por defecto, las políticas basadas en expresiones regulares representan
+        # restricciones negativas (prohibiciones semánticas) y no dependen del texto.
+        polarity = "negative"
 
     # 4. ID Determinista
     text_to_hash = line if line.strip() else (pattern or "")
@@ -82,7 +79,7 @@ def parse_policy_line(line: str, line_idx: int) -> Dict[str, Any]:
         "polarity": polarity,
         "hardness": hardness,
         "priority": 1,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if pattern:
         policy["pattern"] = pattern
@@ -128,7 +125,7 @@ class FilePolicyLoader:
                     line = line.strip()
                     if not line or line.startswith("#"):
                         continue
-                    
+
                     policies.append(self._parse_policy(line, line_idx))
         except Exception as e:
             logger.error(f"Error reading text policy file {self.file_path}: {e}")
@@ -177,6 +174,7 @@ class InvariantSynthesizer:
         vocab_cache_path: Optional[str] = None,
     ) -> None:
         if tokenizer is None:
+
             class _FallbackTokenizer:
                 def __init__(self):
                     self._vocab = {}
@@ -201,9 +199,7 @@ class InvariantSynthesizer:
         self.tokenizer = tokenizer
         self.embedding_service = embedding_service
         if self.embedding_service is None:
-            raise ValueError(
-                "EmbeddingService es obligatorio para InvariantSynthesizer."
-            )
+            raise ValueError("EmbeddingService es obligatorio para InvariantSynthesizer.")
         self.w_bank: Dict[int, Tuple[str, int]] = {}
         self.compilation_log: List[PolicyCompilationResult] = []
         self.vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size

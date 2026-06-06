@@ -24,7 +24,7 @@ class ModelDownloader:
 
     def download_models(
         self,
-        embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         entailment_model_name: str = "cross-encoder/nli-deberta-v3-small",
         force_update: bool = False,
     ) -> None:
@@ -32,7 +32,11 @@ class ModelDownloader:
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
         auth_token = _get_auth_token(self.token)
-        is_forced = force_update or os.getenv("IIAE_FORCE_UPDATE", "").lower() in ("true", "1", "yes")
+        is_forced = force_update or os.getenv("IIAE_FORCE_UPDATE", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
         # 1. Embeddings (Sentence-Transformers)
         print(f"[Phase 1] Verificando Embeddings: {embedding_model_name}")
@@ -119,12 +123,15 @@ class ModelDownloader:
 
 if __name__ == "__main__":
     import argparse
+
     load_dotenv()
-    
+
     parser = argparse.ArgumentParser(description="Descargador de modelos IIAE")
-    parser.add_argument("--force", action="store_true", help="Forzar la descarga/actualización de los modelos")
+    parser.add_argument(
+        "--force", action="store_true", help="Forzar la descarga/actualización de los modelos"
+    )
     args, unknown = parser.parse_known_args()
-    
+
     downloader = ModelDownloader()
     print("[IIAE] Iniciando secuencia de verificación de modelos...")
     downloader.download_models(force_update=args.force)
