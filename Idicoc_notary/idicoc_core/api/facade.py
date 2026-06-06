@@ -8,15 +8,15 @@ from idicoc_core.config import AuditConfig
 
 class NotaryClient:
     """
-    Main client facade for the IDICOC Notary.
-    Shields the integrator from complex mathematical and cryptographic details.
+    Fachada Principal IDICOC. Implementa el patrón Blackbox para el Custodial Kernel.
     """
 
-    def __init__(self, config: AuditConfig):
+    def __init__(self, config: AuditConfig, llm_provider: Any = None):
+        # El proveedor LLM real se inyecta desde la app
+        self.pipeline = AuditPipeline(config, llm_provider)
         self.config = config
-        self.pipeline = AuditPipeline(config)
 
-    def audit(
+    def auditar(
         self,
         user_prompt: str,
         rag_context: str,
@@ -25,8 +25,7 @@ class NotaryClient:
         epsilon_override: Optional[float] = None
     ) -> NotaryAuditResult:
         """
-        Main entry point for the IDICOC Notary.
-        Evaluates the LLM output against the active policies and session context.
+        Proyecta la salida estocástica sobre la Variedad de Invarianza (Manifold).
         """
         return self.pipeline.execute_audit(
             user_prompt=user_prompt,
@@ -36,5 +35,5 @@ class NotaryClient:
             epsilon_override=epsilon_override
         )
 
-
-
+    # Alias funcional para compatibilidad
+    audit = auditar

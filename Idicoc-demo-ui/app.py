@@ -153,45 +153,6 @@ st.markdown(
 )
 
 # ── Proveedores Phi ───────────────────────────────────────────────────────────
-class SimulatedPhiProvider:
-    def __init__(self, embedding_model_name=None):
-        self.embedding_provider = None
-        try:
-            from sentence_transformers import SentenceTransformer
-            self.embedding_provider = SentenceTransformer(embedding_model_name)
-        except Exception:
-            pass
-
-    def generate(self, prompt: str, **kwargs) -> str:
-        prompt_lower = prompt.lower()
-        if "saldo" in prompt_lower or "cuenta" in prompt_lower:
-            return "Su saldo actual en la cuenta corriente es de USD 2,500. El estado es normal y verificado."
-        elif "identidad" in prompt_lower or "verificar" in prompt_lower:
-            return "Para verificar su identidad en la plataforma bancaria, presente su token digital y clave."
-        elif "promesa" in prompt_lower or "rentabilidad" in prompt_lower:
-            return "El banco ofrece productos estándar, pero no podemos realizar promesas de rentabilidad variable garantizada."
-        else:
-            return f"He recibido su consulta: '{prompt}'. De acuerdo con los datos indexados por RAG, la transacción ha sido confirmada."
-
-    def get_embedding(self, text: str) -> list[float]:
-        if self.embedding_provider is None:
-            import numpy as np
-            import hashlib
-            import struct
-            h = hashlib.sha256(text.encode('utf-8')).digest()
-            floats = []
-            for i in range(384):
-                val = struct.unpack('<f', h[(i*4)%32 : (i*4)%32 + 4])[0]
-                if not np.isfinite(val):
-                    val = 0.1
-                floats.append(val)
-            norm = np.linalg.norm(floats)
-            if norm > 0:
-                floats = [f / norm for f in floats]
-            return floats
-        vec = self.embedding_provider.encode(text)
-        return vec.tolist() if hasattr(vec, "tolist") else list(vec)
-
 @st.cache_resource
 def load_real_model(provider_type, model_path, embedding_model_name):
     try:
@@ -234,6 +195,57 @@ if st.session_state.policies_mtime != current_mtime:
     policies_changed = True
     st.session_state.policies_mtime = current_mtime
 
+# ── Pantalla de Carga Temporal para Aplicación y LLM ──
+if "llm_provider" not in st.session_state:
+    loading_placeholder = st.empty()
+    with loading_placeholder.container():
+        st.markdown(
+            """
+            <div style="background-color: #0f172a; padding: 40px; border-radius: 12px; text-align: center; margin: 100px auto; max-width: 600px; border: 1px solid #1e293b; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);">
+                <h1 style="color: #3b82f6; font-size: 28px; margin-bottom: 15px; font-family: 'Outfit', sans-serif;">🛡️ Inicializando Notario IDICOC</h1>
+                <p style="color: #94a3b8; font-size: 16px; margin-bottom: 25px;">Cargando modelo local LLM Phi-3.5-mini y preparando el pipeline de embeddings...</p>
+                <div style="margin: 20px auto; width: 45px; height: 45px; border: 4px solid #334155; border-top: 4px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <p style="color: #64748b; font-size: 12px; margin-top: 15px;">Esto puede tardar unos segundos en la primera inicialización.</p>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        llm_provider, status = load_real_model(
+            provider_type="phi",
+            model_path="models_cache/Phi-3.5-mini-instruct",
+            embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+        if llm_provider is None:
+            st.error(f"❌ Error crítico cargando el modelo real: {status}")
+            st.stop()
+        
+        st.session_state.llm_provider = llm_provider
+        
+        # Initialize NotaryClient immediately on load
+        try:
+            config = AuditConfig(
+                policy_file_path=_pol_path,
+                compile_policies_on_init=True,
+                enable_logits_interception=True,
+                instance_name="audit_forensic_chatbot",
+            )
+            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+            st.session_state.policies_mtime = current_mtime
+        except Exception as e:
+            st.error(f"Error inicializando notario en carga inicial: {e}")
+            st.stop()
+            
+        st.rerun()
+else:
+    llm_provider = st.session_state.llm_provider
+
+
 # ── Configurar Barra Lateral ──────────────────────────────────────────────────
 with st.sidebar:
     st.image("https://img.icons8.com/nolan/96/shield.png", width=65)
@@ -262,26 +274,11 @@ with st.sidebar:
     )
     st.session_state.context_list = [line.strip() for line in rag_context.split("\n") if line.strip()] if rag_context.strip() else None
 
-    model_mode = st.radio("🤖 Proveedor LLM", ["Simulado (Ligero / Seguro)", "Real (Phi-3.5-mini local)"])
-    
-    llm_provider = None
-    if model_mode == "Real (Phi-3.5-mini local)":
-        with st.spinner("⏳ Cargando Phi-3.5-mini (Safetensors)..."):
-            llm_provider, status = load_real_model(
-                provider_type="phi",
-                model_path="models_cache/Phi-3.5-mini-instruct",
-                embedding_model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
-            if llm_provider is None:
-                st.warning(f"⚠️ Fallback al simulador: {status}")
-                llm_provider = SimulatedPhiProvider("sentence-transformers/all-MiniLM-L6-v2")
-            else:
-                st.success("✓ Phi-3.5-mini cargado con aceleración hardware")
-    else:
-        llm_provider = SimulatedPhiProvider("sentence-transformers/all-MiniLM-L6-v2")
+    st.success("✓ Proveedor: Phi-3.5-mini (Local)")
+    st.info("Estado: Activo y Asegurado")
 
-    # Inicializar Notario con config y provider (se recrea si cambia el proveedor o se modifican las políticas)
-    if "notary_client" not in st.session_state or st.session_state.get("current_provider") != model_mode or policies_changed:
+    # Inicializar Notario con config y provider (se recrea si se modifican las políticas)
+    if "notary_client" not in st.session_state or policies_changed:
         try:
             config = AuditConfig(
                 policy_file_path=_pol_path,
@@ -290,7 +287,6 @@ with st.sidebar:
                 instance_name="audit_forensic_chatbot",
             )
             st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
-            st.session_state.current_provider = model_mode
             st.session_state.policies_mtime = current_mtime
         except Exception as e:
             st.error(f"Error inicializando notario: {e}")

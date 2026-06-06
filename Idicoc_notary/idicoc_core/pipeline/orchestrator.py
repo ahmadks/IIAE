@@ -37,8 +37,9 @@ class AuditEntropyModule:
 
 
 class AuditPipeline:
-    def __init__(self, config: Any):
+    def __init__(self, config: Any, llm_provider: Any = None):
         self.config = config
+        self.llm_provider = llm_provider
         
         # 1. Initialize DQE (Context Parser)
         self.dqe = ContextParser(config)
@@ -150,12 +151,12 @@ class AuditPipeline:
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None
     ) -> NotaryAuditResult:
-        # 1. DQE: Construct observable state
-        session_context = self.dqe.build_context(user_prompt, rag_context)
+        # 1. DQE: Empaquetar el Estado Observable
+        context = self.dqe.build_context(user_prompt, rag_context)
 
-        # 2. Gating: Hardware/Software MUX mask
-        if not self.gating.is_hardware_contained(session_context):
-            return self._build_rejection("Stage 2: Hardware Mask Containment Breach", session_context)
+        # 2. Gating: Stage 2/3 (Hardware Mask & Domain Confinement)
+        if not self.gating.is_hardware_contained(context):
+            return self._build_hard_rejection("Stage 2: Hardware Mask Containment Breach", context)
 
         # Dynamic policies management
         added_dynamic_ids = []
@@ -200,16 +201,15 @@ class AuditPipeline:
                 logger.error(f"Error compiling dynamic context policies: {e}")
 
         try:
-            # 3. ISG: Retrieve active invariant manifold
-            active_graph = self.isg
+            # 3. ISG: Cargar Invariantes
+            graph = self.isg
 
-            # 4. DSE: Compute trace equivalence / dissonance
-            # Temporarily configure epsilon override on evaluator strategy
+            # 4. DSE: Evaluación Kantorovich-Lifted (Cálculo de D_s)
             old_eps = self.dse.strategy.config.allowed_epsilon
             if epsilon_override is not None:
                 self.config.allowed_epsilon = epsilon_override
 
-            d_s, violations, raw_metrics = self.dse.evaluate(llm_output, session_context, active_graph)
+            d_s, violations, raw_metrics = self.dse.evaluate(llm_output, context, graph)
             d_s = float(d_s)
             
             allowed_eps = float(epsilon_override if epsilon_override is not None else self.config.allowed_epsilon)
@@ -218,7 +218,7 @@ class AuditPipeline:
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
 
-            # 5. CTM: Cryptographic Side-Effect (Silent Emission)
+            # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
             if self.config.ctm_mode == "full":
                 tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
                 wal_payload = {
@@ -231,13 +231,13 @@ class AuditPipeline:
                 }
                 self.wal.write(tx_id, wal_payload)
                 try:
-                    self.ctm.commit_trace(session_context, llm_output, d_s, is_admitted, violations)
+                    self.ctm.commit_trace(context, llm_output, d_s, is_admitted, violations)
                     self.wal.mark_completed(tx_id)
                 except Exception as exc:
                     logger.error(f"CTM commit failure: {exc}")
 
-            # 6. Return Clean DTO
-            integrity_score = float(max(0.0, 1.0 - d_s) if d_s != float('inf') and not math.isnan(d_s) else 0.0)
+            # 6. Mapeo de Terminalidad Coálgebraica:
+            integrity_score = 0.0 if math.isinf(d_s) or math.isnan(d_s) else float(max(0.0, 1.0 - d_s))
 
             result = NotaryAuditResult(
                 is_admitted=is_admitted,
@@ -245,7 +245,7 @@ class AuditPipeline:
                 dissonance_ds=d_s,
                 allowed_epsilon=allowed_eps,
                 violated_policies=violations,
-                session_context=session_context,
+                session_context=context,
                 metrics=raw_metrics
             )
 
@@ -263,7 +263,6 @@ class AuditPipeline:
 
             return result
         finally:
-            # Remove dynamic policies to prevent mutating the graph permanently
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:
                     self.isg.nodes.pop(ax_id, None)
@@ -291,3 +290,7 @@ class AuditPipeline:
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
         return result
+
+    def _build_hard_rejection(self, reason: str, session_context: SessionContext) -> NotaryAuditResult:
+        return self._build_rejection(reason, session_context)
+

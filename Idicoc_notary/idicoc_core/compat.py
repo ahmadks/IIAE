@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, List, Optional
 from datetime import datetime, timezone
-from idicoc_core.api.facade import NotaryClient
+from idicoc_core.api.facade import NotaryClient as RealNotaryClient
 from idicoc_core.api.schemas import SessionContext
 from idicoc_core.utils.hashing import sha256_hex
 
@@ -22,17 +22,18 @@ class CanonicalStateDTO:
 
 class NotaryClient:
     """Compatibility client facade for legacy client integrations."""
-    def __init__(self, config: Any):
+    def __init__(self, config: Any, llm_provider: Any = None, **kwargs):
         # Map legacy rigidity_epsilon to allowed_epsilon if present
         if hasattr(config, "rigidity_epsilon") and not hasattr(config, "allowed_epsilon"):
             config.allowed_epsilon = config.rigidity_epsilon
         elif hasattr(config, "rigidity_epsilon"):
             config.allowed_epsilon = config.rigidity_epsilon
             
-        self.client = NotaryClient(config)
+        self.client = RealNotaryClient(config, llm_provider)
         self.pipeline = self.client.pipeline
         self.config = config
         self.aem = self.pipeline.aem
+        self.llm_provider = llm_provider
 
     def audit(
         self,

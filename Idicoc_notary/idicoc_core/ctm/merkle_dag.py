@@ -281,7 +281,7 @@ class CustodialTraceManager:
 
     def commit_trace(
         self,
-        context: SessionContext,
+        context: SessionContext | Dict[str, Any],
         output: str,
         d_s: float,
         is_admitted: bool,
@@ -294,9 +294,16 @@ class CustodialTraceManager:
         from datetime import datetime, timezone
         timestamp = datetime.now(timezone.utc).isoformat()
 
+        if isinstance(context, dict):
+            user_prompt = context.get("user_prompt", "")
+            rag_context = context.get("rag_context", "")
+        else:
+            user_prompt = context.user_prompt
+            rag_context = context.rag_context
+
         logical_payload = {
-            "user_prompt": context.user_prompt,
-            "rag_context": context.rag_context,
+            "user_prompt": user_prompt,
+            "rag_context": rag_context,
             "output": output,
             "dissonance": d_s,
             "is_admitted": is_admitted,
