@@ -279,7 +279,7 @@ def _compute_context_contradiction(
                     if contradiction_score > contradiction_alert_threshold:
                         is_contradiction = True
                 else:
-                    if similarity < 0.0 and contradiction_score > contradiction_alert_threshold:
+                    if (similarity < 0.0 or len(context_input) == 1) and contradiction_score > contradiction_alert_threshold:
                         is_contradiction = True
 
             if is_contradiction:
