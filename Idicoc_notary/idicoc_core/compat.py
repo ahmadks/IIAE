@@ -20,7 +20,7 @@ class CanonicalStateDTO:
         self.timestamp = timestamp
         self.data = data
 
-class IDICOCNotaryClient:
+class NotaryClient:
     """Compatibility client facade for legacy client integrations."""
     def __init__(self, config: Any):
         # Map legacy rigidity_epsilon to allowed_epsilon if present
@@ -34,7 +34,7 @@ class IDICOCNotaryClient:
         self.config = config
         self.aem = self.pipeline.aem
 
-    def auditar(
+    def audit(
         self,
         user_prompt: str,
         rag_context: str,
@@ -42,17 +42,13 @@ class IDICOCNotaryClient:
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None
     ) -> Any:
-        """Main entry point for auditing, delegating to the wrapped NotaryClient."""
-        return self.client.auditar(
+        return self.client.audit(
             user_prompt=user_prompt,
             rag_context=rag_context,
             llm_output=llm_output,
             context_policies=context_policies,
             epsilon_override=epsilon_override
         )
-
-    # Alias for English compatibility
-    audit = auditar
 
     def process_interaction(
         self,
@@ -85,7 +81,7 @@ class IDICOCNotaryClient:
             user_prompt = llm_output
 
         # Execute the audit via client
-        audit_res = self.client.auditar(
+        audit_res = self.client.audit(
             user_prompt=user_prompt,
             rag_context=rag_context,
             llm_output=llm_output,

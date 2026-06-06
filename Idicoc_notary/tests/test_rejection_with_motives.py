@@ -17,7 +17,7 @@ import pytest
 import numpy as np
 
 from idicoc_core.config import AuditConfig
-from idicoc_core.api.facade import NotaryClient
+from idicoc_core.api.facade import NotaryClient as RealNotaryClient
 from idicoc_core.pipeline.orchestrator import AuditPipeline
 from idicoc_core.dse.evaluator import PropertyGraphEvaluator
 from idicoc_core.isg.graph_manager import PropertyGraph
@@ -102,10 +102,10 @@ class IDICOCPipeline:
             "canonical_state": ResultWrapper(metadata=metadata)
         }
 
-class IDICOCNotaryClientWrapper:
+class NotaryClientWrapper:
     def __init__(self, config):
         config.allowed_epsilon = config.rigidity_epsilon
-        self.client = NotaryClient(config)
+        self.client = RealNotaryClient(config)
         self.pipeline = self.client.pipeline
         self.aem = DummyAEM()
 
@@ -128,7 +128,7 @@ class IDICOCNotaryClientWrapper:
         
         user_prompt = str(user_input)
         
-        audit_res = self.client.auditar(
+        audit_res = self.client.audit(
             user_prompt=user_prompt,
             rag_context=rag_context,
             llm_output=llm_output,
@@ -150,7 +150,7 @@ class IDICOCNotaryClientWrapper:
         
         return ResultWrapper(metadata=metadata)
 
-IDICOCNotaryClient = IDICOCNotaryClientWrapper
+NotaryClient = NotaryClientWrapper
 
 
 
@@ -174,8 +174,8 @@ class DummyEmbedder:
         return vec / norm if norm > 0.0 else vec
 
 
-def _build_client(**kwargs) -> IDICOCNotaryClient:
-    """Construye un IDICOCNotaryClient con config mínima para tests."""
+def _build_client(**kwargs) -> NotaryClient:
+    """Construye un NotaryClient con config mínima para tests."""
     config = AuditConfig(
         ctm_mode="disabled",
         rigidity_epsilon=kwargs.pop("epsilon", 0.2),
@@ -184,7 +184,7 @@ def _build_client(**kwargs) -> IDICOCNotaryClient:
         embedding_provider=DummyEmbedder(),
         **kwargs,
     )
-    return IDICOCNotaryClient(config)
+    return NotaryClient(config)
 
 
 def _fmt_violated(policies: list) -> str:

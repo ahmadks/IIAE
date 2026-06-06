@@ -30,7 +30,7 @@ class IDICOCPipelineWrapper:
             "audit_receipt": {"status": status}
         }
 
-class IDICOCNotaryClientWrapper:
+class NotaryClientWrapper:
     def __init__(self, config):
         config.allowed_epsilon = config.rigidity_epsilon
         self.pipeline = IDICOCPipelineWrapper(config)
@@ -60,7 +60,7 @@ class IDICOCNotaryClientWrapper:
         
         return CanonicalStateDTO(metadata=metadata)
 
-IDICOCNotaryClient = IDICOCNotaryClientWrapper
+NotaryClient = NotaryClientWrapper
 
 audit_mock = ModuleType("idicoc_core.audit")
 audit_mock.SemanticPayload = SemanticPayload
@@ -108,7 +108,7 @@ def test_pipeline_with_persistence():
         )
         
         # Instantiate wrapper
-        wrapper = IDICOCNotaryClient(config)
+        wrapper = NotaryClient(config)
         
         # Process a valid interaction
         from idicoc_core.audit import SemanticPayload
@@ -132,7 +132,7 @@ def test_pipeline_with_persistence():
             ctm_nodes_path=ctm_nodes,
             ctm_root_path=ctm_root,
         )
-        wrapper2 = IDICOCNotaryClient(config2)
+        wrapper2 = NotaryClient(config2)
         
         # The reloaded MerkleDAG must have the exact same root hash and nodes
         assert wrapper2.pipeline is not None
@@ -140,7 +140,7 @@ def test_pipeline_with_persistence():
 
 def test_ctm_modes():
     config_log = AuditConfig(rigidity_epsilon=0.5, ctm_mode="log_only")
-    wrapper_log = IDICOCNotaryClient(config_log)
+    wrapper_log = NotaryClient(config_log)
     
     # Process interaction
     from idicoc_core.audit import SemanticPayload
@@ -156,7 +156,7 @@ def test_ctm_modes():
     
     # Test disabled mode
     config_dis = AuditConfig(rigidity_epsilon=0.5, ctm_mode="disabled")
-    wrapper_dis = IDICOCNotaryClient(config_dis)
+    wrapper_dis = NotaryClient(config_dis)
     assert wrapper_dis.pipeline is not None
     result_dis = wrapper_dis.pipeline.execute("test log", ["test log"], ["test log"])
     assert result_dis["kernel_result"] == {"status": "disabled"}

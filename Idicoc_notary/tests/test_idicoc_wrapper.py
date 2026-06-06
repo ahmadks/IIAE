@@ -20,7 +20,7 @@ def test_audit_config_properties():
 
 
 @patch('idicoc_core.dse.evaluator.DissonanceStateEvaluator.evaluate')
-def test_notary_client_auditar_success(mock_evaluate):
+def test_notary_client_audit_success(mock_evaluate):
     mock_evaluate.return_value = (0.05, [], {"d_s": 0.05})
     config = AuditConfig(
         rigidity_epsilon=0.1,
@@ -28,7 +28,7 @@ def test_notary_client_auditar_success(mock_evaluate):
         dissonance_weights=(0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0)
     )
     client = NotaryClient(config)
-    res = client.auditar(
+    res = client.audit(
         user_prompt="test prompt",
         rag_context="test context",
         llm_output="test output"
@@ -50,7 +50,7 @@ def test_notary_client_hardware_containment_rejection(monkeypatch):
     client = NotaryClient(config)
     
     # Since metadata is empty, hardware_contained will be False and it will breach containment stage 2
-    res = client.auditar(
+    res = client.audit(
         user_prompt="test prompt",
         rag_context="test context",
         llm_output="test output"

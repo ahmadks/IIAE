@@ -16,7 +16,7 @@ class NotaryClient:
         self.config = config
         self.pipeline = AuditPipeline(config)
 
-    def auditar(
+    def audit(
         self,
         user_prompt: str,
         rag_context: str,
@@ -36,9 +36,5 @@ class NotaryClient:
             epsilon_override=epsilon_override
         )
 
-    # Alias for English compatibility
-    audit = auditar
 
 
-# Alias for backward-compatible naming in test imports
-IDICOCNotaryClient = NotaryClient

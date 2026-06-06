@@ -22,7 +22,7 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"))
 )
 from idicoc_core.config import AuditConfig
-from idicoc_core.compat import IDICOCNotaryClient, SemanticPayload
+from idicoc_core.compat import NotaryClient, SemanticPayload
 from idicoc_core.dse.evaluator import PropertyGraphEvaluator
 from providers.factory import get_provider
 from idicoc_core.utils.hashing import sha256_dict, sha256_hex
@@ -289,7 +289,7 @@ with st.sidebar:
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
-            st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
+            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
             st.session_state.current_provider = model_mode
             st.session_state.policies_mtime = current_mtime
         except Exception as e:
@@ -348,7 +348,7 @@ with st.sidebar:
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
             )
-            st.session_state.notary_client = IDICOCNotaryClient(config, llm_provider=llm_provider)
+            st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
             st.session_state.policies_mtime = current_mtime
         except Exception:
             pass

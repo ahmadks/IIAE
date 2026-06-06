@@ -1,5 +1,5 @@
 """
-Test file for IDICOCNotaryClient with logic strategy profile.
+Test file for NotaryClient with logic strategy profile.
 Tests the IIAE service integration with logical dissonance measurement via optimal transport.
 """
 
@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from idicoc_core.config import AuditConfig
-from idicoc_core import IDICOCNotaryClient
+from idicoc_core import NotaryClient
 from idicoc_core.dse.evaluator import StructuralDissonanceStrategy
 
 
@@ -41,7 +41,7 @@ class MockAuditInput:
 
 
 def _build_logic_service(*args, **kwargs):
-    return IDICOCNotaryClient(
+    return NotaryClient(
         AuditConfig(
             ctm_mode="disabled",
             rigidity_epsilon=0.1,
@@ -54,7 +54,7 @@ def _build_logic_service(*args, **kwargs):
 
 @pytest.fixture
 def logic_service():
-    """Create an IDICOCNotaryClient instance configured for logic mode."""
+    """Create an NotaryClient instance configured for logic mode."""
     return _build_logic_service()
 
 
@@ -63,7 +63,7 @@ def test_logic_service_with_compatible_distribution(logic_service):
     audit_distribution = np.array([0.32, 0.34, 0.34])
     audit_input = MockAuditInput(audit_distribution)
 
-    res = logic_service.auditar(
+    res = logic_service.audit(
         user_prompt="Mock numeric distribution input",
         rag_context="\n".join([
             "Distribution constraint: must maintain entropy ≥ 1.0",
@@ -93,7 +93,7 @@ def test_logic_service_with_incompatible_distribution():
         }
     ]
 
-    res = logic_service.auditar(
+    res = logic_service.audit(
         user_prompt="Incompatible numeric distribution input",
         rag_context="\n".join([
             "Distribution constraint: must be in the probability simplex",
@@ -112,7 +112,7 @@ def test_logic_service_with_partial_dissonance():
     logic_service = _build_logic_service()
     audit_distribution = np.array([0.35, 0.32, 0.33])
 
-    res = logic_service.auditar(
+    res = logic_service.audit(
         user_prompt="Partial dissonance distribution input",
         rag_context="Entropy constraint",
         llm_output=str(audit_distribution.tolist()),
@@ -128,7 +128,7 @@ def test_logic_service_lambda_composition():
     logic_service = _build_logic_service()
 
     vec = np.array([0.33, 0.33, 0.34])
-    res = logic_service.auditar(
+    res = logic_service.audit(
         user_prompt="Uniform-ish numeric distribution input",
         rag_context="",
         llm_output=str(vec.tolist()),

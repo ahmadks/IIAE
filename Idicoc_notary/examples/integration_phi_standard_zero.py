@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from idicoc_core.config import AuditConfig
-from idicoc_core import IDICOCNotaryClient
+from idicoc_core import NotaryClient
 from idicoc_core.utils.logger import get_logger
 from providers.model_downloader import ensure_phi_downloaded
 
@@ -115,7 +115,7 @@ def phase_2_interaction(config: AuditConfig):
     print("=" * 70)
 
     # Crear cliente
-    client = IDICOCNotaryClient(config)
+    client = NotaryClient(config)
 
     # Datos de ejemplo
     context_input = [
@@ -136,7 +136,7 @@ def phase_2_interaction(config: AuditConfig):
     # Procesar interacción
     print(f"\n[Fase 2] Procesando con NotaryClient...")
 
-    result = client.auditar(
+    result = client.audit(
         user_prompt=user_input,
         rag_context="\n".join(context_input),
         llm_output="",  # Vacío en Fase 2

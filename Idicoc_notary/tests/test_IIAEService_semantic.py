@@ -1,5 +1,5 @@
 """
-Test file for IDICOCNotaryClient with semantic profile.
+Test file for NotaryClient with semantic profile.
 """
 
 import math
@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from idicoc_core.config import AuditConfig
-from idicoc_core import IDICOCNotaryClient
+from idicoc_core import NotaryClient
 
 
 class DummyEmbedder:
@@ -25,7 +25,7 @@ class DummyEmbedder:
 
 
 def _build_semantic_service():
-    return IDICOCNotaryClient(
+    return NotaryClient(
         AuditConfig(
             ctm_mode="disabled",
             rigidity_epsilon=0.1,
@@ -47,7 +47,7 @@ def test_semantic_service_with_similar_inputs():
     audit_input = "Execute a transfer of 50000.00 euros, which is within the limit."
     policy_input = ["Execute a transfer of 50000.00 euros, which is within the limit."]
 
-    res = service.auditar(
+    res = service.audit(
         user_prompt="Mock numeric distribution input",
         rag_context="\n".join(context_input),
         llm_output=audit_input,
@@ -69,7 +69,7 @@ def test_semantic_service_with_hard_violation():
         "[HARD] No transfer may exceed 50000.00 euros."
     ]
 
-    res = service.auditar(
+    res = service.audit(
         user_prompt="Incompatible transfer request",
         rag_context="The maximum allowed transaction amount is 50000.00 euros.",
         llm_output=audit_input,
@@ -88,7 +88,7 @@ def test_semantic_service_with_context_and_policy_alignment():
     context_input = ["Approved transfers must remain below the 100.00 EUR ceiling."]
     policy_input = ["Confirmed transfer stays within the approved limit."]
 
-    res = service.auditar(
+    res = service.audit(
         user_prompt="EUR transfer",
         rag_context="\n".join(context_input),
         llm_output=audit_input,
