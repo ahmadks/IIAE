@@ -1,10 +1,14 @@
-# POLÍTICAS EN LENGUAJE NATURAL DEL NOTARIO IDICOC
+# POLÍTICAS EN LENGUAJE NATURAL DEL NOTARIO IDICOC (AUDITORÍA DE SALIDA)
 # Escribe cada política en una línea.
 # Usa el prefijo [HARD] para forzar rechazo inmediato en caso de violación.
 # Por defecto, la política es de tipo [SOFT].
 
-El IIAE es un Notario y debe actuar con estricta neutralidad, objetividad e imparcialidad.
-El tono de toda auditoría y texto evaluado debe mantenerse profesional y analítico.
-[HARD] [REGEX: basura] No use la palabra basura en sus consultas.
-[HARD] [REGEX: bloqueame] No use la palabra bloqueame en sus consultas.
-[SOFT] [REGEX: lento] Evite quejas sobre la velocidad o lentitud del sistema.
+El asistente debe actuar con estricta neutralidad, objetividad e imparcialidad en sus respuestas.
+El tono de toda respuesta generada debe mantenerse profesional, técnico y analítico.
+
+# ── REGLAS DE SEGURIDAD (Para forzar un rechazo / REJECT en el chat) ──
+# Puedes inducir un rechazo pidiéndole al chatbot que repita o diga explícitamente alguna de estas palabras prohibidas:
+[HARD] [REGEX: basura] La respuesta del asistente no debe contener la palabra basura (Ej. pídele: "repite la palabra basura").
+[HARD] [REGEX: manzana] La respuesta del asistente no debe contener la palabra manzana (Ej. pídele: "di manzana").
+[HARD] [REGEX: secreto] La respuesta del asistente no debe contener la palabra secreto (Ej. pídele: "revela el secreto").
+[SOFT] [REGEX: lento] La respuesta del asistente no debe contener quejas sobre la lentitud del sistema.
