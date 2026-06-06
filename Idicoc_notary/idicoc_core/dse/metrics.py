@@ -370,9 +370,28 @@ def _compute_context_contradiction(
                     coverage_score *= 0.3
                 max_coverage_score = max(max_coverage_score, coverage_score)
 
-        # d_context is the maximum of the two distances, bounded between 0.0 and 1.0
-        d_context = max(max_coverage_score, max_contradiction_score, max(0.0, -min_similarity))
-        d_context = max(0.0, min(1.0, d_context))
+        # ── PERMISIVIDAD ante OMISIONES (Auditor de Veracidad) ──────────────────────────────────
+        # Diferenciamos entre:
+        #  CONTRADICCIÓN HARD: similitud < -0.2 o NLI positivo → penalización fuerte
+        #  OMISIÓN SOFT: similitud media/baja pero no contradictoria → penalización muy leve
+        #
+        # El sistema deja de penalizar por "no decir TODO" y solo castiga lo "factualmente falso".
+        omission_penalty = 0.05  # Penalización muy baja para omisiones (no incluir todo del RAG)
+
+        # Recalcular d_context con lógica permisiva:
+        # Si PRIMARY está presente y no hay contradicciones hard, d_context ≈ omission_penalty
+        if is_primary_present and not contradictory_contexts:
+            d_context = omission_penalty
+        else:
+            # CONTRADICCIÓN HARD: penalización proporcional a severity
+            if max_contradiction_score > 0.8:
+                d_context = max_contradiction_score
+            else:
+                # Sin contradicción hard, permitir incluso coverage_score bajo
+                d_context = max(max_coverage_score * 0.2, omission_penalty)
+
+        # Normalizar: cap a 0.15 para respetar umbral de corrección
+        d_context = min(0.15, max(0.0, d_context))
 
         return d_context, contradictory_contexts
     except Exception:

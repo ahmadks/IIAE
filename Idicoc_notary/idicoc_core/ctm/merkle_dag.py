@@ -378,7 +378,7 @@ class CustodialTraceManager:
                 metrics = context.get("metrics") or context.get("metadata", {}).get("audit_metrics")
             else:
                 metrics = getattr(context, "metrics", None) or (context.metadata or {}).get("audit_metrics")
-            
+
             if isinstance(metrics, dict):
                 dissonance_components["d_context"] = float(metrics.get("d_context", 0.0))
                 dissonance_components["d_axiomatic"] = float(metrics.get("d_logic", metrics.get("d_2", d_s)))
@@ -401,6 +401,21 @@ class CustodialTraceManager:
                 violations=violations,
                 dissonance_components=dissonance_components
             )
+
+    def prepare_payload_for_ctm(self, metrics: Dict) -> Dict:
+        """
+        Extrae solo lo esencial para el Ledger (Silent Emission).
+        Optimiza el tamaño del payload sin perder información crítica.
+        """
+        from datetime import datetime, timezone
+        return {
+            "integrity_score": float(1.0 - min(1.0, max(0.0, metrics.get("d_s", 0.0)))),
+            "is_admitted": not metrics.get("correction_flag", False),
+            "violated_policies_count": len(metrics.get("violated_policies", [])),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "d_context": float(metrics.get("d_context", 0.0)),
+            "d_axiomatic": float(metrics.get("d_logic", 0.0))
+        }
 
     def seal_failure(
         self,

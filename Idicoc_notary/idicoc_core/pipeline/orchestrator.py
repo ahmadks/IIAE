@@ -239,9 +239,11 @@ class AuditPipeline:
 
             d_s, violations, raw_metrics = self.dse.evaluate(llm_output, context, graph)
             d_s = float(d_s)
-            
+
+            # Umbral efectivo = base_tolerance + epsilon (permite omisiones suaves)
             allowed_eps = float(epsilon_override if epsilon_override is not None else self.config.allowed_epsilon)
-            is_admitted = bool(d_s <= allowed_eps)
+            effective_threshold = self.config.correction_base_tolerance + allowed_eps
+            is_admitted = bool(d_s <= effective_threshold)
 
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
@@ -311,7 +313,7 @@ class AuditPipeline:
                 is_admitted=is_admitted,
                 integrity_score=integrity_score,
                 dissonance_ds=d_s,
-                allowed_epsilon=allowed_eps,
+                allowed_epsilon=effective_threshold,
                 violated_policies=violations,
                 session_context=context,
                 metrics=raw_metrics
@@ -322,8 +324,8 @@ class AuditPipeline:
                 "admission_breach": not is_admitted,
                 "d_s": d_s,
                 "violated_policies": violations,
-                "epsilon_used": allowed_eps,
-                "epsilon": allowed_eps,
+                "epsilon_used": effective_threshold,
+                "epsilon": effective_threshold,
                 "user_input": user_prompt,
                 "audit_input": llm_output,
                 "timestamp": datetime.now(timezone.utc).isoformat()
@@ -338,11 +340,12 @@ class AuditPipeline:
 
     def _build_rejection(self, reason: str, session_context: SessionContext) -> NotaryAuditResult:
         allowed_eps = self.config.allowed_epsilon
+        effective_threshold = self.config.correction_base_tolerance + allowed_eps
         result = NotaryAuditResult(
             is_admitted=False,
             integrity_score=0.0,
             dissonance_ds=float("inf"),
-            allowed_epsilon=allowed_eps,
+            allowed_epsilon=effective_threshold,
             violated_policies=[reason],
             session_context=session_context,
             metrics={"error": reason}
@@ -351,8 +354,8 @@ class AuditPipeline:
             "admission_breach": True,
             "d_s": float("inf"),
             "violated_policies": [reason],
-            "epsilon_used": allowed_eps,
-            "epsilon": allowed_eps,
+            "epsilon_used": effective_threshold,
+            "epsilon": effective_threshold,
             "user_input": session_context.user_prompt,
             "audit_input": "Stage 2: Hardware Mask Containment Breach",
             "timestamp": datetime.now(timezone.utc).isoformat()
