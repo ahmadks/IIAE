@@ -3,8 +3,8 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "idicoc-notary-core"
-version = "1.0.0"
+name = "idicoc-notary"
+version = "2.0.0"
 description = "IDICOC Notary SDK: Audit framework for AI systems with deterministic consensus and merkle custody."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -57,7 +57,7 @@ Repository = "https://github.com/yourusername/idicoc-notary-core.git"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["idicoc_notary_core*"]
+include = ["idicoc_notary*"]
 namespaces = false
 
 [tool.pytest.ini_options]
@@ -96,7 +96,7 @@ disallow_untyped_defs = false
 disallow_any_unimported = false
 
 [tool.pyrefly]
-# Raíz del proyecto: permite resolver correctamente idicoc_notary_core y tests
+# Raíz del proyecto: permite resolver correctamente idicoc_notary y tests
 project_root = "."
 search_path = [".", "tests"]
 

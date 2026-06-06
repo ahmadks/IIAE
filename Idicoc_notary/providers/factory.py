@@ -1,5 +1,5 @@
 from __future__ import annotations
-from idicoc_notary_core.audit.llm_interface import BaseLLMProvider
+from idicoc_notary.utils import BaseLLMProvider
 
 
 def get_provider(

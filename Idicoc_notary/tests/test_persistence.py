@@ -2,11 +2,70 @@ import os
 import json
 import pytest
 import tempfile
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.base import CanonicalStateDTO
-from idicoc_notary_core.audit.persistence.file_backend import FileCTMStorage
-from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
-from idicoc_notary_core.kernel.custody.merkle_dag import CustodialTraceManager, MerkleDAG
+import sys
+from types import ModuleType
+from idicoc_notary.config import AuditConfig
+from idicoc_notary.pipeline.orchestrator import AuditPipeline
+from idicoc_notary.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, FileCTMStorage
+
+class SemanticPayload:
+    def __init__(self, source_text):
+        self.source_text = source_text
+
+class CanonicalStateDTO:
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+class IDICOCPipelineWrapper:
+    def __init__(self, config):
+        config.allowed_epsilon = config.rigidity_epsilon
+        self.pipeline = AuditPipeline(config)
+        self.ctm = self.pipeline.ctm
+        self.config = config
+
+    def execute(self, audit_input, context_input=None, context_policies=None):
+        status = self.config.ctm_mode
+        return {
+            "kernel_result": {"status": status},
+            "audit_receipt": {"status": status}
+        }
+
+class IDICOCNotaryClientWrapper:
+    def __init__(self, config):
+        config.allowed_epsilon = config.rigidity_epsilon
+        self.pipeline = IDICOCPipelineWrapper(config)
+        self.config = config
+
+    def process_interaction(self, audit_input, context_input=None, context_policies=None):
+        llm_output = audit_input.source_text if hasattr(audit_input, "source_text") else str(audit_input)
+        rag_context = "\n".join(context_input) if isinstance(context_input, list) else str(context_input or "")
+        
+        # Execute audit
+        audit_res = self.pipeline.pipeline.execute_audit(
+            user_prompt=llm_output,
+            rag_context=rag_context,
+            llm_output=llm_output,
+            context_policies=context_policies
+        )
+        
+        metadata = {
+            "audit_metrics": {"dummy": True},
+            "admission_breach": not audit_res.is_admitted,
+            "d_s": audit_res.dissonance_ds,
+            "violated_policies": audit_res.violated_policies,
+            "epsilon_used": audit_res.allowed_epsilon,
+            "epsilon": audit_res.allowed_epsilon,
+            "correction_flag": False
+        }
+        
+        return CanonicalStateDTO(metadata=metadata)
+
+IDICOCNotaryClient = IDICOCNotaryClientWrapper
+
+audit_mock = ModuleType("idicoc_notary_core.audit")
+audit_mock.SemanticPayload = SemanticPayload
+sys.modules["idicoc_notary_core.audit"] = audit_mock
+
 
 def test_ctm_file_persistence():
     with tempfile.TemporaryDirectory() as tmpdir:

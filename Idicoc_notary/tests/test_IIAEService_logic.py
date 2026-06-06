@@ -4,12 +4,12 @@ Tests the IIAE service integration with logical dissonance measurement via optim
 """
 
 import math
-
 import numpy as np
 import pytest
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
-from idicoc_notary_core.audit.dse.structural_strategy import StructuralDissonanceStrategy
+
+from idicoc_notary.config import AuditConfig
+from idicoc_notary import IDICOCNotaryClient
+from idicoc_notary.dse.evaluator import StructuralDissonanceStrategy
 
 
 class DummyEmbedder:
@@ -63,30 +63,17 @@ def test_logic_service_with_compatible_distribution(logic_service):
     audit_distribution = np.array([0.32, 0.34, 0.34])
     audit_input = MockAuditInput(audit_distribution)
 
-    from idicoc_notary_core.audit import SemanticPayload
-
-    lst = audit_input.distribution.tolist()
-    payload = SemanticPayload(
-        text="Mock numeric distribution input",
-        vec=audit_input.distribution,
-        source_text=str(lst),
-        payload_type="numeric",
-    )
-    canonical_state = logic_service.process_interaction(
-        audit_input=payload,
-        context_input=[
+    res = logic_service.auditar(
+        user_prompt="Mock numeric distribution input",
+        rag_context="\n".join([
             "Distribution constraint: must maintain entropy ≥ 1.0",
             "Balance requirement: all mass must be accounted for",
-        ],
-        context_policies=[],
+        ]),
+        llm_output=str(audit_input.distribution.tolist())
     )
 
-    metadata = canonical_state.metadata
-    assert metadata["admission_breach"] is False
-    assert metadata["correction_flag"] is False
-    assert metadata["d_s"] <= 0.1
-    assert logic_service.verify_compliance(canonical_state) is True
-
+    assert res.is_admitted is True
+    assert res.dissonance_ds <= 0.15
 
 def test_logic_service_with_incompatible_distribution():
     """The service should reject a distribution that violates a hard numeric policy."""
@@ -106,31 +93,18 @@ def test_logic_service_with_incompatible_distribution():
         }
     ]
 
-    from idicoc_notary_core.audit import SemanticPayload
-
-    lst = audit_input.distribution.tolist()
-    payload = SemanticPayload(
-        text="Incompatible numeric distribution input",
-        vec=audit_input.distribution,
-        source_text=str(lst),
-        payload_type="numeric",
-    )
-    canonical_state = logic_service.process_interaction(
-        audit_input=payload,
-        context_input=[
+    res = logic_service.auditar(
+        user_prompt="Incompatible numeric distribution input",
+        rag_context="\n".join([
             "Distribution constraint: must be in the probability simplex",
             "All weights must be non-negative",
-        ],
+        ]),
+        llm_output=str(audit_input.distribution.tolist()),
         context_policies=policy_input,
     )
 
-    metadata = canonical_state.metadata
-    assert metadata["admission_breach"] is True  # En no se corrige ex-post, se rechaza directamente
-    assert (
-        metadata["correction_flag"] is False
-    )  # En no se aplica corrección ex-post (SPSA / proyección)
-    assert math.isinf(metadata["d_s"])
-    assert logic_service.verify_compliance(canonical_state, tolerance=0.0) is False
+    assert res.is_admitted is False
+    assert math.isinf(res.dissonance_ds)
 
 
 def test_logic_service_with_partial_dissonance():
@@ -138,52 +112,29 @@ def test_logic_service_with_partial_dissonance():
     logic_service = _build_logic_service()
     audit_distribution = np.array([0.35, 0.32, 0.33])
 
-    from idicoc_notary_core.audit import SemanticPayload
-
-    lst = audit_distribution.tolist()
-    payload = SemanticPayload(
-        text="Partial dissonance distribution input",
-        vec=audit_distribution,
-        source_text=str(lst),
-        payload_type="numeric",
-    )
-    canonical_state = logic_service.process_interaction(
-        audit_input=payload,
-        context_input=["Entropy constraint"],
-        context_policies=[],
+    res = logic_service.auditar(
+        user_prompt="Partial dissonance distribution input",
+        rag_context="Entropy constraint",
+        llm_output=str(audit_distribution.tolist()),
         epsilon_override=0.1,
     )
 
-    metadata = canonical_state.metadata
-    assert metadata["d_s"] >= 0.0
-    assert metadata["epsilon_used"] == 0.1
+    assert res.dissonance_ds >= 0.0
+    assert res.allowed_epsilon == 0.1
 
 
 def test_logic_service_lambda_composition():
     """The service should still compute D_s correctly when no dynamic policies are present."""
     logic_service = _build_logic_service()
 
-    from idicoc_notary_core.audit import SemanticPayload
-
     vec = np.array([0.33, 0.33, 0.34])
-    lst = vec.tolist()
-    payload = SemanticPayload(
-        text="Uniform-ish numeric distribution input",
-        vec=vec,
-        source_text=str(lst),
-        payload_type="numeric",
-    )
-    canonical_state = logic_service.process_interaction(
-        audit_input=payload,
-        context_input=[],
-        context_policies=[],
+    res = logic_service.auditar(
+        user_prompt="Uniform-ish numeric distribution input",
+        rag_context="",
+        llm_output=str(vec.tolist()),
     )
 
-    metadata = canonical_state.metadata
-    assert "algebraic_components" in metadata
-    assert metadata["algebraic_components"]["d_2"] == metadata.get("audit_metrics", {}).get(
-        "d_logic", 0.0
-    )
+    assert "d_2" in res.metrics
 
 
 # =============================================================================

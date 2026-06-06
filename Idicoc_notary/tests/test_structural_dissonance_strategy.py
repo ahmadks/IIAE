@@ -2,16 +2,19 @@ import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
-from idicoc_notary_core.audit.dse.structural_strategy import StructuralDissonanceStrategy
-from idicoc_notary_core.audit.config import AuditConfig
+from idicoc_notary.dse.evaluator import StructuralDissonanceStrategy, PropertyGraphEvaluator
+from idicoc_notary.config import AuditConfig
+from idicoc_notary.pipeline.orchestrator import AuditPipeline
+from idicoc_notary.isg.graph_manager import PropertyGraph
 
 @pytest.fixture
 def strategy():
     config = AuditConfig()
     return StructuralDissonanceStrategy(config)
 
-@patch('idicoc_notary_core.utils.string_utils.StringUtils.to_vector')
-def test_compute_dissonance_with_property_graph(mock_to_vector, strategy):
+@patch('idicoc_notary.utils.string_utils.StringUtils.to_vector')
+@patch('idicoc_notary.dse.evaluator._compute_d_1_vectorized')
+def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, strategy):
     """
     Verifica que StructuralDissonanceStrategy combina correctamente las métricas
     del PropertyGraph (lógicas y temporales) con la disonancia invariante.
@@ -30,11 +33,11 @@ def test_compute_dissonance_with_property_graph(mock_to_vector, strategy):
     strategy.lambda_3 = 0.1
     
     # Mock the EMD calculation internally
-    strategy._compute_d_1_vectorized = MagicMock(return_value=0.2)
+    mock_d1_vec.return_value = 0.2
     
     # Mock the PropertyGraphEvaluator methods since the strategy now instantiates it
-    with patch('idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
-         patch('idicoc_notary_core.audit.graph.property_graph_evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
+    with patch('idicoc_notary.dse.evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
+         patch('idicoc_notary.dse.evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
         
         d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
         
@@ -46,52 +49,28 @@ def test_compute_dissonance_with_property_graph(mock_to_vector, strategy):
         mock_temp.assert_called_once_with("candidato")
 
 
-from idicoc_notary_core.audit.pipeline import IDICOCPipeline
-from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
-
-def test_pipeline_graph_integration():
+@patch('idicoc_notary.dse.evaluator.DissonanceStateEvaluator.evaluate')
+def test_pipeline_graph_integration(mock_evaluate):
     """
-    Verifica que el pipeline inyecta correctamente el contexto y los politicas
-    en el PropertyGraph, y delega la ejecución de la disonancia al DQE/Estrategia.
+    Verifica que el pipeline delega la ejecución de la disonancia al DQE/Estrategia.
     """
-    # Mock strategy as a factory
-    mock_strategy_instance = MagicMock()
-    mock_strategy_instance.compute.return_value = (0.05, 0.0, "test audit", False, {"d_s": 0.05, "d_1": 0.0, "d_2": 0.0})
-    mock_strategy_instance._compute_context_contradiction.return_value = (0.0, [])
-    mock_strategy_instance.compute_dissonance.return_value = 0.05
-    mock_strategy_instance.lambda_weights = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
-    mock_strategy_instance._d_inv_from_pair = MagicMock(return_value=0.0)
-    
-    mock_strategy_class = MagicMock(return_value=mock_strategy_instance)
-    mock_strategy_class.lambda_weights = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    mock_evaluate.return_value = (0.05, [], {"d_s": 0.05})
     
     config = AuditConfig(
-        dissonance_strategy=mock_strategy_class,
         rigidity_epsilon=0.1,
         ctm_mode="disabled",
         dissonance_weights=(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
     )
-    auditor = IDICOCPipeline(config)
-    
-    # Inyectar mock PropertyGraph para capturar el comportamiento
-    mock_graph = MagicMock(spec=PropertyGraph)
-    mock_graph.nodes = {}
-    mock_graph.get_active_policies.return_value = []
-    auditor.graph = mock_graph
+    auditor = AuditPipeline(config)
     
     # Ejecutar pipeline
-    res = auditor.execute(
-        audit_input="test audit",
-        context_input=["context chunk"],
-        context_policies=["test policy"]
+    res = auditor.execute_audit(
+        user_prompt="test audit",
+        rag_context="context chunk",
+        llm_output="test output"
     )
     
-    # 1. El PropertyGraph debe haber sido actualizado con los politicas
-    # Dependiendo de cómo se implemente la carga en el pipeline:
-    # mock_graph.insert... (el pipeline hace algo como `self.dse.update_graph`)
-    # Wait, en el pipeline, la carga del graph se hace a traves del policy_engine
-    
     # Lo más importante: D_s se obtuvo del mock
-    print(f"DEBUG: res={res}")
-    assert res["canonical_state"].metadata["audit_metrics"]["d_s"] == 0.05
-    assert res["canonical_state"].metadata["admission_metrics"]["admitted"] is True
+    assert res.dissonance_ds == 0.05
+    assert res.is_admitted is True
+    mock_evaluate.assert_called_once()

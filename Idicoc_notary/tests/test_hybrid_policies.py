@@ -2,10 +2,72 @@ import pytest
 import numpy as np
 from unittest.mock import MagicMock
 
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
-from idicoc_notary_core.audit.pipeline import IDICOCPipeline
-from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
+from idicoc_notary.config import AuditConfig
+from idicoc_notary.dse.evaluator import PropertyGraphEvaluator
+from idicoc_notary.isg.graph_manager import PropertyGraph
+from idicoc_notary.pipeline.orchestrator import AuditPipeline
+
+class ResultWrapper:
+    def __init__(self, metadata, data=None):
+        self.metadata = metadata
+        self.data = data
+
+class IDICOCPipelineWrapper:
+    def __init__(self, config):
+        config.allowed_epsilon = config.rigidity_epsilon
+        self.pipeline = AuditPipeline(config)
+        self.config = config
+
+    def initialize(self):
+        pass
+
+    def execute(self, audit_input, context_input=None, context_policies=None, epsilon_override=None):
+        from idicoc_notary.utils.data_converter import DataConverter
+        normalized_data = DataConverter.normalize_payload(audit_input)
+        
+        # Determine raw output text
+        if hasattr(audit_input, "text_content"):
+            llm_output = audit_input.text_content
+        elif hasattr(audit_input, "source_text"):
+            llm_output = audit_input.source_text
+        elif isinstance(audit_input, str):
+            llm_output = audit_input
+        else:
+            llm_output = str(audit_input)
+            
+        # Determine RAG context
+        rag_context = ""
+        if context_input:
+            if isinstance(context_input, list):
+                rag_context = "\n".join(context_input)
+            else:
+                rag_context = str(context_input)
+        
+        audit_res = self.pipeline.execute_audit(
+            user_prompt=llm_output,
+            rag_context=rag_context,
+            llm_output=llm_output,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override
+        )
+        
+        metadata = {
+            "d_context": audit_res.metrics.get("d_context", 0.0),
+            "contradictory_contexts": audit_res.metrics.get("contradictory_contexts", []),
+            "algebraic_components": {
+                "d_0": audit_res.metrics.get("d_0", 0.0),
+                "d_1": audit_res.metrics.get("d_1", 0.0),
+                "d_2": audit_res.metrics.get("d_2", 0.0),
+                "d_3": audit_res.metrics.get("d_3", 0.0),
+            }
+        }
+        
+        return {
+            "canonical_state": ResultWrapper(metadata=metadata, data=normalized_data)
+        }
+
+IDICOCPipeline = IDICOCPipelineWrapper
+
 
 
 def test_unified_evaluation():

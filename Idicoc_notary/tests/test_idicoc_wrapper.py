@@ -1,29 +1,16 @@
 import pytest
-import warnings
-import numpy as np
-import torch
 from unittest.mock import MagicMock, patch
+import numpy as np
 
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.base import CanonicalStateDTO
-from idicoc_notary_core.audit.pipeline import IDICOCPipeline
-from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
-from idicoc_notary_core.kernel.projection import (
-    InvariantStateGenerator,
-    CanonicalState,
-)
-from idicoc_notary_core.kernel.verification.registry import ProjectionRegistry
+from idicoc_notary.config import AuditConfig
+from idicoc_notary.api.facade import NotaryClient
+from idicoc_notary.api.schemas import NotaryAuditResult
 
-
-# ===================================================================
-# TEST 1: Config class validation and property checks
-# ===================================================================
 def test_audit_config_properties():
     # Instantiating with default values
     config = AuditConfig()
     assert config.correction_base_tolerance == 0.15
     assert config.instance_name == "ai_comercial"
-    assert not hasattr(config, "mode")
     assert config.enable_hard_halt is False
 
     # Check warning when enable_hard_halt is set to True
@@ -32,122 +19,44 @@ def test_audit_config_properties():
     assert config_warn.enable_hard_halt is False
 
 
-# ===================================================================
-# TEST 2: InvariantStateGenerator preserves signal magnitude
-# ===================================================================
-def test_invariant_state_generator_preserves_text_signal():
-    anchor = None
-    registry = ProjectionRegistry()
-    isg = InvariantStateGenerator(anchor, registry)
-
-    state = isg.generate("test_anchor text")
-    assert isinstance(state.measure_vector, np.ndarray)
-    assert state.measure_vector.size > 0
-
-
-def test_invariant_state_generator_preserves_exact_vector_input():
-    anchor = None
-    registry = ProjectionRegistry()
-    isg = InvariantStateGenerator(anchor, registry)
-
-    state = isg.generate(np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
-    assert isinstance(state.measure_vector, np.ndarray)
-    assert np.array_equal(state.measure_vector, np.array([1.0, 0.0, 0.0, 0.0], dtype=float))
-
-
-# ===================================================================
-# TEST 7: algebraic_components present and correct in pipeline metadata
-# ===================================================================
-def test_pipeline_algebraic_components_in_metadata():
-    mock_strategy_instance = MagicMock()
-    mock_strategy_instance.compute_dissonance.return_value = 0.3
-    mock_strategy_instance.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
-    mock_strategy_instance._d_inv_from_pair = MagicMock(return_value=0.0)
-
-    mock_strategy_class = MagicMock(return_value=mock_strategy_instance)
-    # Patch the config to return the right expected weights in the pipeline
-    mock_strategy_class.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
-
+@patch('idicoc_notary.dse.evaluator.DissonanceStateEvaluator.evaluate')
+def test_notary_client_auditar_success(mock_evaluate):
+    mock_evaluate.return_value = (0.05, [], {"d_s": 0.05})
     config = AuditConfig(
-        dissonance_strategy=mock_strategy_class,
-        dissonance_weights=(0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0),
+        rigidity_epsilon=0.1,
+        ctm_mode="disabled",
+        dissonance_weights=(0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0)
     )
-    wrapper = IDICOCNotaryClient(config)
-
-    from idicoc_notary_core.audit import SemanticPayload
-    state = wrapper.process_interaction(
-        audit_input=SemanticPayload("test input"),
-        context_input=["ctx"],
-        context_policies=["ax"],
+    client = NotaryClient(config)
+    res = client.auditar(
+        user_prompt="test prompt",
+        rag_context="test context",
+        llm_output="test output"
     )
-
-    assert isinstance(state, CanonicalStateDTO)
-    ac = state.metadata.get("algebraic_components")
-    assert ac is not None, "algebraic_components debe estar en el metadata del estado canónico"
-    assert "lambda_weights" not in ac
-    assert ac["d_1"] == 0.0
-    assert ac["d_3"] == 0.0
-    assert "d_2" in ac
+    
+    assert isinstance(res, NotaryAuditResult)
+    assert res.is_admitted is True
+    assert res.dissonance_ds == 0.05
+    assert res.violated_policies == []
+    assert res.metrics == {"d_s": 0.05}
 
 
-# ===================================================================
-# TEST 8: verify_compliance validates coalgebraic weights and D_s=d_logic
-# ===================================================================
-def test_verify_compliance_algebraic_validation():
-    # Stub the strategy so no ML models are loaded
-    mock_strategy_instance = MagicMock()
-    mock_strategy_instance.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
-    mock_strategy_instance._d_inv_from_pair = MagicMock(return_value=0.0)
-    mock_strategy_class = MagicMock(return_value=mock_strategy_instance)
-    # Patch the class so the wrapper pipeline correctly reads expected_weights
-    mock_strategy_class.lambda_weights = [0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0]
-
+def test_notary_client_hardware_containment_rejection(monkeypatch):
+    monkeypatch.setenv("IIAE_HARDWARE_KEY", "mock_key")
     config = AuditConfig(
-        rigidity_epsilon=1.0,
-        dissonance_strategy=mock_strategy_class,
-        dissonance_weights=(0.0, 0.5, 0.4, 0.1, 0.0, 0.0, 0.0),
+        require_hardware_seal=True,  # Force hardware containment check
+        ctm_mode="disabled"
     )
-    wrapper = IDICOCNotaryClient(config)
-
-    # Case 1: valid algebraic components → should return True
-    valid_state = CanonicalStateDTO(
-        data="output",
-        metadata={
-            "d_s": 0.12,  # 0.5*0 + 0.4*0.3 + 0.1*0 = 0.12
-            "algebraic_components": {
-                "d_0": 0.0,
-                "d_1": 0.0,
-                "d_2": 0.3,
-                "d_3": 0.0,
-                "d_4": 0.0,
-                "d_5": 0.0,
-                "d_6": 0.0,
-            },
-        },
+    client = NotaryClient(config)
+    
+    # Since metadata is empty, hardware_contained will be False and it will breach containment stage 2
+    res = client.auditar(
+        user_prompt="test prompt",
+        rag_context="test context",
+        llm_output="test output"
     )
-    assert wrapper.verify_compliance(valid_state) is True
-
-    # Case 2: d_s does not match expected_d_s → should return False
-    mismatched_state = CanonicalStateDTO(
-        data="output",
-        metadata={
-            "d_s": 0.5,  # does not match d_logic=0.3
-            "algebraic_components": {
-                "d_0": 0.0,
-                "d_1": 0.0,
-                "d_2": 0.3,
-                "d_3": 0.0,
-                "d_4": 0.0,
-                "d_5": 0.0,
-                "d_6": 0.0,
-            },
-        },
-    )
-    assert wrapper.verify_compliance(mismatched_state) is False
-
-    # Case 4: missing algebraic_components → should return False
-    no_algebraic_state = CanonicalStateDTO(
-        data="output",
-        metadata={"d_s": 0.1},
-    )
-    assert wrapper.verify_compliance(no_algebraic_state) is False
+    
+    assert isinstance(res, NotaryAuditResult)
+    assert res.is_admitted is False
+    assert res.dissonance_ds == float("inf")
+    assert "Stage 2: Hardware Mask Containment Breach" in res.violated_policies

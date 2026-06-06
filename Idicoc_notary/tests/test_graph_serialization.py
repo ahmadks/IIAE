@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
+from idicoc_notary.isg.graph_manager import PropertyGraph
 
 def test_to_dict_and_from_dict():
     graph = PropertyGraph(embedding_signature="test_sig")

@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from idicoc_notary_core.utils.string_utils import StringUtils
+from idicoc_notary.utils.string_utils import StringUtils
 
 def test_embedding_token_limit_and_chunking():
     """Verify that passing moderately long text raises a warning and does chunking."""

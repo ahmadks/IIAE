@@ -3,11 +3,11 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 # Import components
-from idicoc_notary_core.utils.model_downloader import ModelDownloader
-from idicoc_notary_core.utils.embedding_service import EmbeddingService
+from idicoc_notary.utils.model_downloader import ModelDownloader
+from idicoc_notary.utils.embedding_service import EmbeddingService
 from providers.model_downloader import ensure_phi_downloaded
 from providers.phi_provider import PhiProvider
-from idicoc_notary_core.audit.config import AuditConfig
+from idicoc_notary.config import AuditConfig
 
 
 @patch("sentence_transformers.SentenceTransformer")

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any
 import os
 
-from idicoc_notary_core.audit.llm_interface import BaseLLMProvider
+from idicoc_notary.utils import BaseLLMProvider
 
 # Enable PyTorch MPS fallback to avoid hangs on unsupported operators
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"

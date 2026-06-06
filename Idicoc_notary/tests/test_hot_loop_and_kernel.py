@@ -1,9 +1,8 @@
 import numpy as np
 import pytest
 
-from idicoc_notary_core.audit.dse.logits_processor import DeterministicMUXLogitsProcessor
-from idicoc_notary_core.audit.graph.invariant_synthesizer import InvariantSynthesizer
-from idicoc_notary_core.kernel.pipeline.kernel import CustodialKernel
+from idicoc_notary.dse.evaluator import DeterministicMUXLogitsProcessor
+from idicoc_notary.isg.loader import InvariantSynthesizer
 
 
 class DummyTokenizer:
@@ -50,89 +49,6 @@ class DummyEmbeddingService:
             vec[ord(ch) % 32] += 1.0
         norm = np.linalg.norm(vec)
         return vec / norm if norm > 1e-12 else vec
-
-
-class DummyGraph:
-    def __init__(self):
-        self.nodes = ["n1"]
-        self.edges = [("n1", "n1")]
-
-    def compute_policy_density(self):
-        return 0.0
-
-
-class DummyISG:
-    def generate(self, admitted):
-        class DummyState:
-            def __init__(self, metadata):
-                self.metadata = metadata
-
-        return DummyState(metadata={"timestamp": "2026-01-01T00:00:00Z"})
-
-
-class DummyDSE:
-    def update_graph(self, admitted, canonical_state_obj):
-        return DummyGraph()
-
-
-class DummyDissonanceStrategy:
-    def select_canonical_input(self, canonical_state):
-        return "canonical-input"
-
-
-class DummyCMC:
-    def build(self, canonical_input, updated_graph, epsilon):
-        class DummyManifold:
-            def __init__(self):
-                self.epsilon = epsilon
-
-        return DummyManifold()
-
-    def update_epsilon(self, current_eps, policy_density, dissonance_variance):
-        return current_eps
-
-
-class DummyDQE:
-    def __init__(self):
-        self.project_called = False
-
-    def compute_dissonance(self, admitted, canonical_input, updated_graph):
-        return 0.9
-
-    def project_to_manifold(self, admitted, manifold, canonical_input, updated_graph):
-        self.project_called = True
-        return admitted
-
-
-class DummyVerifier:
-    def verify_alignment(self, canonical_state_obj, tolerance, dqe, graph):
-        pass
-
-
-class DummyCTM:
-    def __init__(self):
-        self.root_hash = "root"
-        self.committed = None
-
-    def commit(
-        self,
-        canonical_payload,
-        dissonance,
-        epsilon,
-        property_graph,
-        timestamp,
-        invariant_state_hash,
-        property_graph_hash,
-        aem_counters,
-    ):
-        self.committed = {
-            "canonical_payload": canonical_payload,
-            "dissonance": dissonance,
-            "epsilon": epsilon,
-        }
-
-    def seal_failure(self, snapshot, timestamp=None):
-        raise RuntimeError("seal_failure should not be called")
 
 
 @pytest.mark.parametrize("use_torch", [False, True])
@@ -226,24 +142,3 @@ def test_invariant_synthesizer_extracts_semantic_concepts():
     assert all(
         isinstance(t, str) and len(t) > 0 for t in token_texts
     ), "Todos los tokens del W_bank deben decodificarse como strings no vacíos"
-
-
-def test_kernel_skips_projection_for_hardware_contained_signal():
-    kernel = CustodialKernel(
-        aem=None,
-        isg=DummyISG(),
-        verifier=DummyVerifier(),
-        ctm=DummyCTM(),
-        dse=DummyDSE(),
-        cmc=DummyCMC(),
-        dqe=DummyDQE(),
-        dissonance_strategy=DummyDissonanceStrategy(),
-        epsilon=0.0,
-    )
-
-    admitted = {"hardware_contained": True}
-    result = kernel.process(admitted)
-
-    assert result["status"] == "committed"
-    assert not kernel.dqe.project_called
-    assert kernel.ctm.committed["dissonance"] == pytest.approx(0.9)

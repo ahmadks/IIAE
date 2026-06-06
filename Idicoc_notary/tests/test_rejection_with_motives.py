@@ -16,11 +16,142 @@ import math
 import pytest
 import numpy as np
 
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient, SemanticPayload
-from idicoc_notary_core.audit.pipeline import IDICOCPipeline
-from idicoc_notary_core.audit.graph.property_graph_evaluator import PropertyGraphEvaluator
-from idicoc_notary_core.kernel.graph.property_graph import PropertyGraph
+from idicoc_notary.config import AuditConfig
+from idicoc_notary.api.facade import NotaryClient
+from idicoc_notary.pipeline.orchestrator import AuditPipeline
+from idicoc_notary.dse.evaluator import PropertyGraphEvaluator
+from idicoc_notary.isg.graph_manager import PropertyGraph
+
+class SemanticPayload:
+    def __init__(self, source_text):
+        self.source_text = source_text
+
+class ResultWrapper:
+    def __init__(self, metadata):
+        self.metadata = metadata
+
+class DummyAEM:
+    def __init__(self):
+        self.trail = []
+        
+    def record(self, metadata):
+        self.trail.append({
+            "d_s": metadata["d_s"],
+            "violated_policies": metadata["violated_policies"],
+            "admission_breach": metadata["admission_breach"]
+        })
+        
+    def get_audit_trail(self):
+        return self.trail
+        
+    def get_counters(self):
+        total = len(self.trail)
+        rejected = sum(1 for x in self.trail if x["admission_breach"])
+        valid = total - rejected
+        return total, valid, rejected
+
+class IDICOCPipeline:
+    def __init__(self, config):
+        config.allowed_epsilon = config.rigidity_epsilon
+        self.pipeline = AuditPipeline(config)
+        self.aem = DummyAEM()
+
+    def initialize(self):
+        pass
+
+    def execute(
+        self,
+        audit_input,
+        user_input,
+        context_input=None,
+        context_policies=None,
+        epsilon_override=None
+    ):
+        llm_output = audit_input.source_text if hasattr(audit_input, "source_text") else str(audit_input)
+        
+        rag_context = ""
+        if context_input:
+            if isinstance(context_input, list):
+                rag_context = "\n".join(context_input)
+            else:
+                rag_context = str(context_input)
+        
+        user_prompt = str(user_input)
+        
+        audit_res = self.pipeline.execute_audit(
+            user_prompt=user_prompt,
+            rag_context=rag_context,
+            llm_output=llm_output,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override
+        )
+        
+        metadata = {
+            "admission_breach": not audit_res.is_admitted,
+            "d_s": audit_res.dissonance_ds,
+            "violated_policies": audit_res.violated_policies,
+            "epsilon_used": audit_res.allowed_epsilon,
+            "epsilon": audit_res.allowed_epsilon,
+            "correction_flag": False,
+            "d_context": audit_res.metrics.get("d_context", 0.0)
+        }
+        
+        self.aem.record(metadata)
+        
+        return {
+            "canonical_state": ResultWrapper(metadata=metadata)
+        }
+
+class IDICOCNotaryClientWrapper:
+    def __init__(self, config):
+        config.allowed_epsilon = config.rigidity_epsilon
+        self.client = NotaryClient(config)
+        self.pipeline = self.client.pipeline
+        self.aem = DummyAEM()
+
+    def process_interaction(
+        self,
+        audit_input,
+        user_input,
+        context_input=None,
+        context_policies=None,
+        epsilon_override=None
+    ):
+        llm_output = audit_input.source_text if hasattr(audit_input, "source_text") else str(audit_input)
+        
+        rag_context = ""
+        if context_input:
+            if isinstance(context_input, list):
+                rag_context = "\n".join(context_input)
+            else:
+                rag_context = str(context_input)
+        
+        user_prompt = str(user_input)
+        
+        audit_res = self.client.auditar(
+            user_prompt=user_prompt,
+            rag_context=rag_context,
+            llm_output=llm_output,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override
+        )
+        
+        metadata = {
+            "admission_breach": not audit_res.is_admitted,
+            "d_s": audit_res.dissonance_ds,
+            "violated_policies": audit_res.violated_policies,
+            "epsilon_used": audit_res.allowed_epsilon,
+            "epsilon": audit_res.allowed_epsilon,
+            "correction_flag": False,
+            "d_context": audit_res.metrics.get("d_context", 0.0)
+        }
+        
+        self.aem.record(metadata)
+        
+        return ResultWrapper(metadata=metadata)
+
+IDICOCNotaryClient = IDICOCNotaryClientWrapper
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────

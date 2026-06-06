@@ -23,9 +23,9 @@ from datetime import datetime, timezone
 # Agregar directorio raíz al path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from idicoc_notary_core.audit.config import AuditConfig
-from idicoc_notary_core.audit.wrapper_pipeline import IDICOCNotaryClient
-from idicoc_notary_core.utils.logger import get_logger
+from idicoc_notary.config import AuditConfig
+from idicoc_notary import IDICOCNotaryClient
+from idicoc_notary.utils.logger import get_logger
 from providers.model_downloader import ensure_llama_downloaded
 
 logger = get_logger("example.integration")
@@ -134,24 +134,19 @@ def phase_2_interaction(config: AuditConfig):
     print(f"  {user_input}")
 
     # Procesar interacción
-    print(f"\n[Fase 2] Procesando con wrapper_pipeline...")
+    print(f"\n[Fase 2] Procesando con NotaryClient...")
 
-    from idicoc_notary_core.audit import SemanticPayload
-
-    result = client.process_interaction(
-        audit_input=SemanticPayload(""),  # Vacío en Fase 2
-        context_input=context_input,
+    result = client.auditar(
+        user_prompt=user_input,
+        rag_context="\n".join(context_input),
+        llm_output="",  # Vacío en Fase 2
         context_policies=[],  # Ya compiladas en Fase 1
-        user_input=user_input,  # ← NUEVO: instrucción explícita
         epsilon_override=0.0,  # Modo factual
-        trace_input="user_session_example_001",
-        client_id="client_example_001",
     )
 
     print(f"\n[Fase 2] ✓ Procesamiento completado")
-    print(f"  - Estado canónico generado")
-    print(f"  - D_s (disonancia): {result.metadata.get('d_s', 'N/A')}")
-    print(f"  - Timestamp: {result.timestamp}")
+    print(f"  - D_s (disonancia): {result.dissonance_ds}")
+    print(f"  - Admitido: {result.is_admitted}")
 
     return result, context_input, user_input
 
@@ -241,43 +236,9 @@ def phase_4_consolidation(config: AuditConfig, user_input: str, output_text: str
     print("\n" + "=" * 70)
     print("FASE 4: CONSOLIDACIÓN (Trazabilidad CTM WAL)")
     print("=" * 70)
-
-    try:
-        from idicoc_notary_core.audit.ctm_client import CTMClient
-        import hashlib
-
-        print(f"\n[Fase 4] Inicializando CTM...")
-        ctm = CTMClient(config)
-
-        # Calcular hashes
-        user_input_hash = hashlib.sha256(user_input.encode()).hexdigest()[:16]
-        output_hash = hashlib.sha256(output_text.encode()).hexdigest()[:16]
-
-        print(f"\n[Fase 4] Registrando en WAL:")
-        print(f"  - user_input_hash: {user_input_hash}...")
-        print(f"  - output_hash: {output_hash}...")
-        print(f"  - timestamp: {datetime.now(timezone.utc).isoformat()}")
-        print(f"  - client_id: client_example_001")
-
-        # Registrar (si CTM está disponible)
-        try:
-            result = ctm.notarize(
-                input_hash=user_input_hash,
-                output_hash=output_hash,
-                metadata={
-                    "phase": "3-hot-loop",
-                    "output_text": output_text,
-                    "client_id": "client_example_001",
-                },
-            )
-            print(f"\n[Fase 4] ✓ Registrado exitosamente")
-            print(f"  - Merkle path: {result.get('merkle_path', 'N/A')[:40]}...")
-        except Exception as e:
-            print(f"\n[Fase 4] ⚠ CTM no disponible ({e})")
-            print(f"         Simulación: registro local completado")
-
-    except Exception as e:
-        print(f"\n[Fase 4] ⚠ Error en consolidación: {e}")
+    print("\n[Fase 4] En la nueva arquitectura DDD, el CTM (Custodial Trace Manager)")
+    print("registra automáticamente las trazas y computa el Merkle DAG como un")
+    print("efecto secundario silencioso del pipeline de auditoría.")
 
 
 def main():
