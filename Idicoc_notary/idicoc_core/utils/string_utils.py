@@ -1,5 +1,6 @@
 from typing import Any
 import numpy as np
+from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
 
 
 class StringUtils:
@@ -9,7 +10,7 @@ class StringUtils:
 
     @classmethod
     def get_embedding_model(
-        cls, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        cls, model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
     ) -> Any:
         """Carga y devuelve el modelo de embeddings usando el servicio central."""
         from idicoc_core.utils.embedding_service import EmbeddingService
@@ -20,7 +21,7 @@ class StringUtils:
     def embed_text(
         cls,
         text: str,
-        model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         max_chunks: int = 10,
     ) -> np.ndarray:
         """Convierte texto a un vector usando el modelo de embeddings."""
@@ -119,7 +120,7 @@ class StringUtils:
 
     @classmethod
     def get_embedding_dimension(
-        cls, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        cls, model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
     ) -> int:
         """Devuelve la dimensión de salida del modelo de embeddings si es disponible."""
         model = cls.get_embedding_model(model_name)
@@ -134,7 +135,7 @@ class StringUtils:
     def to_vector(
         cls,
         y: Any,
-        model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         max_chunks: int = 10,
     ) -> np.ndarray:
         """Convierte cualquier entrada a un vector numérico (ndarray)."""

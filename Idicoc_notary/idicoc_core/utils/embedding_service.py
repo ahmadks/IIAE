@@ -3,6 +3,7 @@ import threading
 import logging
 from idicoc_core.utils.logger import get_logger
 from idicoc_core.utils.embedding_utils import compute_embedding_signature
+from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
 
 
 class EmbeddingService:
@@ -34,7 +35,7 @@ class EmbeddingService:
             return cls._instance
 
     def get_embedder(
-        self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        self, model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
     ) -> Any:
         """
         Devuelve el modelo de embeddings especificado.
@@ -92,7 +93,7 @@ class EmbeddingService:
         return self._models[model_name]
 
     def get_signature(
-        self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        self, model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL
     ) -> str:
         """Devuelve la firma determinista del modelo y sus parámetros."""
         return compute_embedding_signature(model_name)
@@ -100,7 +101,7 @@ class EmbeddingService:
     def encode(
         self,
         text: str | list[str],
-        model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL,
     ) -> Any:
         """Envoltorio para generar embeddings usando el modelo cacheados."""
         if self._provider is not None:

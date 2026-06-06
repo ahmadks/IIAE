@@ -21,7 +21,7 @@ import logging
 sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"))
 )
-from idicoc_core.config import AuditConfig
+from idicoc_core.config import AuditConfig, DEFAULT_SEMANTIC_EMBEDDING_MODEL
 from idicoc_core.compat import NotaryClient, SemanticPayload
 from idicoc_core.dse.evaluator import PropertyGraphEvaluator
 from providers.factory import get_provider
@@ -227,7 +227,7 @@ if "llm_provider" not in st.session_state:
         llm_provider, status = load_real_model(
             provider_type="phi",
             model_path="models_cache/Phi-3.5-mini-instruct",
-            embedding_model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            embedding_model_name=DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         )
         if llm_provider is None:
             st.error(f"❌ Error crítico cargando el modelo real: {status}")
@@ -265,6 +265,14 @@ with st.sidebar:
     epsilon = st.slider("Umbral de Tolerancia (ε)", 0.01, 1.00, 0.20, 0.01)
     st.session_state.epsilon = epsilon
 
+    lambda_context = st.slider(
+        "Peso Integridad RAG (λ_context)",
+        0.0, 1.0, 0.40, 0.05,
+        help="Cuánto influye la coherencia con el contexto RAG en D_s. "
+             "0=solo políticas, 1=solo RAG. Recomendado: 0.40"
+    )
+    st.session_state.lambda_context = lambda_context
+
     st.markdown("---")
     st.markdown("### 📄 Simular Contexto RAG")
     rag_presets = {
@@ -301,6 +309,7 @@ with st.sidebar:
                 compile_policies_on_init=True,
                 enable_logits_interception=True,
                 instance_name="audit_forensic_chatbot",
+                lambda_context=st.session_state.get("lambda_context", 0.4),
             )
             st.session_state.notary_client = NotaryClient(
                 config, llm_provider=llm_provider
@@ -517,15 +526,26 @@ with col_chat:
                     )
 
                 # Pasar processor a generate() si el llm_provider lo soporta
+                # ── Construir prompt enriquecido con contexto RAG ─────────────────
+                context_list = st.session_state.get("context_list") or []
+                if context_list:
+                    rag_block = "\n".join(context_list)
+                    llm_prompt = (
+                        f"CONTEXTO:\n{rag_block}\n\n"
+                        f"PREGUNTA DEL USUARIO:\n{user_msg}"
+                    )
+                else:
+                    llm_prompt = user_msg
+
                 import inspect
 
                 sig = inspect.signature(llm_provider.generate)
                 if "logits_processor" in sig.parameters:
                     assistant_res = llm_provider.generate(
-                        user_msg, logits_processor=processor
+                        llm_prompt, logits_processor=processor
                     )
                 else:
-                    assistant_res = llm_provider.generate(user_msg)
+                    assistant_res = llm_provider.generate(llm_prompt)
 
         # 2. Auditar Respuesta
         with st.spinner("🛡️ Evaluando respuesta en el Notario IDICOC..."):
@@ -597,6 +617,7 @@ with col_chat:
                         "d_1": d_1,
                         "d_2": d_2,
                         "d_3": d_3,
+                        "d_context": audit_result.metadata.get("d_context", 0.0),
                         "hash": integrity_hash,
                         "root_hash": st.session_state.notary_client.pipeline.ctm.root_hash
                         or "GENESIS",
@@ -649,10 +670,21 @@ with col_telemetry:
         d_3_val = last_audit.get("d_3")
         d_3_text = "N/A" if d_3_val is None else f"{d_3_val:.4f}"
 
+        d_context_val = last_audit.get("d_context")
+        d_context_text = "N/A" if d_context_val is None else f"{d_context_val:.4f}"
+        d_context_color = (
+            "#10B981" if (d_context_val or 0) < 0.3
+            else "#F59E0B" if (d_context_val or 0) < 0.6
+            else "#EF4444"
+        )
+
         st.markdown(
             f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
             f'<b>Resultado:</b> <span class="{badge_class}">{status}</span><br>'
             f"<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>"
+            f"<small>🔗 <b>Integridad RAG (d_context):</b> "
+            f"<span style='color:{d_context_color}; font-weight:bold;'>{d_context_text}</span> "
+            f"<span style='color:#64748b; font-size:10px;'>(0=coherente, 1=alucinación)</span></small><br>"
             f'<small>Ledger Tx Hash: <span style="font-family:\'JetBrains Mono\'; font-size:10px;">{last_audit["hash"]}</span></small>'
             f"</div>",
             unsafe_allow_html=True,

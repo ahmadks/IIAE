@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
+from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL, DEFAULT_SEMANTIC_NLI_MODEL
 
 
 def _ensure_cache_dir(cache_dir: str) -> None:
@@ -24,8 +25,8 @@ class ModelDownloader:
 
     def download_models(
         self,
-        embedding_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        entailment_model_name: str = "cross-encoder/nli-deberta-v3-small",
+        embedding_model_name: str = DEFAULT_SEMANTIC_EMBEDDING_MODEL,
+        entailment_model_name: str = DEFAULT_SEMANTIC_NLI_MODEL,
         force_update: bool = False,
     ) -> None:
         from sentence_transformers import SentenceTransformer

@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from providers.model_downloader import ensure_phi_downloaded
 from providers.phi_provider import PhiProvider
+from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
 
 
 def main():
@@ -37,7 +38,7 @@ def main():
     try:
         provider = PhiProvider(
             model_path=os.path.join(cache_dir, "Phi-3.5-mini-instruct"),
-            embedding_model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            embedding_model_name=DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         )
         provider._ensure_model()
         print("✓ Model loaded successfully into memory.")

@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 # Therefore λ_2 (d_2: policy graph violations) carries the primary weight for text auditing.
 DEFAULT_DISSONANCE_WEIGHTS = (
     0.0,  # λ0: discrete edit distance (unused for text)
-    0.0,  # λ1: KL-div to canonical state (only for distribution inputs)
-    0.9,  # λ2: policy graph violations — primary metric for text auditing
-    0.1,  # λ3: temporal constraint violations
+    0.2,  # λ1: KL-div to canonical state (only for distribution inputs)
+    0.5,  # λ2: policy graph violations — primary metric for text auditing
+    0.3,  # λ3: temporal constraint violations
     0.0,  # λ4: hash indexing (unused)
     0.0,  # λ5: consensus (unused)
     0.0,  # λ6: sealing/verification (unused)
@@ -98,6 +98,39 @@ class AuditConfig:
 
     # El wrapper notario nunca debe bloquear, pero mantenemos el parámetro por compatibilidad.
     enable_hard_halt: bool = False
+
+    # ── Parámetros del Middleware de Integridad RAG→LLM ──────────────────────
+    #
+    # lambda_context (λ_context) ∈ [0.0, 1.0]
+    #   Peso de la Disonancia de Fase Semántica (d_context) en la fórmula de D_s:
+    #     D_s = (1 - λ_context) × D_policy  +  λ_context × d_context
+    #   • 0.0 → el RAG no influye en D_s; solo cuentan las políticas del grafo.
+    #   • 1.0 → D_s es puramente la distancia RAG→LLM; las políticas no cuentan.
+    #   • 0.4 → equilibrio recomendado: 60 % políticas, 40 % coherencia con el RAG.
+    lambda_context: float = 0.4
+
+    # rag_contradiction_alert_threshold ∈ [0.0, 1.0]
+    #   Umbral de alerta para etiquetar un chunk del RAG como "contradictorio"
+    #   en el log de auditoría y en la lista de violated_policies.
+    #
+    #   ¿Qué es?
+    #     Es la distancia coseno mínima entre el output del LLM y un chunk del
+    #     contexto RAG para que ese chunk se considere "en contradicción semántica".
+    #     distancia = 1 - cosine_similarity(embedding_LLM, embedding_chunk_RAG)
+    #
+    #   ¿Para qué sirve?
+    #     Solo controla el ETIQUETADO en trazabilidad (qué chunks aparecen en
+    #     `contradictory_contexts` y en el AEM trail). NO afecta al valor numérico
+    #     de d_context, que siempre es la distancia máxima real observada.
+    #
+    #   Ejemplos de calibración:
+    #     0.20 → solo alerta si el LLM contradice casi literalmente el RAG (muy estricto).
+    #     0.35 → alerta si hay divergencia semántica moderada (valor por defecto).
+    #     0.50 → alerta solo si hay divergencia semántica fuerte (permisivo).
+    #
+    #   Nota: reducir este umbral aumenta el número de chunks etiquetados como
+    #   contradictorios pero NO cambia D_s ni el veredicto ADMITTED/REJECTED.
+    rag_contradiction_alert_threshold: float = 0.35
 
     # Trazabilidad externa opcional para auditorías y reportes.
     client_id: str | None = None

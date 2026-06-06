@@ -8,9 +8,10 @@ class BaseLLMProvider(Protocol):
     """Abstract protocol for LLM providers and embedding adapters.
 
     Implementations must keep heavy third-party imports (transformers, openai,
-    anthropic, llama-cpp) inside the provider implementation to avoid
-    leaking dependencies into the main package.
+        anthropic, llama-cpp) inside the provider implementation to avoid
+        leaking dependencies into the main package.
     """
+
 
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate a raw string response from the model."""

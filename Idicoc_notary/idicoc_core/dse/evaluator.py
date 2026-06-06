@@ -577,10 +577,11 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
     def compute_dissonance(
         self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None
     ) -> float:
+        from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
         model_name = getattr(
             self.config,
             "semantic_embedding_model",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         )
         y_vec = StringUtils.to_vector(y, model_name=model_name)
         v_hat_vec = StringUtils.to_vector(V_hat, model_name=model_name)
@@ -810,23 +811,36 @@ class DissonanceStateEvaluator:
             logger.warning(f"Error computing d_1 (uniqueness distance): {ex}")
 
         # ── D_s: Weighted Coalgebraic Dissonance ─────────────────────────────────
-        # For text auditing, only d_2 (policy violations) and d_3 (temporal) are
-        # non-trivially populated. When d_1=0, the normalized weights ensure d_2
-        # and d_3 still use their relative proportions. If d_2=inf (HARD breach),
-        # D_s=inf regardless of weights.
+        # Dimensiones activas para texto:
+        #   d_2 = violaciones del grafo de políticas    (λ_2)
+        #   d_3 = restricciones temporales              (λ_3)
+        #   d_context = disonancia de fase RAG→LLM      (λ_context)
+        #
+        # d_context tiene su propio coeficiente porque es la dimensión del
+        # Middleware de Integridad: mide si el LLM alucina respecto al RAG.
+        # Si d_2=inf (violación HARD), D_s=inf independientemente del resto.
+        lambda_context = float(getattr(self.config, "lambda_context", 0.4))
+
         if d_logic == float("inf") or d_temporal == float("inf"):
             d_s = float("inf")
         else:
-            d_s = (
-                weights[0] * 0.0       # d0: edit distance (unused for text)
-                + weights[1] * d1      # d1: KL-div to canonical (0.0 for text)
-                + weights[2] * d_logic   # d2: policy graph violations
-                + weights[3] * d_temporal  # d3: temporal constraints
-                + weights[4] * 0.0     # d4: hash mismatch (unused)
-                + weights[5] * 0.0     # d5: consensus (unused)
-                + weights[6] * 0.0     # d6: sealing (unused)
+            # Suma ponderada base (política + temporal)
+            policy_dissonance = (
+                weights[0] * 0.0        # d0: edit distance (unused)
+                + weights[1] * d1       # d1: KL-div (0.0 para texto)
+                + weights[2] * d_logic  # d2: violaciones de políticas
+                + weights[3] * d_temporal  # d3: restricciones temporales
+                + weights[4] * 0.0      # d4: hash (unused)
+                + weights[5] * 0.0      # d5: consenso (unused)
+                + weights[6] * 0.0      # d6: sellado (unused)
             )
-            d_s = max(d_s, d_context)
+
+            # Integrar d_context como término ponderado + floor de seguridad
+            # D_s = (1 - λ_context) * D_policy + λ_context * d_context
+            # El max() garantiza que una contradicción RAG severa siempre escale D_s
+            weighted_context = lambda_context * d_context
+            d_s = (1.0 - lambda_context) * policy_dissonance + weighted_context
+            d_s = max(d_s, d_context * lambda_context)  # floor proporcional
 
         # Raw metrics breakdown
         raw_metrics = {
@@ -839,6 +853,7 @@ class DissonanceStateEvaluator:
             "d_5": 0.0,
             "d_6": 0.0,
             "d_context": d_context,
+            "lambda_context": lambda_context,
             "effective_threshold": self.config.allowed_epsilon,
             "contradictory_contexts": contradictory_contexts,
             "violated_policies": violations,
@@ -847,6 +862,7 @@ class DissonanceStateEvaluator:
         }
 
         return d_s, violations, raw_metrics
+
 
 
 class AuditEntropyModule:

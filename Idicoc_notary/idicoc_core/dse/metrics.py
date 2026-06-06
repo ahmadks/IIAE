@@ -137,7 +137,16 @@ def _compute_context_contradiction(
     y: Any, context_input: List[str], config: Any
 ) -> Tuple[float, List[str]]:
     """
-    Computes semantic contradiction between audit_input and context rules via embedding cosine similarity.
+    Middleware de Integridad RAG→LLM: mide la disonancia de fase entre la
+    "verdad recuperada" (context_input) y la respuesta generada por el LLM (y).
+
+    Retorna (d_context, contradictory_contexts) donde:
+      - d_context ∈ [0, 1]: distancia coseno máxima entre el output del LLM y
+        cualquier chunk del contexto RAG. Equivale a la Disonancia de Fase Semántica.
+        0.0 = coherencia perfecta con el RAG, 1.0 = contradicción total.
+      - contradictory_contexts: chunks del RAG que superan el umbral de alerta.
+
+    Si no hay context_input, el sistema está "ciego" y retorna 0.0 (sin penalización).
     """
     if not context_input:
         return 0.0, []
@@ -146,14 +155,22 @@ def _compute_context_contradiction(
     if not text_y or str(text_y).strip() == "" or "array(" in text_y or "tensor(" in text_y:
         return 0.0, []
 
+    # Umbral de alerta leído desde config (ver AuditConfig.rag_contradiction_alert_threshold).
+    # Controla qué chunks del RAG se etiquetan como "contradictorios" en el log.
+    # NO afecta al valor numérico de d_context ni al veredicto ADMITTED/REJECTED.
+    contradiction_alert_threshold = float(
+        getattr(config, "rag_contradiction_alert_threshold", 0.35)
+    )
+
     try:
+        from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
         from idicoc_core.utils.embedding_service import EmbeddingService
 
         embed_service = EmbeddingService()
         model_name = getattr(
             config,
             "semantic_embedding_model",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         )
         embedder = embed_service.get_embedder(model_name)
 
@@ -176,6 +193,10 @@ def _compute_context_contradiction(
             return np.asarray([embedding], dtype=float)
 
         audit_emb = _encode_text(text_y)
+        audit_norm = np.linalg.norm(audit_emb)
+        if audit_norm < 1e-12:
+            return 0.0, []
+        audit_emb = audit_emb / audit_norm
 
         max_contradiction = 0.0
         contradictory_contexts = []
@@ -193,20 +214,26 @@ def _compute_context_contradiction(
                     ctx_emb = embedder.encode(ctx)
 
             ctx_emb = np.asarray(ctx_emb, dtype=float)
-            similarity = np.dot(audit_emb, ctx_emb) / (
-                np.linalg.norm(audit_emb) * np.linalg.norm(ctx_emb) + 1e-12
-            )
+            ctx_norm = np.linalg.norm(ctx_emb)
+            if ctx_norm < 1e-12:
+                continue
+            ctx_emb = ctx_emb / ctx_norm
 
-            contradiction_score = float(1.0 - similarity)
+            # Cosine similarity → distance (phase dissonance)
+            similarity = float(np.dot(audit_emb, ctx_emb))
+            contradiction_score = float(1.0 - max(-1.0, min(1.0, similarity)))
 
             if contradiction_score > max_contradiction:
                 max_contradiction = contradiction_score
 
-            if contradiction_score > 0.4:
+            # Etiquetar chunks que superan el umbral de alerta para trazabilidad
+            if contradiction_score > contradiction_alert_threshold:
                 contradictory_contexts.append(ctx)
 
-        if not contradictory_contexts:
-            return 0.0, []
+        # SIEMPRE retornar el max_contradiction real — nunca descartar la señal.
+        # Antes retornaba 0.0 si ningún chunk superaba el umbral, lo cual
+        # ocultaba disonancias de fase reales (e.g., 0.32 queda invisible).
         return max_contradiction, contradictory_contexts
     except Exception:
         return 0.0, []
+
