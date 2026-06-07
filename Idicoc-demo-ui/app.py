@@ -11,6 +11,7 @@ import os
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 import json
+import copy
 from datetime import datetime, timezone
 import numpy as np
 import matplotlib.pyplot as plt
@@ -58,6 +59,7 @@ class MemoryLogHandler(logging.Handler):
 if "notary_logs" not in st.session_state:
     st.session_state.notary_logs = []
 
+
 def ensure_memory_log_handler():
     # Attach to root logger so ALL sub-loggers (kernel.*, idicoc_core.*, etc.) propagate here
     _log_list = st.session_state.notary_logs
@@ -67,7 +69,14 @@ def ensure_memory_log_handler():
         root_logger.addHandler(MemoryLogHandler(_log_list))
         root_logger.setLevel(logging.INFO)
     # Also explicitly attach to known namespaces in case propagation is disabled
-    for logger_name in ["idicoc_core", "IIAE", "kernel", "idicoc_core.dse", "idicoc_core.pipeline", "idicoc_core.ctm"]:
+    for logger_name in [
+        "idicoc_core",
+        "IIAE",
+        "kernel",
+        "idicoc_core.dse",
+        "idicoc_core.pipeline",
+        "idicoc_core.ctm",
+    ]:
         ns_logger = logging.getLogger(logger_name)
         has_handler = any(isinstance(h, MemoryLogHandler) for h in ns_logger.handlers)
         if not has_handler:
@@ -75,7 +84,9 @@ def ensure_memory_log_handler():
         ns_logger.setLevel(logging.INFO)
         ns_logger.propagate = True
 
+
 ensure_memory_log_handler()
+
 
 def read_wal_log_content():
     if "notary_client" not in st.session_state:
@@ -84,8 +95,10 @@ def read_wal_log_content():
         config = st.session_state.notary_client.pipeline.config
         wal_path = config.ctm_wal_path
         if not wal_path:
-            wal_path = os.path.join(os.path.dirname(config.ctm_nodes_path or "."), "ctm_wal.log")
-        
+            wal_path = os.path.join(
+                os.path.dirname(config.ctm_nodes_path or "."), "ctm_wal.log"
+            )
+
         if os.path.exists(wal_path):
             with open(wal_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -93,6 +106,50 @@ def read_wal_log_content():
     except Exception as e:
         return f"Error al leer WAL: {e}"
     return ""
+
+
+def _normalize_audit_metadata(audit_result):
+    metadata = {}
+    if hasattr(audit_result, "metadata") and isinstance(audit_result.metadata, dict):
+        metadata.update(audit_result.metadata)
+    elif hasattr(audit_result, "metrics") and isinstance(audit_result.metrics, dict):
+        metadata.update(audit_result.metrics)
+        metadata["admission_breach"] = not getattr(audit_result, "is_admitted", True)
+        metadata["d_s"] = getattr(audit_result, "dissonance_ds", metadata.get("d_s"))
+        metadata["violated_policies"] = getattr(
+            audit_result, "violated_policies", metadata.get("violated_policies", [])
+        )
+        # Only set default algebraic_components if not already present
+        if "algebraic_components" not in metadata:
+            metadata["algebraic_components"] = {
+                "d_0": metadata.get("d_0", 0.0),
+                "d_1": metadata.get("d_1", 0.0),
+                "d_2": metadata.get("d_2", 0.0),
+                "d_3": metadata.get("d_3", 0.0),
+                "d_4": metadata.get("d_4", 0.0),
+                "d_5": metadata.get("d_5", 0.0),
+                "d_6": metadata.get("d_6", 0.0),
+            }
+    return metadata
+
+
+def _sanitize_audit_details(metadata):
+    details = copy.deepcopy(metadata) if isinstance(metadata, dict) else metadata
+    if isinstance(details, dict) and isinstance(details.get("audit_metrics"), dict):
+        audit_metrics = details["audit_metrics"]
+        y_vector = audit_metrics.get("y_vector")
+        if isinstance(y_vector, (list, tuple)):
+            audit_metrics["y_vector_summary"] = (
+                f"Salida proyectada en la variedad canónica (dim={len(y_vector)})."
+            )
+            audit_metrics["y_vector"] = "[raw y_vector omitted for clarity]"
+        elif y_vector is not None:
+            audit_metrics["y_vector_summary"] = (
+                "Salida proyectada en la variedad canónica."
+            )
+            audit_metrics["y_vector"] = "[raw y_vector omitted for clarity]"
+    return details
+
 
 # Estilos Premium (Outfit/Inter, Dark Theme, Glassmorphism)
 st.markdown(
@@ -304,9 +361,12 @@ with st.sidebar:
 
     lambda_context = st.slider(
         "Peso Integridad RAG (λ_context)",
-        0.0, 1.0, 0.40, 0.05,
+        0.0,
+        1.0,
+        0.40,
+        0.05,
         help="Cuánto influye la coherencia con el contexto RAG en D_s. "
-             "0=solo políticas, 1=solo RAG. Recomendado: 0.40"
+        "0=solo políticas, 1=solo RAG. Recomendado: 0.40",
     )
     st.session_state.lambda_context = lambda_context
 
@@ -503,7 +563,10 @@ with col_chat:
     # Renderizar burbujas de chat
     chat_container = st.container(height=450)
     with chat_container:
-        has_chat = any(msg["role"] in ("user", "assistant") for msg in st.session_state.chat_history)
+        has_chat = any(
+            msg["role"] in ("user", "assistant")
+            for msg in st.session_state.chat_history
+        )
         if not has_chat:
             st.info(
                 "Canal seguro establecido. Inicie la conversación con el asistente."
@@ -557,7 +620,9 @@ with col_chat:
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
 
         # Generación y Auditoría bajo Contención Preventiva
-        with st.spinner("🤖 Generando y auditando respuesta bajo Contención Preventiva..."):
+        with st.spinner(
+            "🤖 Generando y auditando respuesta bajo Contención Preventiva..."
+        ):
             try:
                 if forced_response:
                     assistant_res = forced_response
@@ -569,33 +634,41 @@ with col_chat:
                         epsilon_override=epsilon,
                     )
                 else:
-                    # Interceptar logits en el Hot Loop si el Notario está disponible
+                    # Generar output del LLM directamente
                     kwargs = {}
                     if "notary_client" in st.session_state:
                         processor = (
                             st.session_state.notary_client.pipeline.config.logits_processor
                         )
                         import inspect
+
                         sig = inspect.signature(llm_provider.generate)
                         if "logits_processor" in sig.parameters:
                             kwargs["logits_processor"] = processor
 
+                    # Generar respuesta del LLM
+                    assistant_res = llm_provider.generate(user_msg, **kwargs)
+
+                    # Auditar el output generado
+                    payload = SemanticPayload(assistant_res)
                     context_list = st.session_state.get("context_list") or []
-                    assistant_res, audit_result = st.session_state.notary_client.generate(
-                        user_prompt=user_msg,
-                        rag_context=context_list,
+                    audit_result = st.session_state.notary_client.process_interaction(
+                        audit_input=payload,
+                        user_input=user_msg,
+                        context_input=context_list,
                         epsilon_override=epsilon,
-                        **kwargs
                     )
 
-                # Extraer métricas y hashes
-                d_s = audit_result.metadata.get("d_s")
+                # Normalizar metadata del resultado de auditoría para mayor robustez
+                audit_metadata = _normalize_audit_metadata(audit_result)
+
+                d_s = audit_metadata.get("d_s")
                 if d_s is None:
                     d_s = 0.0
-                admission_breach = audit_result.metadata.get("admission_breach", False)
+                admission_breach = bool(audit_metadata.get("admission_breach", False))
                 status = "REJECTED" if admission_breach else "ADMITTED"
 
-                ac = audit_result.metadata.get("algebraic_components") or {}
+                ac = audit_metadata.get("algebraic_components") or {}
                 d_1 = ac.get("d_1")
                 if d_1 is None:
                     d_1 = 0.0
@@ -606,7 +679,7 @@ with col_chat:
                 if d_3 is None:
                     d_3 = 0.0
 
-                integrity_hash = str(audit_result.integrity_hash)
+                integrity_hash = str(getattr(audit_result, "integrity_hash", "N/A"))
 
                 # Obtener contadores del módulo AEM
                 aem_total, aem_valid, aem_rejected = (
@@ -617,9 +690,7 @@ with col_chat:
                 violated_policy = None
                 rejection_reason = None
                 if status == "REJECTED":
-                    violated_policies = (
-                        audit_result.metadata.get("violated_policies") or []
-                    )
+                    violated_policies = audit_metadata.get("violated_policies") or []
                     violated_policy = (
                         ", ".join(violated_policies)
                         if violated_policies
@@ -635,7 +706,12 @@ with col_chat:
                     else:
                         rejection_reason = f"Desviación semántica alta ({d_s:.4f}) respecto al invariante (ε={epsilon:.2f})."
 
-                # Guardar auditoría en historial
+                # Guardar auditoría en historial (con texto forense del LLM)
+                # audit_metrics contiene 'llm_output_text' para trazabilidad
+                audit_metrics = audit_metadata.get("audit_metrics") or {}
+                llm_output_text = (
+                    audit_metrics.get("llm_output_text") or assistant_res[:300]
+                )
                 st.session_state.chat_history.append(
                     {
                         "role": "audit",
@@ -645,16 +721,19 @@ with col_chat:
                         "d_1": d_1,
                         "d_2": d_2,
                         "d_3": d_3,
-                        "d_context": audit_result.metadata.get("d_context", 0.0),
+                        "d_context": audit_metadata.get("d_context", 0.0),
                         "hash": integrity_hash,
                         "root_hash": st.session_state.notary_client.pipeline.ctm.root_hash
                         or "GENESIS",
-                        "timestamp": audit_result.timestamp,
+                        "timestamp": audit_metadata.get("timestamp")
+                        or getattr(audit_result, "timestamp", "N/A"),
                         "violated_policy": violated_policy,
                         "rejection_reason": rejection_reason,
                         "aem_total": aem_total,
                         "aem_valid": aem_valid,
                         "aem_rejected": aem_rejected,
+                        # Texto forense: texto exacto evaluado por el Notario
+                        "llm_output_text": llm_output_text,
                     }
                 )
 
@@ -668,7 +747,9 @@ with col_chat:
                 )
 
                 # Guardar detalles para panel expandido
-                st.session_state.last_audit_details = audit_result.metadata
+                st.session_state.last_audit_details = _sanitize_audit_details(
+                    audit_metadata
+                )
 
             except Exception as e:
                 st.error(f"Error en el flujo del Notario: {e}")
@@ -701,15 +782,40 @@ with col_telemetry:
         d_context_val = last_audit.get("d_context")
         d_context_text = "N/A" if d_context_val is None else f"{d_context_val:.4f}"
         d_context_color = (
-            "#10B981" if (d_context_val or 0) < 0.3
-            else "#F59E0B" if (d_context_val or 0) < 0.6
-            else "#EF4444"
+            "#10B981"
+            if (d_context_val or 0) < 0.3
+            else "#F59E0B" if (d_context_val or 0) < 0.6 else "#EF4444"
         )
+
+        # Formatear d_2 y d_3 — mostrar ∞ cuando son inf (violación HARD)
+        def _fmt_component(val):
+            if val is None:
+                return "N/A"
+            if val == float("inf") or (isinstance(val, float) and val > 1e10):
+                return "∞"
+            return f"{val:.4f}"
+
+        d_1_text = _fmt_component(d_1_val)
+        d_2_text = _fmt_component(d_2_val)
+        d_3_text = _fmt_component(d_3_val)
+
+        # Color de d_2: rojo si inf o alto, verde si bajo
+        d_2_color = (
+            "#EF4444"
+            if (d_2_val or 0) == float("inf") or (d_2_val or 0) > 0.5
+            else "#F59E0B" if (d_2_val or 0) > 0.2 else "#10B981"
+        )
+
+        # Texto forense del LLM (texto exacto evaluado por el Notario)
+        llm_forensic_text = last_audit.get("llm_output_text", "")
 
         st.markdown(
             f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
             f'<b>Resultado:</b> <span class="{badge_class}">{status}</span><br>'
-            f"<small>Dissonancia D_s: <b>{d_s_text}</b> | Componentes: d1={d_1_text}, d2={d_2_text}, d3={d_3_text}</small><br>"
+            f"<small>Disonancia D_s: <b>{d_s_text}</b> | Componentes: "
+            f"d1={d_1_text}, "
+            f"<span style='color:{d_2_color}; font-weight:bold;'>d2={d_2_text}</span>, "
+            f"d3={d_3_text}</small><br>"
             f"<small>🔗 <b>Integridad RAG (d_context):</b> "
             f"<span style='color:{d_context_color}; font-weight:bold;'>{d_context_text}</span> "
             f"<span style='color:#64748b; font-size:10px;'>(0=coherente, 1=alucinación)</span></small><br>"
@@ -717,6 +823,13 @@ with col_telemetry:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+        # Panel forense: texto exacto evaluado por el Notario
+        if llm_forensic_text:
+            with st.expander(
+                "🔍 Texto evaluado por el Notario (vista forense)", expanded=False
+            ):
+                st.code(llm_forensic_text, language=None)
 
         # Si hay políticas específicas que causaron el rechazo, listarlas
         if status == "REJECTED":
@@ -938,13 +1051,20 @@ with col_telemetry:
                 )
 
 
-
 # ── Detalle del Último Análisis de Auditoría (Expander) ───────────────────────
 st.markdown("---")
 with st.expander(
     "📊 Explicabilidad Detallada de la Notaría (Última Transacción)", expanded=False
 ):
     if st.session_state.last_audit_details:
+        summary = st.session_state.last_audit_details.get("y_vector_summary")
+        if summary:
+            st.markdown(
+                f"<div style='margin-bottom:10px; padding:10px; border-radius:8px; background-color:#111827; border:1px solid #334155;'>"
+                f"<b>y_vector:</b> {summary}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
         st.json(st.session_state.last_audit_details)
     else:
         st.info("Envíe mensajes para desplegar el análisis matemático de la auditoría.")
@@ -953,6 +1073,7 @@ with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
     ensure_memory_log_handler()
     wal_content = read_wal_log_content()
     import html as _html
+
     log_text = _html.escape("\n".join(st.session_state.notary_logs))
     wal_text = _html.escape(wal_content) if wal_content else ""
 
@@ -972,7 +1093,9 @@ with st.expander("📜 Visor de Logs del Notario (Tiempo Real)", expanded=True):
             )
 
     with col_log_2:
-        st.markdown("<b>Transacciones CTM (Ledger WAL Log):</b>", unsafe_allow_html=True)
+        st.markdown(
+            "<b>Transacciones CTM (Ledger WAL Log):</b>", unsafe_allow_html=True
+        )
         if not wal_text:
             st.markdown(
                 "<div class='term'><span style='opacity:0.4'>Sin transacciones registradas en WAL.</span></div>",

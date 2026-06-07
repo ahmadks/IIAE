@@ -4,30 +4,38 @@ from idicoc_core.api.facade import NotaryClient as RealNotaryClient
 from idicoc_core.api.schemas import SessionContext
 from idicoc_core.utils.hashing import sha256_hex
 
+
 class SemanticPayload:
     """Compatibility wrapper that represents a text message payload."""
+
     def __init__(self, source_text: str = ""):
         self.source_text = source_text
         self.text_content = source_text
         self.data = source_text
 
+
 class CanonicalStateDTO:
     """Compatibility wrapper representing the resulting state after notary audit."""
-    def __init__(self, metadata: dict, integrity_hash: str = "", timestamp: str = "", data: str = ""):
+
+    def __init__(
+        self, metadata: dict, integrity_hash: str = "", timestamp: str = "", data: str = ""
+    ):
         self.metadata = metadata
         self.integrity_hash = integrity_hash
         self.timestamp = timestamp
         self.data = data
 
+
 class NotaryClient:
     """Compatibility client facade for legacy client integrations."""
+
     def __init__(self, config: Any, llm_provider: Any = None, **kwargs):
         # Map legacy rigidity_epsilon to allowed_epsilon if present
         if hasattr(config, "rigidity_epsilon") and not hasattr(config, "allowed_epsilon"):
             config.allowed_epsilon = config.rigidity_epsilon
         elif hasattr(config, "rigidity_epsilon"):
             config.allowed_epsilon = config.rigidity_epsilon
-            
+
         self.client = RealNotaryClient(config, llm_provider)
         self.pipeline = self.client.pipeline
         self.config = config
@@ -40,14 +48,14 @@ class NotaryClient:
         rag_context: str,
         llm_output: str,
         context_policies: Optional[List[Any]] = None,
-        epsilon_override: Optional[float] = None
+        epsilon_override: Optional[float] = None,
     ) -> Any:
         return self.client.audit(
             user_prompt=user_prompt,
             rag_context=rag_context,
             llm_output=llm_output,
             context_policies=context_policies,
-            epsilon_override=epsilon_override
+            epsilon_override=epsilon_override,
         )
 
     def generate(
@@ -56,7 +64,7 @@ class NotaryClient:
         rag_context: str | List[str],
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[str, CanonicalStateDTO]:
         """
         Generates output under Generative Containment (PromptProjector)
@@ -73,7 +81,7 @@ class NotaryClient:
             rag_context=rag_context,
             context_policies=context_policies,
             epsilon_override=epsilon_override,
-            **kwargs
+            **kwargs,
         )
 
         # Build algebraic components mapping for legacy code
@@ -89,6 +97,16 @@ class NotaryClient:
 
         # Format metadata dictionary
         timestamp_str = datetime.now(timezone.utc).isoformat()
+        y_vector = audit_res.metrics.get("y_vector")
+        y_vector_summary = None
+        if y_vector is not None:
+            if hasattr(y_vector, "__len__") and not isinstance(y_vector, str):
+                y_vector_summary = (
+                    f"Salida proyectada en la variedad canónica (dim={len(y_vector)})."
+                )
+            else:
+                y_vector_summary = "Salida proyectada en la variedad canónica."
+
         metadata = {
             "admission_breach": not audit_res.is_admitted,
             "d_s": audit_res.dissonance_ds,
@@ -100,6 +118,7 @@ class NotaryClient:
             "algebraic_components": ac,
             "timestamp": timestamp_str,
             "audit_metrics": audit_res.metrics,
+            "y_vector_summary": y_vector_summary,
         }
 
         # Fetch integrity hash from CTM if active
@@ -111,7 +130,7 @@ class NotaryClient:
             metadata=metadata,
             integrity_hash=integrity_hash,
             timestamp=timestamp_str,
-            data=llm_output
+            data=llm_output,
         )
 
         return llm_output, dto
@@ -122,7 +141,7 @@ class NotaryClient:
         user_input: Any = None,
         context_input: Any = None,
         context_policies: Any = None,
-        epsilon_override: Optional[float] = None
+        epsilon_override: Optional[float] = None,
     ) -> CanonicalStateDTO:
         # Extract LLM output
         if hasattr(audit_input, "source_text"):
@@ -152,7 +171,7 @@ class NotaryClient:
             rag_context=rag_context,
             llm_output=llm_output,
             context_policies=context_policies,
-            epsilon_override=epsilon_override
+            epsilon_override=epsilon_override,
         )
 
         # Build algebraic components mapping for legacy code
@@ -168,6 +187,16 @@ class NotaryClient:
 
         # Format metadata dictionary
         timestamp_str = datetime.now(timezone.utc).isoformat()
+        y_vector = audit_res.metrics.get("y_vector")
+        y_vector_summary = None
+        if y_vector is not None:
+            if hasattr(y_vector, "__len__") and not isinstance(y_vector, str):
+                y_vector_summary = (
+                    f"Salida proyectada en la variedad canónica (dim={len(y_vector)})."
+                )
+            else:
+                y_vector_summary = "Salida proyectada en la variedad canónica."
+
         metadata = {
             "admission_breach": not audit_res.is_admitted,
             "d_s": audit_res.dissonance_ds,
@@ -179,6 +208,7 @@ class NotaryClient:
             "algebraic_components": ac,
             "timestamp": timestamp_str,
             "audit_metrics": audit_res.metrics,
+            "y_vector_summary": y_vector_summary,
         }
 
         # Fetch integrity hash from CTM if active
@@ -190,7 +220,7 @@ class NotaryClient:
             metadata=metadata,
             integrity_hash=integrity_hash,
             timestamp=timestamp_str,
-            data=llm_output
+            data=llm_output,
         )
 
     def get_aem_counters(self) -> dict[str, float]:

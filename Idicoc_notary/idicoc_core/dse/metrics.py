@@ -133,7 +133,7 @@ def _compute_d_6(s6_dist_k: float, s6_prime_dist_k: float) -> float:
     return s6_dist_k + s6_prime_dist_k
 
 
-def _is_chunk_critical(ctx: str, evaluator: Any, config: Any = None) -> bool:
+def _is_chunk_critical(ctx: str, evaluator: Any) -> bool:
     if evaluator is None or not hasattr(evaluator, "graph") or not evaluator.graph:
         return False
     # Get all hard policies in the graph
@@ -141,21 +141,18 @@ def _is_chunk_critical(ctx: str, evaluator: Any, config: Any = None) -> bool:
     if not hard_policies:
         return False
 
-    # Similitud coseno mínima para considerar un chunk RAG "crítico" (configurable)
-    critical_sim_threshold = float(
-        getattr(config, "rag_critical_chunk_similarity_threshold", 0.6)
-    )
-
     # Try to encode ctx for semantic similarity checks
     ctx_emb = None
     try:
         from idicoc_core.utils.embedding_service import EmbeddingService
+
         embed_service = EmbeddingService()
         ctx_emb = embed_service.encode(ctx)
     except Exception:
         pass
 
     import re
+
     for ax in hard_policies:
         a_type = ax.get("policy_type", "fact")
         if a_type in ("regex", "numeric"):
@@ -176,7 +173,12 @@ def _is_chunk_critical(ctx: str, evaluator: Any, config: Any = None) -> bool:
                     norm_b = np.linalg.norm(ax_emb_arr)
                     if norm_a > 1e-12 and norm_b > 1e-12:
                         sim = float(np.dot(ctx_emb_arr / norm_a, ax_emb_arr / norm_b))
-                        if sim >= critical_sim_threshold:
+                        # Read threshold from evaluator.config if available
+                        try:
+                            threshold = float(getattr(evaluator, "config", None) and getattr(evaluator.config, "rag_critical_chunk_similarity_threshold", 0.6))
+                        except Exception:
+                            threshold = 0.6
+                        if sim >= threshold:
                             return True
                 except Exception:
                     pass
@@ -202,6 +204,7 @@ def _compute_context_contradiction(
         return 0.0, []
 
     import numpy as np
+
     # Si la entrada es un array numérico, distribución o lista de números, no se realiza
     # análisis semántico de contradicción RAG→LLM ya que no representa texto en lenguaje natural.
     if (
@@ -212,14 +215,19 @@ def _compute_context_contradiction(
         return 0.0, []
 
     text_y = str(getattr(y, "content", getattr(y, "text_content", y)))
-    
+
     # También ignorar representaciones de arrays/listas de floats en formato string
     trimmed = text_y.strip()
     if trimmed.startswith("[") and trimmed.endswith("]"):
         try:
             import ast
+
             parsed = ast.literal_eval(trimmed)
-            if isinstance(parsed, (list, tuple)) and len(parsed) > 0 and isinstance(parsed[0], (int, float)):
+            if (
+                isinstance(parsed, (list, tuple))
+                and len(parsed) > 0
+                and isinstance(parsed[0], (int, float))
+            ):
                 return 0.0, []
         except Exception:
             pass
@@ -308,10 +316,14 @@ def _compute_context_contradiction(
                     prompt_similarities.append(-1.0)
             primary_idx = int(np.argmax(prompt_similarities))
 
+        # Thresholds read from config for tunability
+        primary_presence_threshold = float(getattr(config, "rag_primary_presence_threshold", 0.70))
+        non_critical_damper = float(getattr(config, "rag_non_critical_coverage_damper", 0.1))
+        primary_present_damper = float(getattr(config, "rag_primary_present_coverage_damper", 0.3))
+
         is_primary_present = False
         if primary_idx < len(context_embs) and context_embs[primary_idx] is not None:
             primary_sim = float(np.dot(audit_emb, context_embs[primary_idx]))
-            primary_presence_threshold = float(getattr(config, "rag_primary_presence_threshold", 0.70))
             is_primary_present = primary_sim >= primary_presence_threshold
 
         max_similarity = -1.0
@@ -334,8 +346,7 @@ def _compute_context_contradiction(
                 min_similarity = similarity
 
             is_contradiction = False
-            score_contra = 0.0
-            
+
             # 1. Try NLI pipeline first
             nli_pipeline = getattr(config, "nli_pipeline", None)
             if nli_pipeline is not None:
@@ -343,35 +354,39 @@ def _compute_context_contradiction(
                     nli_res = nli_pipeline(
                         sequences=text_y,
                         candidate_labels=["entailment", "contradiction", "neutral"],
-                        hypothesis_template=f"Based on the context: {ctx}, this statement is {{}}."
+                        hypothesis_template=f"Based on the context: {ctx}, this statement is {{}}.",
                     )
                     idx_contra = nli_res["labels"].index("contradiction")
-                    score_contra = float(nli_res["scores"][idx_contra])
+                    score_contra = nli_res["scores"][idx_contra]
                     top_label = nli_res["labels"][0]
-                    print("DEBUG CONTRADICTION:", "top_label:", top_label, "score_contra:", score_contra, "text_y:", text_y, "ctx:", ctx)
                     nli_threshold = float(getattr(config, "semantic_nli_conflict_threshold", 0.5))
                     if top_label == "contradiction" or score_contra > nli_threshold:
                         is_contradiction = True
                 except Exception as nli_err:
                     import logging
-                    logging.getLogger(__name__).warning(f"Error calling NLI pipeline for contradiction check: {nli_err}")
+
+                    logging.getLogger(__name__).warning(
+                        f"Error calling NLI pipeline for contradiction check: {nli_err}"
+                    )
 
             # 2. Fallback to embedding distance/similarity
             contradiction_score = float(1.0 - similarity)
             if not is_contradiction:
-                if contradiction_score > contradiction_alert_threshold:
-                    is_contradiction = True
+                if getattr(config, "nli_pipeline", None) is None:
+                    if similarity < 0.0 and contradiction_score > contradiction_alert_threshold:
+                        is_contradiction = True
+                else:
+                    if (
+                        similarity < 0.0 or len(context_input) == 1
+                    ) and contradiction_score > contradiction_alert_threshold:
+                        is_contradiction = True
 
             if is_contradiction:
-                if nli_pipeline is not None and score_contra > 0.0:
-                    contradiction_score = max(score_contra, contradiction_score)
                 contradictory_contexts.append(ctx)
                 max_contradiction_score = max(max_contradiction_score, contradiction_score)
             else:
                 coverage_score = 1.0 - max(0.0, similarity)
-                is_critical = _is_chunk_critical(ctx, evaluator, config)
-                non_critical_damper = float(getattr(config, "rag_non_critical_coverage_damper", 0.1))
-                primary_present_damper = float(getattr(config, "rag_primary_present_coverage_damper", 0.3))
+                is_critical = _is_chunk_critical(ctx, evaluator)
                 if not is_critical:
                     coverage_score *= non_critical_damper
                 elif is_primary_present:
@@ -384,7 +399,7 @@ def _compute_context_contradiction(
         #  OMISIÓN SOFT: similitud media/baja pero no contradictoria → penalización muy leve
         #
         # El sistema deja de penalizar por "no decir TODO" y solo castiga lo "factualmente falso".
-        omission_penalty = getattr(config, "omission_penalty", 0.05)  # Configurable penalty for omitted RAG content
+        omission_penalty = float(getattr(config, "omission_penalty", 0.05))
 
         # Recalcular d_context con lógica permisiva:
         # Si PRIMARY está presente y no hay contradicciones hard, d_context ≈ omission_penalty
@@ -393,18 +408,18 @@ def _compute_context_contradiction(
         else:
             # CONTRADICCIÓN HARD: penalización proporcional a severity
             hard_contradiction_threshold = float(getattr(config, "rag_hard_contradiction_threshold", 0.8))
-            coverage_contribution_factor = float(getattr(config, "rag_coverage_contribution_factor", 0.2))
+            coverage_factor = float(getattr(config, "rag_coverage_contribution_factor", 0.2))
+
             if max_contradiction_score > hard_contradiction_threshold:
                 d_context = max_contradiction_score
             else:
                 # Sin contradicción hard, permitir incluso coverage_score bajo
-                d_context = max(max_coverage_score * coverage_contribution_factor, omission_penalty)
+                d_context = max(max_coverage_score * coverage_factor, omission_penalty)
 
-        # Normalizar: cap configurable para respetar umbral de corrección
-        d_context_cap = float(getattr(config, "rag_d_context_cap", 0.15))
-        d_context = min(d_context_cap, max(0.0, d_context))
+        # Normalizar: cap usando `config.rag_d_context_cap` (permite tests ajustar el tope)
+        contradiction_cap = float(getattr(config, "rag_d_context_cap", 0.15))
+        d_context = min(contradiction_cap, max(0.0, d_context))
 
         return d_context, contradictory_contexts
     except Exception:
         return 0.0, []
-

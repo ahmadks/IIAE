@@ -484,19 +484,21 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
 
         d2 = 0.0
         if self._graph is not None:
+            evaluator = PropertyGraphEvaluator(self._graph, self.config)
             try:
-                evaluator = PropertyGraphEvaluator(self._graph, self.config)
                 d2 = float(evaluator.evaluate(audit_input))
-            except Exception:
-                pass
+            except Exception as ex:
+                logger.error(f"Error computing d2 (policy dissonance): {ex}", exc_info=True)
+                raise
 
         d3 = 0.0
         if self._graph is not None:
+            evaluator = PropertyGraphEvaluator(self._graph, self.config)
             try:
-                evaluator = PropertyGraphEvaluator(self._graph, self.config)
                 d3 = float(evaluator.compute_temporal(audit_input))
-            except Exception:
-                pass
+            except Exception as ex:
+                logger.error(f"Error computing d3 (temporal dissonance): {ex}", exc_info=True)
+                raise
 
         d4 = 0.0
         d5 = 0.0
@@ -733,6 +735,20 @@ class DissonanceStateEvaluator:
         except Exception:
             pass
 
+        # ── Texto real evaluado por el Notario (para trazabilidad forense) ──────
+        # Este es el texto exacto que se pasa al PropertyGraphEvaluator.
+        # Si el LLM genera texto que viola una política regex, aquí debe verse.
+        _eval_text = (
+            eval_input
+            if isinstance(eval_input, str)
+            else str(
+                getattr(
+                    eval_input, "source_text", getattr(eval_input, "text_content", str(eval_input))
+                )
+            )
+        )
+        logger.info(f"[DSE] Texto evaluado por el Notario: {repr(_eval_text[:200])}")
+
         # Evaluate logic disonancia using PropertyGraphEvaluator
         evaluator = PropertyGraphEvaluator(active_graph, self.config)
         violations = []
@@ -741,16 +757,56 @@ class DissonanceStateEvaluator:
             for vn in violated_nodes:
                 violations.append(f"{vn['id']}: {vn['text']} ({vn['hardness'].upper()})")
         except Exception as ex:
-            logger.warning(f"Error computing logical violations: {ex}")
+            logger.error(f"Error computing logical violations: {ex}", exc_info=True)
+            raise
 
-        # Compute d_logic, d_temporal, and d_context
-        d_logic = evaluator.evaluate(eval_input)
-        d_temporal = evaluator.compute_temporal(eval_input)
+        # Compute d_logic (d_2: policy violations) - CRITICAL METRIC
+        # NOTA: Para políticas HARD de tipo regex, evaluate() retorna float('inf').
+        # El try/except sólo captura errores de SISTEMA (embedding, etc.), NO viola la política.
+        d_logic = 0.0
+        try:
+            d_logic = evaluator.evaluate(eval_input)
+            if d_logic == float("inf"):
+                logger.info(
+                    f"[DSE] d_2=inf: Violación HARD detectada. Texto: {repr(_eval_text[:100])}"
+                )
+            elif not isinstance(d_logic, (int, float)):
+                logger.warning(f"d_logic returned invalid type: {type(d_logic)}, defaulting to 0.0")
+                d_logic = 0.0
+        except Exception as ex:
+            logger.error(f"CRITICAL: Error computing d_logic (d_2): {ex}", exc_info=True)
+            raise
 
-        # Semantic/RAG contradiction
-        d_context, contradictory_contexts = _compute_context_contradiction(
-            eval_input, context_input, self.config, session_context.user_prompt, evaluator
-        )
+        # Compute d_temporal (d_3: temporal constraints) - CRITICAL METRIC
+        # If exception occurs, default to 0.0 (no temporal violation)
+        d_temporal = 0.0
+        try:
+            d_temporal = evaluator.compute_temporal(eval_input)
+            if not isinstance(d_temporal, (int, float)):
+                logger.warning(
+                    f"d_temporal returned invalid type: {type(d_temporal)}, defaulting to 0.0"
+                )
+                d_temporal = 0.0
+        except Exception as ex:
+            logger.error(f"CRITICAL: Error computing d_temporal (d_3): {ex}", exc_info=True)
+            raise
+
+        # Semantic/RAG contradiction - CRITICAL METRIC
+        d_context = 0.0
+        contradictory_contexts = []
+        try:
+            d_context, contradictory_contexts = _compute_context_contradiction(
+                eval_input, context_input, self.config, session_context.user_prompt, evaluator
+            )
+            if not isinstance(d_context, (int, float)):
+                logger.warning(
+                    f"d_context returned invalid type: {type(d_context)}, defaulting to 0.0"
+                )
+                d_context = 0.0
+                contradictory_contexts = []
+        except Exception as ex:
+            logger.error(f"CRITICAL: Error computing d_context (RAG): {ex}", exc_info=True)
+            raise
 
         for ctx_text in contradictory_contexts:
             violations.append(f"Contradicción RAG: {ctx_text} (SOFT)")
@@ -775,7 +831,9 @@ class DissonanceStateEvaluator:
 
                 # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
                 # es la distribución uniforme o el vector de V_hat si es compatible.
-                if session_context.v_hat is not None and hasattr(session_context.v_hat, "semantic_vector"):
+                if session_context.v_hat is not None and hasattr(
+                    session_context.v_hat, "semantic_vector"
+                ):
                     target_state = session_context.v_hat.semantic_vector
                     if not isinstance(target_state, np.ndarray):
                         target_state = np.asarray(target_state, dtype=float)
@@ -786,8 +844,11 @@ class DissonanceStateEvaluator:
                 d1 = _compute_d_1(mu, target_state)
             else:
                 # Text input: compute Projection Divergence against CanonicalState V_hat
-                if session_context.v_hat is not None and hasattr(session_context.v_hat, "semantic_vector"):
+                if session_context.v_hat is not None and hasattr(
+                    session_context.v_hat, "semantic_vector"
+                ):
                     from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
+
                     model_name = getattr(
                         self.config,
                         "semantic_embedding_model",
@@ -859,6 +920,7 @@ class DissonanceStateEvaluator:
         if context_input:
             from idicoc_core.utils.embedding_service import EmbeddingService
             from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
+
             try:
                 embed_service = EmbeddingService()
                 model_name = getattr(
@@ -891,7 +953,7 @@ class DissonanceStateEvaluator:
             except Exception:
                 pass
 
-         # Raw metrics breakdown
+        # Raw metrics breakdown — incluye texto evaluado para trazabilidad forense
         raw_metrics = {
             "d_s": d_s,
             "d_0": 0.0,
@@ -910,12 +972,15 @@ class DissonanceStateEvaluator:
             "d_temporal": d_temporal,
             "y_vector": y_vector if "y_vector" in locals() else None,
             "context_embeddings": context_embs_list,
+            # Texto real evaluado por el notario (trazabilidad forense)
+            "llm_output_text": _eval_text[:500],
         }
 
         return d_s, violations, raw_metrics
 
     def _compute_rag_divergence(self, vec: np.ndarray, context_embs: List[np.ndarray]) -> float:
         import numpy as np
+
         max_sim = -1.0
         for c_emb in context_embs:
             if c_emb is None:
@@ -996,12 +1061,14 @@ class DissonanceStateEvaluator:
         init_rag_div = 0.0
         if context_embs:
             init_rag_div = float(self._compute_rag_divergence(z, context_embs))
-        history.append({
-            "iteration": 0,
-            "dissonance": float(best_loss),
-            "rag_divergence": init_rag_div,
-            "backtracked": False
-        })
+        history.append(
+            {
+                "iteration": 0,
+                "dissonance": float(best_loss),
+                "rag_divergence": init_rag_div,
+                "backtracked": False,
+            }
+        )
 
         # Early stop if already in the green band
         if best_loss <= self.config.diss_threshold_green:
@@ -1042,22 +1109,26 @@ class DissonanceStateEvaluator:
                 current_rag_div = float(self._compute_rag_divergence(z_next, context_embs))
                 if current_rag_div > max_rag_div_threshold:
                     backtracked = True
-                    history.append({
-                        "iteration": k + 1,
-                        "dissonance": float(_cost_function(z_next)),
-                        "rag_divergence": current_rag_div,
-                        "backtracked": True
-                    })
+                    history.append(
+                        {
+                            "iteration": k + 1,
+                            "dissonance": float(_cost_function(z_next)),
+                            "rag_divergence": current_rag_div,
+                            "backtracked": True,
+                        }
+                    )
                     # Reject this update step, continue searching in another direction
                     continue
 
             loss_next = _cost_function(z_next)
-            history.append({
-                "iteration": k + 1,
-                "dissonance": float(loss_next),
-                "rag_divergence": current_rag_div,
-                "backtracked": False
-            })
+            history.append(
+                {
+                    "iteration": k + 1,
+                    "dissonance": float(loss_next),
+                    "rag_divergence": current_rag_div,
+                    "backtracked": False,
+                }
+            )
 
             # Update best if improved
             if loss_next < best_loss:
@@ -1071,8 +1142,6 @@ class DissonanceStateEvaluator:
                 break
 
         return best_z, best_loss, history
-
-
 
 
 class AuditEntropyModule:
