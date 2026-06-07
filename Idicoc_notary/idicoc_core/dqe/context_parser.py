@@ -14,16 +14,18 @@ class ContextParser:
     def build_context(
         self,
         user_prompt: str,
-        rag_context: str,
+        rag_context: Any,
         metadata: Optional[Dict[str, Any]] = None,
         v_hat: Optional[Any] = None,
     ) -> SessionContext:
         """
-        Builds a structured SessionContext DTO from raw prompt and context strings.
+        Builds a structured SessionContext DTO from raw prompt and context.
         """
+        if isinstance(rag_context, (list, tuple)):
+            rag_context = "\n".join(str(item).strip() for item in rag_context if str(item).strip())
         return SessionContext(
             user_prompt=user_prompt or "",
-            rag_context=rag_context or "",
+            rag_context=str(rag_context or ""),
             metadata=metadata or {},
             v_hat=v_hat,
         )

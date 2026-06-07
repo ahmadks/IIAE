@@ -108,6 +108,29 @@ def read_wal_log_content():
     return ""
 
 
+def ensure_notary_client(llm_provider, policies_changed: bool = False):
+    """Centraliza la creación/recreación del NotaryClient.
+    Si `policies_changed` es True fuerza la recreación.
+    """
+    if "notary_client" in st.session_state and not policies_changed:
+        return st.session_state.notary_client
+
+    ui_dir = os.path.dirname(os.path.abspath(__file__))
+    config = AuditConfig(
+        policy_file_path=_pol_path,
+        compile_policies_on_init=True,
+        enable_logits_interception=True,
+        instance_name="audit_forensic_chatbot",
+        lambda_context=st.session_state.get("lambda_context", 0.4),
+        ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
+        ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
+        ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
+    )
+    st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+    st.session_state.policies_mtime = current_mtime
+    return st.session_state.notary_client
+
+
 def _normalize_audit_metadata(audit_result):
     metadata = {}
     if hasattr(audit_result, "metadata") and isinstance(audit_result.metadata, dict):
@@ -325,22 +348,9 @@ if "llm_provider" not in st.session_state:
 
         st.session_state.llm_provider = llm_provider
 
-        # Initialize NotaryClient immediately on load
+        # Initialize NotaryClient immediately on load (centralized)
         try:
-            ui_dir = os.path.dirname(os.path.abspath(__file__))
-            config = AuditConfig(
-                policy_file_path=_pol_path,
-                compile_policies_on_init=True,
-                enable_logits_interception=True,
-                instance_name="audit_forensic_chatbot",
-                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
-                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
-                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
-            )
-            st.session_state.notary_client = NotaryClient(
-                config, llm_provider=llm_provider
-            )
-            st.session_state.policies_mtime = current_mtime
+            ensure_notary_client(llm_provider, policies_changed=False)
         except Exception as e:
             st.error(f"Error inicializando notario en carga inicial: {e}")
             st.stop()
@@ -401,21 +411,7 @@ with st.sidebar:
     # Inicializar Notario con config y provider (se recrea si se modifican las políticas)
     if "notary_client" not in st.session_state or policies_changed:
         try:
-            ui_dir = os.path.dirname(os.path.abspath(__file__))
-            config = AuditConfig(
-                policy_file_path=_pol_path,
-                compile_policies_on_init=True,
-                enable_logits_interception=True,
-                instance_name="audit_forensic_chatbot",
-                lambda_context=st.session_state.get("lambda_context", 0.4),
-                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
-                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
-                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
-            )
-            st.session_state.notary_client = NotaryClient(
-                config, llm_provider=llm_provider
-            )
-            st.session_state.policies_mtime = current_mtime
+            ensure_notary_client(llm_provider, policies_changed=policies_changed)
         except Exception as e:
             st.error(f"Error inicializando notario: {e}")
 
@@ -473,20 +469,7 @@ with st.sidebar:
         st.session_state.pending_query = None
         # Limpiar ledger recreando el pipeline
         try:
-            ui_dir = os.path.dirname(os.path.abspath(__file__))
-            config = AuditConfig(
-                policy_file_path=_pol_path,
-                compile_policies_on_init=True,
-                enable_logits_interception=True,
-                instance_name="audit_forensic_chatbot",
-                ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
-                ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
-                ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
-            )
-            st.session_state.notary_client = NotaryClient(
-                config, llm_provider=llm_provider
-            )
-            st.session_state.policies_mtime = current_mtime
+            ensure_notary_client(llm_provider, policies_changed=True)
         except Exception:
             pass
         st.rerun()

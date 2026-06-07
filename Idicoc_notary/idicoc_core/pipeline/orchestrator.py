@@ -6,9 +6,12 @@ from typing import Any, List, Optional, Dict, Tuple
 
 from idicoc_core.api.schemas import NotaryAuditResult, SessionContext
 from idicoc_core.dqe.context_parser import ContextParser
+from idicoc_core.dqe.invariance_projector import InvarianceProjector
+from idicoc_core.exceptions import InvariantStateBreach
 from idicoc_core.gating.hardware_mask import HardwareMask
 from idicoc_core.isg.graph_manager import PropertyGraph
 from idicoc_core.isg.loader import parse_policy_line
+from idicoc_core.kernel.projection.invariant_state_generator import CanonicalState
 from idicoc_core.dse.evaluator import DissonanceStateEvaluator
 from idicoc_core.ctm.merkle_dag import (
     CustodialTraceManager,
@@ -146,6 +149,20 @@ class AuditPipeline:
         # Load initial policies
         self._load_initial_policies()
 
+    @staticmethod
+    def _normalize_rag_context(rag_context: Any) -> str:
+        if rag_context is None:
+            return ""
+        if isinstance(rag_context, (list, tuple)):
+            return "\n".join(str(item).strip() for item in rag_context if str(item).strip())
+        return str(rag_context or "")
+
+    def _build_generation_prompt(self, user_prompt: str, rag_context: str) -> str:
+        prompt_parts = [user_prompt.strip()]
+        if rag_context.strip():
+            prompt_parts.append("CONTEXT:\n" + rag_context.strip())
+        return "\n\n".join(prompt_parts)
+
     def _load_initial_policies(self) -> None:
         if not self.config.policy_loader:
             return
@@ -181,63 +198,109 @@ class AuditPipeline:
         except Exception as exc:
             logger.error(f"Error loading initial policies: {exc}")
 
+    def _add_dynamic_policies(self, context_policies: Optional[List[Any]]) -> List[str]:
+        added_dynamic_ids: List[str] = []
+        if not context_policies:
+            return added_dynamic_ids
+
+        try:
+            from idicoc_core.utils.embedding_service import EmbeddingService
+
+            embed_service = EmbeddingService()
+            for idx, ax_item in enumerate(context_policies):
+                if not ax_item:
+                    continue
+                if isinstance(ax_item, dict):
+                    policy_dict = dict(ax_item)
+                    policy_id = (
+                        policy_dict.get("id")
+                        or policy_dict.get("policy_id")
+                        or f"dynamic_policy_{idx}"
+                    )
+                elif isinstance(ax_item, str):
+                    policy_dict = parse_policy_line(ax_item, idx)
+                    policy_id = policy_dict["id"]
+                else:
+                    continue
+
+                if "embedding" not in policy_dict:
+                    raw_text = (
+                        policy_dict.get("text") or policy_dict.get("description") or policy_dict
+                    )
+                    try:
+                        policy_dict["embedding"] = embed_service.encode(
+                            str(raw_text),
+                            model_name=self.config.semantic_embedding_model,
+                        ).tolist()
+                    except Exception as e:
+                        logger.warning(f"Failed to embed dynamic policy {policy_id}: {e}")
+
+                self.isg.add_policy(policy_id, policy_dict)
+                added_dynamic_ids.append(policy_id)
+
+            self.isg.detect_conflicts()
+        except Exception as e:
+            logger.error(f"Error compiling dynamic context policies: {e}")
+
+        return added_dynamic_ids
+
+    def _attempt_spsa_correction(
+        self,
+        llm_output: str,
+        session_context: SessionContext,
+        raw_metrics: Dict[str, Any],
+        effective_threshold: float,
+    ) -> Optional[float]:
+        try:
+            from idicoc_core.utils.string_utils import StringUtils
+
+            y_vec = StringUtils.to_vector(
+                llm_output,
+                model_name=self.config.semantic_embedding_model,
+            )
+            v_hat = getattr(session_context, "v_hat", None)
+            if v_hat is None:
+                return None
+
+            v_hat_vec = getattr(v_hat, "semantic_vector", v_hat)
+            if v_hat_vec is None:
+                return None
+
+            corrected_vector, corrected_loss, history = self.dse.project_spsa(
+                y_vec,
+                v_hat_vec,
+                raw_metrics,
+                context_embs=raw_metrics.get("context_embeddings", []),
+            )
+
+            raw_metrics["spsa_history"] = history
+            return float(corrected_loss)
+        except Exception as exc:
+            logger.error(f"Error during SPSA correction: {exc}", exc_info=True)
+            raw_metrics["spsa_error"] = str(exc)
+            return None
+
     def execute_audit(
         self,
         user_prompt: str,
-        rag_context: str,
+        rag_context: Any,
         llm_output: str,
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None,
+        session_context: Optional[SessionContext] = None,
     ) -> NotaryAuditResult:
         # 1. DQE: Empaquetar el Estado Observable
-        context = self.dqe.build_context(user_prompt, rag_context)
+        if session_context is None:
+            context = self.dqe.build_context(user_prompt, rag_context)
+        else:
+            context = session_context
 
         # 2. Gating: Stage 2/3 (Hardware Mask & Domain Confinement)
         if not self.gating.is_hardware_contained(context):
             return self._build_hard_rejection("Stage 2: Hardware Mask Containment Breach", context)
 
         # Dynamic policies management
-        added_dynamic_ids = []
-        if context_policies:
-            try:
-                from idicoc_core.utils.embedding_service import EmbeddingService
-
-                embed_service = EmbeddingService()
-
-                for idx, ax_item in enumerate(context_policies):
-                    if not ax_item:
-                        continue
-                    if isinstance(ax_item, dict):
-                        policy_dict = dict(ax_item)
-                        policy_id = (
-                            policy_dict.get("id")
-                            or policy_dict.get("policy_id")
-                            or f"dynamic_policy_{idx}"
-                        )
-                    elif isinstance(ax_item, str):
-                        policy_dict = parse_policy_line(ax_item, idx)
-                        policy_id = policy_dict["id"]
-                    else:
-                        continue
-
-                    if "embedding" not in policy_dict:
-                        raw_text = (
-                            policy_dict.get("text") or policy_dict.get("description") or policy_dict
-                        )
-                        try:
-                            policy_dict["embedding"] = embed_service.encode(
-                                str(raw_text),
-                                model_name=self.config.semantic_embedding_model,
-                            ).tolist()
-                        except Exception as e:
-                            logger.warning(f"Failed to embed dynamic policy {policy_id}: {e}")
-
-                    self.isg.add_policy(policy_id, policy_dict)
-                    added_dynamic_ids.append(policy_id)
-
-                self.isg.detect_conflicts()
-            except Exception as e:
-                logger.error(f"Error compiling dynamic context policies: {e}")
+        added_dynamic_ids = self._add_dynamic_policies(context_policies)
 
         try:
             # 3. ISG: Cargar Invariantes
@@ -250,6 +313,8 @@ class AuditPipeline:
 
             d_s, violations, raw_metrics = self.dse.evaluate(llm_output, context, graph)
             d_s = float(d_s)
+            if d_s == float("inf") and "[CRITICAL_HARD_HALT]" not in violations:
+                violations.insert(0, "[CRITICAL_HARD_HALT] Hard policy breach detected.")
 
             # Umbral efectivo = base_tolerance + epsilon (permite omisiones suaves)
             allowed_eps = float(
@@ -257,6 +322,28 @@ class AuditPipeline:
             )
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
             is_admitted = bool(d_s <= effective_threshold)
+
+            if (
+                d_s != float("inf")
+                and d_s > self.config.diss_threshold_green
+                and d_s <= self.config.diss_threshold_red
+                and context is not None
+                and getattr(context, "v_hat", None) is not None
+            ):
+                corrected_d_s = self._attempt_spsa_correction(llm_output, context, raw_metrics, effective_threshold)
+                if corrected_d_s is not None:
+                    raw_metrics["spsa_original_dissonance"] = float(d_s)
+                    raw_metrics["spsa_corrected_dissonance"] = float(corrected_d_s)
+                    raw_metrics["spsa_corrected"] = corrected_d_s <= effective_threshold
+
+                    if corrected_d_s <= effective_threshold:
+                        d_s = float(corrected_d_s)
+                        is_admitted = True
+                    elif d_s > effective_threshold:
+                        d_s = float("inf")
+                        is_admitted = False
+                        if "[CRITICAL_HARD_HALT] SPSA convergence failed." not in violations:
+                            violations.append("[CRITICAL_HARD_HALT] SPSA convergence failed.")
 
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
@@ -356,6 +443,60 @@ class AuditPipeline:
             )
 
             return result
+        finally:
+            if added_dynamic_ids:
+                for ax_id in added_dynamic_ids:
+                    self.isg.nodes.pop(ax_id, None)
+                self.isg.detect_conflicts()
+
+    def generate(
+        self,
+        user_prompt: str,
+        rag_context: Any,
+        context_policies: Optional[List[Any]] = None,
+        epsilon_override: Optional[float] = None,
+        **kwargs,
+    ) -> Tuple[str, NotaryAuditResult]:
+        if self.llm_provider is None:
+            raise ValueError("LLM provider is required for generation.")
+
+        normalized_rag = self._normalize_rag_context(rag_context)
+        session_context = self.dqe.build_context(user_prompt, normalized_rag)
+        added_dynamic_ids = self._add_dynamic_policies(context_policies)
+
+        try:
+            # Input projection / containment gate
+            try:
+                projected_vector = InvarianceProjector(self.config).project(
+                    user_prompt, self.isg
+                )
+                session_context.v_hat = CanonicalState(
+                    measure_vector=projected_vector,
+                    metadata={"source": "input_projection"},
+                )
+            except InvariantStateBreach as exc:
+                return "", self._build_hard_rejection(str(exc), session_context)
+            except Exception as exc:
+                logger.error("Input projection failed: %s", exc, exc_info=True)
+                return "", self._build_hard_rejection(
+                    "Input projection failed during generation.", session_context
+                )
+
+            # Do not inject hidden system prompts or policy clauses into the LLM request.
+            prompt = self._build_generation_prompt(user_prompt, normalized_rag)
+            llm_output = self.llm_provider.generate(prompt, **kwargs)
+
+            audit_result = self.execute_audit(
+                user_prompt=user_prompt,
+                rag_context=normalized_rag,
+                llm_output=llm_output,
+                context_policies=None,
+                epsilon_override=epsilon_override,
+                session_context=session_context,
+            )
+            if not audit_result.is_admitted:
+                return "", audit_result
+            return llm_output, audit_result
         finally:
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:
