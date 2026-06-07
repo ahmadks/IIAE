@@ -280,6 +280,16 @@ class AuditPipeline:
             raw_metrics["spsa_error"] = str(exc)
             return None
 
+    def _should_apply_spsa(self, d_s: float, raw_metrics: Dict[str, Any]) -> bool:
+        d2 = float(raw_metrics.get("d_2", 0.0))
+        d3 = float(raw_metrics.get("d_3", 0.0))
+
+        if d2 > 0.0 or d3 > 0.0:
+            return False
+        if d_s == float("inf"):
+            return False
+        return self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
+
     def execute_audit(
         self,
         user_prompt: str,
@@ -323,14 +333,26 @@ class AuditPipeline:
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
             is_admitted = bool(d_s <= effective_threshold)
 
-            if (
-                d_s != float("inf")
-                and d_s > self.config.diss_threshold_green
-                and d_s <= self.config.diss_threshold_red
-                and context is not None
+            if raw_metrics.get("d_2", 0.0) > 0.0 or raw_metrics.get("d_3", 0.0) > 0.0:
+                logger.error(
+                    "[DSE] Bloqueo inmediato por violación discreta: d_2=%s d_3=%s",
+                    raw_metrics.get("d_2", 0.0),
+                    raw_metrics.get("d_3", 0.0),
+                )
+                d_s = float("inf")
+                is_admitted = False
+                if "[CRITICAL_HARD_HALT] Violación discreta d_2/d_3 detectada." not in violations:
+                    violations.append("[CRITICAL_HARD_HALT] Violación discreta d_2/d_3 detectada.")
+            elif (
+                self._should_apply_spsa(d_s, raw_metrics)
                 and getattr(context, "v_hat", None) is not None
             ):
-                corrected_d_s = self._attempt_spsa_correction(llm_output, context, raw_metrics, effective_threshold)
+                corrected_d_s = self._attempt_spsa_correction(
+                    llm_output,
+                    context,
+                    raw_metrics,
+                    effective_threshold,
+                )
                 if corrected_d_s is not None:
                     raw_metrics["spsa_original_dissonance"] = float(d_s)
                     raw_metrics["spsa_corrected_dissonance"] = float(corrected_d_s)
@@ -339,11 +361,49 @@ class AuditPipeline:
                     if corrected_d_s <= effective_threshold:
                         d_s = float(corrected_d_s)
                         is_admitted = True
-                    elif d_s > effective_threshold:
+                        logger.info(
+                            "[DSE] SPSA corregido con éxito: d_s_original=%s -> d_s_corregido=%s",
+                            raw_metrics["spsa_original_dissonance"],
+                            corrected_d_s,
+                        )
+                    else:
                         d_s = float("inf")
                         is_admitted = False
                         if "[CRITICAL_HARD_HALT] SPSA convergence failed." not in violations:
                             violations.append("[CRITICAL_HARD_HALT] SPSA convergence failed.")
+                        logger.warning(
+                            "[DSE] SPSA no convergió. corrected_d_s=%s > threshold=%s",
+                            corrected_d_s,
+                            effective_threshold,
+                        )
+                else:
+                    d_s = float("inf")
+                    is_admitted = False
+                    if "[CRITICAL_HARD_HALT] No se pudo ejecutar SPSA." not in violations:
+                        violations.append("[CRITICAL_HARD_HALT] No se pudo ejecutar SPSA.")
+            elif is_admitted:
+                logger.info(
+                    "[DSE] Señal admitida sin corrección. d_s=%s <= effective_threshold=%s",
+                    d_s,
+                    effective_threshold,
+                )
+            else:
+                logger.error(
+                    "[DSE] Rechazo sin corrección SPSA. d_1=%s d_2=%s d_3=%s d_s=%s",
+                    raw_metrics.get("d_1", 0.0),
+                    raw_metrics.get("d_2", 0.0),
+                    raw_metrics.get("d_3", 0.0),
+                    d_s,
+                )
+                d_s = float("inf")
+                is_admitted = False
+                if (
+                    "[CRITICAL_HARD_HALT] Rechazo sin SPSA por zona roja o violaciones discreta."
+                    not in violations
+                ):
+                    violations.append(
+                        "[CRITICAL_HARD_HALT] Rechazo sin SPSA por zona roja o violaciones discreta."
+                    )
 
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
@@ -467,9 +527,7 @@ class AuditPipeline:
         try:
             # Input projection / containment gate
             try:
-                projected_vector = InvarianceProjector(self.config).project(
-                    user_prompt, self.isg
-                )
+                projected_vector = InvarianceProjector(self.config).project(user_prompt, self.isg)
                 session_context.v_hat = CanonicalState(
                     measure_vector=projected_vector,
                     metadata={"source": "input_projection"},

@@ -175,7 +175,12 @@ def _is_chunk_critical(ctx: str, evaluator: Any) -> bool:
                         sim = float(np.dot(ctx_emb_arr / norm_a, ax_emb_arr / norm_b))
                         # Read threshold from evaluator.config if available
                         try:
-                            threshold = float(getattr(evaluator, "config", None) and getattr(evaluator.config, "rag_critical_chunk_similarity_threshold", 0.6))
+                            threshold = float(
+                                getattr(evaluator, "config", None)
+                                and getattr(
+                                    evaluator.config, "rag_critical_chunk_similarity_threshold", 0.6
+                                )
+                            )
                         except Exception:
                             threshold = 0.6
                         if sim >= threshold:
@@ -407,7 +412,9 @@ def _compute_context_contradiction(
             d_context = omission_penalty
         else:
             # CONTRADICCIÓN HARD: penalización proporcional a severity
-            hard_contradiction_threshold = float(getattr(config, "rag_hard_contradiction_threshold", 0.8))
+            hard_contradiction_threshold = float(
+                getattr(config, "rag_hard_contradiction_threshold", 0.8)
+            )
             coverage_factor = float(getattr(config, "rag_coverage_contribution_factor", 0.2))
 
             if max_contradiction_score > hard_contradiction_threshold:

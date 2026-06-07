@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 from idicoc_core.api.schemas import NotaryAuditResult
 from idicoc_core.pipeline.orchestrator import AuditPipeline
@@ -18,29 +18,34 @@ class NotaryClient:
     def auditar(
         self,
         user_prompt: str,
-        rag_context: str,
+        rag_context: Union[str, List[str]],
         llm_output: str,
         context_policies: Optional[List[Any]] = None,
-        epsilon_override: Optional[float] = None
+        epsilon_override: Optional[float] = None,
     ) -> NotaryAuditResult:
         """
         Proyecta la salida estocástica sobre la Variedad de Invarianza (Manifold).
         """
+        normalized_context = (
+            "\n".join(str(item).strip() for item in rag_context if str(item).strip())
+            if isinstance(rag_context, list)
+            else str(rag_context or "")
+        )
         return self.pipeline.execute_audit(
             user_prompt=user_prompt,
-            rag_context=rag_context,
+            rag_context=normalized_context,
             llm_output=llm_output,
             context_policies=context_policies,
-            epsilon_override=epsilon_override
+            epsilon_override=epsilon_override,
         )
 
     def generate(
         self,
         user_prompt: str,
-        rag_context: str | List[str],
+        rag_context: Union[str, List[str]],
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[str, NotaryAuditResult]:
         """
         Generates output under Generative Containment (PromptProjector)
@@ -51,7 +56,37 @@ class NotaryClient:
             rag_context=rag_context,
             context_policies=context_policies,
             epsilon_override=epsilon_override,
-            **kwargs
+            **kwargs,
+        )
+
+    def process_query(
+        self,
+        user_prompt: str,
+        rag_context: Union[str, List[str]] = "",
+        llm_output: Optional[str] = None,
+        context_policies: Optional[List[Any]] = None,
+        epsilon_override: Optional[float] = None,
+        **kwargs,
+    ) -> Tuple[str, NotaryAuditResult]:
+        """
+        Single public entrypoint for generation and audit.
+        Si se suministra llm_output, se audita directamente esa respuesta.
+        """
+        if llm_output is not None:
+            return llm_output, self.auditar(
+                user_prompt=user_prompt,
+                rag_context=rag_context,
+                llm_output=llm_output,
+                context_policies=context_policies,
+                epsilon_override=epsilon_override,
+            )
+
+        return self.generate(
+            user_prompt=user_prompt,
+            rag_context=rag_context,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override,
+            **kwargs,
         )
 
     def get_aem_counters(self) -> dict[str, float]:
@@ -77,3 +112,6 @@ class NotaryClient:
 
     # Alias funcional para compatibilidad
     audit = auditar
+
+
+IDICOCNotary = NotaryClient

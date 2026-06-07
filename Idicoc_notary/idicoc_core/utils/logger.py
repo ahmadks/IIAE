@@ -132,7 +132,7 @@ def _handler_siem() -> logging.Handler:
     return SysLogHandler(address=(host, port))
 
 
-def configure_logging(log_destination: str = "stdout") -> None:
+def configure_logging(log_destination: str = "stdout", log_format: Optional[str] = None) -> None:
     global _CONFIGURED_DESTINATION
     dest = log_destination or "stdout"
     if _CONFIGURED_DESTINATION == dest:
@@ -144,7 +144,10 @@ def configure_logging(log_destination: str = "stdout") -> None:
     root.handlers.clear()
     handler = _build_handler(dest)
     if not isinstance(handler, logging.NullHandler):
-        handler.setFormatter(JSONFormatter())
+        if log_format:
+            handler.setFormatter(logging.Formatter(log_format))
+        else:
+            handler.setFormatter(JSONFormatter())
     root.addHandler(handler)
     root.setLevel(logging.INFO)
     root.propagate = False
