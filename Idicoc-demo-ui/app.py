@@ -12,6 +12,8 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 import json
 import copy
+import time
+import hashlib
 from datetime import datetime, timezone
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,8 +27,11 @@ sys.path.insert(
 from idicoc_core.config import AuditConfig, DEFAULT_SEMANTIC_EMBEDDING_MODEL
 from idicoc_core.api.facade import NotaryClient
 from idicoc_core.dse.evaluator import PropertyGraphEvaluator
+from idicoc_core.utils.logger import get_logger
 from providers.factory import get_provider
 from idicoc_core.utils.hashing import sha256_dict, sha256_hex
+
+logger = get_logger("idicoc_demo_ui")
 
 # ── Configuración de Página ───────────────────────────────────────────────────
 st.set_page_config(
@@ -108,12 +113,23 @@ def read_wal_log_content():
     return ""
 
 
-def ensure_notary_client(llm_provider, policies_changed: bool = False):
-    """Centraliza la creación/recreación del NotaryClient.
-    Si `policies_changed` es True fuerza la recreación.
+@st.cache_resource(show_spinner=False)
+def _create_cached_notary_client(
+    llm_provider_key: str, policies_hash: str, lambda_context: float
+):
     """
-    if "notary_client" in st.session_state and not policies_changed:
-        return st.session_state.notary_client
+    Crea y cachea el NotaryClient en memoria global de Streamlit.
+    El caché se invalida solo si:
+    - Cambia el hash del archivo de políticas
+    - Cambia lambda_context
+
+    Esto evita recomputar embeddings de políticas en cada rerun.
+    """
+    # Note: llm_provider se pasa como string key, NO como objeto (no es serializable)
+    # El objeto LLM se toma desde st.session_state
+    llm_provider = st.session_state.get("llm_provider")
+    if llm_provider is None:
+        raise ValueError("LLM provider not initialized in session state")
 
     ui_dir = os.path.dirname(os.path.abspath(__file__))
     config = AuditConfig(
@@ -121,14 +137,44 @@ def ensure_notary_client(llm_provider, policies_changed: bool = False):
         compile_policies_on_init=True,
         enable_logits_interception=True,
         instance_name="audit_forensic_chatbot",
-        lambda_context=st.session_state.get("lambda_context", 0.4),
+        lambda_context=lambda_context,
         ctm_nodes_path=os.path.join(ui_dir, "ctm_nodes.json"),
         ctm_root_path=os.path.join(ui_dir, "ctm_root.txt"),
         ctm_wal_path=os.path.join(ui_dir, "ctm_wal.log"),
     )
-    st.session_state.notary_client = NotaryClient(config, llm_provider=llm_provider)
+    client = NotaryClient(config, llm_provider=llm_provider)
+    logger.info(f"[CACHE] Created cached NotaryClient | policies_hash={policies_hash}")
+    return client
+
+
+def ensure_notary_client(llm_provider, policies_changed: bool = False):
+    """Centraliza la creación/recreación del NotaryClient.
+    Si `policies_changed` es True fuerza la recreación del caché.
+    """
+    # Calcular hash del archivo de políticas para invalidar caché si cambia
+    import hashlib
+
+    try:
+        with open(_pol_path, "r") as f:
+            policies_hash = hashlib.md5(f.read().encode()).hexdigest()[:8]
+    except Exception:
+        policies_hash = "0"
+
+    lambda_context = st.session_state.get("lambda_context", 0.4)
+    llm_key = str(
+        id(llm_provider)
+    )  # Usar id del objeto como key (no serializa el objeto)
+
+    # Si policies_changed es True, limpiar caché de Streamlit
+    if policies_changed:
+        _create_cached_notary_client.clear()
+        logger.info("[CACHE] Cleared NotaryClient cache due to policy change")
+
+    # Usar caché para evitar recrear el cliente
+    client = _create_cached_notary_client(llm_key, policies_hash, lambda_context)
+    st.session_state.notary_client = client
     st.session_state.policies_mtime = current_mtime
-    return st.session_state.notary_client
+    return client
 
 
 def _normalize_audit_metadata(audit_result):
@@ -607,7 +653,13 @@ with col_chat:
             "🤖 Generando y auditando respuesta bajo Contención Preventiva..."
         ):
             try:
+                # Timing for performance measurement
+                t_total_start = time.perf_counter()
+                t_llm_elapsed = 0.0
+                t_audit_elapsed = 0.0
+
                 if forced_response:
+                    t_process_start = time.perf_counter()
                     assistant_res, audit_result = (
                         st.session_state.notary_client.process_query(
                             user_prompt=user_msg,
@@ -616,6 +668,8 @@ with col_chat:
                             epsilon_override=epsilon,
                         )
                     )
+                    t_process_elapsed = time.perf_counter() - t_process_start
+                    t_audit_elapsed = t_process_elapsed
                 else:
                     kwargs = {}
                     if "notary_client" in st.session_state:
@@ -628,6 +682,7 @@ with col_chat:
                         if "logits_processor" in sig.parameters:
                             kwargs["logits_processor"] = processor
 
+                    t_process_start = time.perf_counter()
                     assistant_res, audit_result = (
                         st.session_state.notary_client.process_query(
                             user_prompt=user_msg,
@@ -636,6 +691,26 @@ with col_chat:
                             **kwargs,
                         )
                     )
+                    t_process_elapsed = time.perf_counter() - t_process_start
+
+                    # Extract timing from metrics
+                    if hasattr(audit_result, "metrics") and audit_result.metrics:
+                        # audit_duration_sec is total audit time
+                        audit_metrics = audit_result.metrics
+                        t_audit_elapsed = audit_metrics.get(
+                            "audit_duration_sec", t_process_elapsed
+                        )
+                        # LLM time = total - audit time (if audit time is available)
+                        if t_audit_elapsed > 0:
+                            t_llm_elapsed = max(0, t_process_elapsed - t_audit_elapsed)
+                        else:
+                            t_llm_elapsed = t_process_elapsed
+                    else:
+                        # Fallback: assume most time is in LLM
+                        t_llm_elapsed = t_process_elapsed
+                        t_audit_elapsed = 0
+
+                t_total_elapsed = time.perf_counter() - t_total_start
 
                 # Normalizar metadata del resultado de auditoría para mayor robustez
                 audit_metadata = _normalize_audit_metadata(audit_result)
@@ -712,6 +787,10 @@ with col_chat:
                         "aem_rejected": aem_rejected,
                         # Texto forense: texto exacto evaluado por el Notario
                         "llm_output_text": llm_output_text,
+                        # Timing measurements
+                        "timing_llm_sec": t_llm_elapsed,
+                        "timing_audit_sec": t_audit_elapsed,
+                        "timing_total_sec": t_total_elapsed,
                     }
                 )
 
@@ -787,6 +866,16 @@ with col_telemetry:
         # Texto forense del LLM (texto exacto evaluado por el Notario)
         llm_forensic_text = last_audit.get("llm_output_text", "")
 
+        # Extract timing info if available
+        timing_llm = last_audit.get("timing_llm_sec", 0)
+        timing_audit = last_audit.get("timing_audit_sec", 0)
+        timing_total = last_audit.get("timing_total_sec", 0)
+        timing_str = ""
+        if timing_total > 0:
+            llm_pct = (timing_llm / timing_total * 100) if timing_total > 0 else 0
+            audit_pct = (timing_audit / timing_total * 100) if timing_total > 0 else 0
+            timing_str = f"<small style='color:#64748b;'>⏱️ LLM: {timing_llm:.2f}s ({llm_pct:.0f}%) | Auditoría: {timing_audit:.2f}s ({audit_pct:.0f}%) | Total: {timing_total:.2f}s</small><br>"
+
         st.markdown(
             f'<div class="{"audit-admitted" if status == "ADMITTED" else "audit-rejected"}">'
             f'<b>Resultado:</b> <span class="{badge_class}">{status}</span><br>'
@@ -797,6 +886,7 @@ with col_telemetry:
             f"<small>🔗 <b>Integridad RAG (d_context):</b> "
             f"<span style='color:{d_context_color}; font-weight:bold;'>{d_context_text}</span> "
             f"<span style='color:#64748b; font-size:10px;'>(0=coherente, 1=alucinación)</span></small><br>"
+            f"{timing_str}"
             f'<small>Ledger Tx Hash: <span style="font-family:\'JetBrains Mono\'; font-size:10px;">{last_audit["hash"]}</span></small>'
             f"</div>",
             unsafe_allow_html=True,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import math
+import time
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Dict, Tuple
 
@@ -13,6 +14,7 @@ from idicoc_core.isg.graph_manager import PropertyGraph
 from idicoc_core.isg.loader import parse_policy_line
 from idicoc_core.kernel.projection.invariant_state_generator import CanonicalState
 from idicoc_core.dse.evaluator import DissonanceStateEvaluator
+from idicoc_core.dse.spsa import SPSACorrector
 from idicoc_core.ctm.merkle_dag import (
     CustodialTraceManager,
     MerkleDAG,
@@ -85,6 +87,7 @@ class AuditPipeline:
 
         # 4. Initialize DSE (Dissonance State Evaluator)
         self.dse = DissonanceStateEvaluator(config)
+        self.spsa = SPSACorrector(config)
 
         # 5. Initialize CTM (Custodial Trace Manager)
         ctm_storage = FileCTMStorage(
@@ -203,6 +206,7 @@ class AuditPipeline:
         if not context_policies:
             return added_dynamic_ids
 
+        t_start = time.perf_counter()
         try:
             from idicoc_core.utils.embedding_service import EmbeddingService
 
@@ -241,6 +245,13 @@ class AuditPipeline:
             self.isg.detect_conflicts()
         except Exception as e:
             logger.error(f"Error compiling dynamic context policies: {e}")
+        finally:
+            t_elapsed = time.perf_counter() - t_start
+            logger.info(
+                "[TIMING] Dynamic policies added: %d policies, %.3f sec",
+                len(added_dynamic_ids),
+                t_elapsed,
+            )
 
         return added_dynamic_ids
 
@@ -251,6 +262,7 @@ class AuditPipeline:
         raw_metrics: Dict[str, Any],
         effective_threshold: float,
     ) -> Optional[float]:
+        t_spsa_start = time.perf_counter()
         try:
             from idicoc_core.utils.string_utils import StringUtils
 
@@ -266,7 +278,7 @@ class AuditPipeline:
             if v_hat_vec is None:
                 return None
 
-            corrected_vector, corrected_loss, history = self.dse.project_spsa(
+            corrected_vector, corrected_loss, history = self.spsa.project(
                 y_vec,
                 v_hat_vec,
                 raw_metrics,
@@ -274,10 +286,15 @@ class AuditPipeline:
             )
 
             raw_metrics["spsa_history"] = history
+            t_spsa_elapsed = time.perf_counter() - t_spsa_start
+            logger.info("[TIMING] SPSA correction: %.3f sec", t_spsa_elapsed)
+            raw_metrics["spsa_duration_sec"] = t_spsa_elapsed
             return float(corrected_loss)
         except Exception as exc:
             logger.error(f"Error during SPSA correction: {exc}", exc_info=True)
             raw_metrics["spsa_error"] = str(exc)
+            t_spsa_elapsed = time.perf_counter() - t_spsa_start
+            logger.error("[TIMING] SPSA error after %.3f sec: %s", t_spsa_elapsed, exc)
             return None
 
     def _should_apply_spsa(self, d_s: float, raw_metrics: Dict[str, Any]) -> bool:
@@ -291,10 +308,17 @@ class AuditPipeline:
         if d_s == float("inf"):
             return False
 
-        # SPSA is only allowed in the gray band for d1 and d_s.
-        in_d1_gray = self.config.diss_threshold_green < d1 <= self.config.diss_threshold_red
+        # Do not apply SPSA if there are no active policies in the graph.
+        if raw_metrics.get("policy_graph_empty", False):
+            logger.warning(
+                "Skipping SPSA because the active policy graph is empty. "
+                "d_2 and d_3 are zero by default when no policies are evaluated."
+            )
+            return False
+
+        # SPSA is only allowed in the gray band for d_s.
         in_ds_gray = self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
-        return in_d1_gray and in_ds_gray
+        return in_ds_gray
 
     def execute_audit(
         self,
@@ -305,15 +329,26 @@ class AuditPipeline:
         epsilon_override: Optional[float] = None,
         session_context: Optional[SessionContext] = None,
     ) -> NotaryAuditResult:
+        t_audit_start = time.perf_counter()
+        logger.info("[TIMING] execute_audit START")
+
         # 1. DQE: Empaquetar el Estado Observable
+        t_dqe_start = time.perf_counter()
         if session_context is None:
             context = self.dqe.build_context(user_prompt, rag_context)
         else:
             context = session_context
+        t_dqe_elapsed = time.perf_counter() - t_dqe_start
+        logger.info("[TIMING] DQE context build: %.3f sec", t_dqe_elapsed)
 
         # 2. Gating: Stage 2/3 (Hardware Mask & Domain Confinement)
+        t_gating_start = time.perf_counter()
         if not self.gating.is_hardware_contained(context):
+            t_gating_elapsed = time.perf_counter() - t_gating_start
+            logger.warning("[TIMING] Gating rejection after %.3f sec", t_gating_elapsed)
             return self._build_hard_rejection("Stage 2: Hardware Mask Containment Breach", context)
+        t_gating_elapsed = time.perf_counter() - t_gating_start
+        logger.info("[TIMING] Gating check: %.3f sec", t_gating_elapsed)
 
         # Dynamic policies management
         added_dynamic_ids = self._add_dynamic_policies(context_policies)
@@ -323,14 +358,17 @@ class AuditPipeline:
             graph = self.isg
 
             # 4. DSE: Evaluación Kantorovich-Lifted (Cálculo de D_s)
+            t_dse_start = time.perf_counter()
             old_eps = self.dse.strategy.config.allowed_epsilon
             if epsilon_override is not None:
                 self.config.allowed_epsilon = epsilon_override
 
             d_s, violations, raw_metrics = self.dse.evaluate(llm_output, context, graph)
+            t_dse_elapsed = time.perf_counter() - t_dse_start
+            logger.info("[TIMING] DSE evaluate: %.3f sec | d_s=%.6f", t_dse_elapsed, float(d_s))
             d_s = float(d_s)
             if d_s == float("inf") and "[CRITICAL_HARD_HALT]" not in violations:
-                violations.insert(0, "[CRITICAL_HARD_HALT] Hard policy breach detected.")
+                violations.append("[CRITICAL_HARD_HALT] Hard policy breach detected.")
 
             # Umbral efectivo = base_tolerance + epsilon (permite omisiones suaves)
             allowed_eps = float(
@@ -339,20 +377,11 @@ class AuditPipeline:
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
             is_admitted = bool(d_s <= effective_threshold)
 
-            if raw_metrics.get("d_2", 0.0) > 0.0 or raw_metrics.get("d_3", 0.0) > 0.0:
-                logger.error(
-                    "[DSE] Bloqueo inmediato por violación discreta: d_2=%s d_3=%s",
-                    raw_metrics.get("d_2", 0.0),
-                    raw_metrics.get("d_3", 0.0),
-                )
-                d_s = float("inf")
-                is_admitted = False
-                if "[CRITICAL_HARD_HALT] Violación discreta d_2/d_3 detectada." not in violations:
-                    violations.append("[CRITICAL_HARD_HALT] Violación discreta d_2/d_3 detectada.")
-            elif (
+            if (
                 self._should_apply_spsa(d_s, raw_metrics)
                 and getattr(context, "v_hat", None) is not None
             ):
+                logger.info("[TIMING] Attempting SPSA correction...")
                 corrected_d_s = self._attempt_spsa_correction(
                     llm_output,
                     context,
@@ -401,20 +430,13 @@ class AuditPipeline:
                     raw_metrics.get("d_3", 0.0),
                     d_s,
                 )
-                d_s = float("inf")
                 is_admitted = False
-                if (
-                    "[CRITICAL_HARD_HALT] Rechazo sin SPSA por zona roja o violaciones discreta."
-                    not in violations
-                ):
-                    violations.append(
-                        "[CRITICAL_HARD_HALT] Rechazo sin SPSA por zona roja o violaciones discreta."
-                    )
 
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
 
             # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
+            t_ctm_start = time.perf_counter()
             if self.config.ctm_mode == "full":
                 tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
                 timestamp = datetime.now(timezone.utc).isoformat()
@@ -478,6 +500,10 @@ class AuditPipeline:
                     self.wal.mark_completed(tx_id)
                 except Exception as exc:
                     logger.error(f"CTM commit failure: {exc}")
+                t_ctm_elapsed = time.perf_counter() - t_ctm_start
+                logger.info("[TIMING] CTM commit: %.3f sec", t_ctm_elapsed)
+            else:
+                logger.info("[TIMING] CTM mode: %s (skipped)", self.config.ctm_mode)
 
             # 6. Mapeo de Terminalidad Coálgebraica:
             integrity_score = (
@@ -508,6 +534,14 @@ class AuditPipeline:
                 }
             )
 
+            t_audit_total = time.perf_counter() - t_audit_start
+            logger.info(
+                "[TIMING] execute_audit TOTAL: %.3f sec | admitted=%s | d_s=%.6f",
+                t_audit_total,
+                is_admitted,
+                float(d_s),
+            )
+            raw_metrics["audit_duration_sec"] = t_audit_total
             return result
         finally:
             if added_dynamic_ids:
@@ -523,17 +557,28 @@ class AuditPipeline:
         epsilon_override: Optional[float] = None,
         **kwargs,
     ) -> Tuple[str, NotaryAuditResult]:
+        t_generate_start = time.perf_counter()
+        logger.info("[TIMING] generate START")
+
         if self.llm_provider is None:
             raise ValueError("LLM provider is required for generation.")
 
+        t_rag_start = time.perf_counter()
         normalized_rag = self._normalize_rag_context(rag_context)
         session_context = self.dqe.build_context(user_prompt, normalized_rag)
+        t_rag_elapsed = time.perf_counter() - t_rag_start
+        logger.info("[TIMING] RAG context normalization: %.3f sec", t_rag_elapsed)
+
         added_dynamic_ids = self._add_dynamic_policies(context_policies)
 
         try:
             # Input projection / containment gate
             try:
+                t_proj_start = time.perf_counter()
                 projected_vector = InvarianceProjector(self.config).project(user_prompt, self.isg)
+                t_proj_elapsed = time.perf_counter() - t_proj_start
+                logger.info("[TIMING] Input projection: %.3f sec", t_proj_elapsed)
+
                 session_context.v_hat = CanonicalState(
                     measure_vector=projected_vector,
                     metadata={"source": "input_projection"},
@@ -548,7 +593,14 @@ class AuditPipeline:
 
             # Do not inject hidden system prompts or policy clauses into the LLM request.
             prompt = self._build_generation_prompt(user_prompt, normalized_rag)
+            t_llm_start = time.perf_counter()
             llm_output = self.llm_provider.generate(prompt, **kwargs)
+            t_llm_elapsed = time.perf_counter() - t_llm_start
+            logger.info(
+                "[TIMING] LLM generation: %.3f sec | output_len=%d chars",
+                t_llm_elapsed,
+                len(llm_output) if llm_output else 0,
+            )
 
             audit_result = self.execute_audit(
                 user_prompt=user_prompt,
@@ -559,7 +611,19 @@ class AuditPipeline:
                 session_context=session_context,
             )
             if not audit_result.is_admitted:
+                t_generate_total = time.perf_counter() - t_generate_start
+                logger.warning(
+                    "[TIMING] generate REJECTED: %.3f sec total",
+                    t_generate_total,
+                )
                 return "", audit_result
+
+            t_generate_total = time.perf_counter() - t_generate_start
+            logger.info(
+                "[TIMING] generate COMPLETE: %.3f sec total | llm=%.3f sec",
+                t_generate_total,
+                t_llm_elapsed,
+            )
             return llm_output, audit_result
         finally:
             if added_dynamic_ids:

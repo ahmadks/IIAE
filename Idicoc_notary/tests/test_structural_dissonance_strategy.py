@@ -25,7 +25,6 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
     # Mock graph
     mock_graph = MagicMock()
     mock_graph.evaluate.return_value = 0.8  # d_logic
-    mock_graph.compute_temporal.return_value = 0.5  # d_temporal
     
     # Set specific weights
     strategy.lambda_1 = 0.5
@@ -36,17 +35,14 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
     mock_d1_vec.return_value = 0.2
     
     # Mock the PropertyGraphEvaluator methods since the strategy now instantiates it
-    with patch('idicoc_core.dse.evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval, \
-         patch('idicoc_core.dse.evaluator.PropertyGraphEvaluator.compute_temporal', return_value=0.5) as mock_temp:
-        
+    with patch('idicoc_core.dse.evaluator.PropertyGraphEvaluator.evaluate', return_value=0.8) as mock_eval:
         d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
-        
-        # d_s = lambda_inv(0.5) * d_inv(0.2) + lambda_logic(0.4) * d_logic(0.8) + lambda_temporal(0.1) * d_temporal(0.5)
-        # d_s = 0.1 + 0.32 + 0.05 = 0.47
-        assert abs(d_s - 0.47) < 1e-6
-        
+
+        # New semantics: d_3 is RAG/context (no temporal policies here), so d3=0.
+        # d_s = lambda_1 * d1 + lambda_2 * d2 = 0.5*0.2 + 0.4*0.8 = 0.42
+        assert abs(d_s - 0.42) < 1e-6
+
         mock_eval.assert_called_once_with("candidato")
-        mock_temp.assert_called_once_with("candidato")
 
 
 @patch('idicoc_core.dse.evaluator.DissonanceStateEvaluator.evaluate')

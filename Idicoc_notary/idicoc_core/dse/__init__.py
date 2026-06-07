@@ -19,6 +19,7 @@ from idicoc_core.dse.evaluator import (
     DissonanceStrategy,
     AuditEntropyModule,
 )
+from idicoc_core.dse.spsa import SPSACorrector
 
 __all__ = [
     "_cosine_distance",
@@ -38,4 +39,5 @@ __all__ = [
     "DissonanceEvaluationResult",
     "DissonanceStrategy",
     "AuditEntropyModule",
+    "SPSACorrector",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
@@ -49,8 +50,10 @@ class PropertyGraphEvaluator:
         Evalúa la disonancia lógica de un estado candidato ``y`` contra los
         políticas no-temporales activos en el grafo.
         """
+        t_eval_start = time.perf_counter()
         policies = [ax for ax in self.graph.nodes.values() if ax.get("policy_type") != "temporal"]
         if not policies:
+            logger.debug("[TIMING] PropertyGraphEvaluator.evaluate: no policies, 0 sec")
             return 0.0
 
         y_tokens = self._tokenize(self._to_str(y))
@@ -74,8 +77,21 @@ class PropertyGraphEvaluator:
             total_weight += weight
 
         if total_weight == 0.0:
+            t_eval_elapsed = time.perf_counter() - t_eval_start
+            logger.debug(
+                "[TIMING] PropertyGraphEvaluator.evaluate: zero weight, %.3f sec", t_eval_elapsed
+            )
             return 0.0
-        return min(1.0, weighted_penalty / total_weight)
+
+        result = min(1.0, weighted_penalty / total_weight)
+        t_eval_elapsed = time.perf_counter() - t_eval_start
+        logger.debug(
+            "[TIMING] PropertyGraphEvaluator.evaluate: %.3f sec | policies=%d | penalty=%.6f",
+            t_eval_elapsed,
+            len(policies),
+            result,
+        )
+        return result
 
     def get_violated_policies(self, y: Any) -> List[Dict[str, Any]]:
         violated = []
@@ -255,12 +271,18 @@ class PropertyGraphEvaluator:
             from idicoc_core.utils.embedding_service import EmbeddingService
 
             try:
+                policy_id = policy.get("id", "unknown")
+                logger.debug(f"[CACHE] Computing embedding for policy {policy_id}")
                 ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
                 policy["embedding"] = ax_embedding
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to generate embedding for policy text: '{self._policy_text(policy)}' due to: {e}"
                 ) from e
+        else:
+            # Embedding already cached
+            policy_id = policy.get("id", "unknown")
+            logger.debug(f"[CACHE] Using cached embedding for policy {policy_id}")
 
         if y_vec is None:
             from idicoc_core.utils.embedding_service import EmbeddingService
@@ -576,28 +598,28 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
 
         d1 = _compute_d_1_vectorized(y_vec, v_hat_vec)
 
+        # d_2: policy dissonance (logical policies from PropertyGraph)
+        # d_3: RAG/context dissonance (context contradiction)
         d2 = 0.0
-        d3 = 0.0
         if G_t is not None:
             evaluator = PropertyGraphEvaluator(G_t, self.config)
             d2 = float(evaluator.evaluate(y))
-            d3 = float(evaluator.compute_temporal(y))
 
-        if d2 == float("inf") or d3 == float("inf"):
-            d_s = float("inf")
-        else:
-            d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
-
-        d_context = 0.0
+        # Compute d_context (RAG) and map it to d3
+        d3 = 0.0
         if context_input:
             evaluator_instance = (
                 PropertyGraphEvaluator(G_t, self.config) if G_t is not None else None
             )
-            d_context, _ = _compute_context_contradiction(
+            d3, _ = _compute_context_contradiction(
                 y, context_input, self.config, evaluator=evaluator_instance
             )
 
-        return max(d_s, d_context)
+        if d2 == float("inf"):
+            return float("inf")
+
+        d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
+        return max(d_s, d3)
 
     def select_canonical_input(self, canonical_state: Any) -> np.ndarray:
         return canonical_state.measure_vector
@@ -709,91 +731,167 @@ class DissonanceStateEvaluator:
         Evaluates dissonance and collects list of violated policy IDs/descriptions.
         Returns (d_s, list_of_violations, raw_metrics).
         """
+        t_dse_start = time.perf_counter()
+        logger.info("[TIMING] DissonanceStateEvaluator.evaluate START")
+
         self.strategy.set_graph(active_graph)
 
-        # Build list of contexts from RAG context
-        context_input = []
-        if session_context.rag_context:
-            context_input = [
-                ctx.strip() for ctx in session_context.rag_context.split("\n") if ctx.strip()
-            ]
+        t_context_start = time.perf_counter()
+        context_input = self._build_context_input(session_context)
+        eval_input = self._prepare_eval_input(llm_output)
+        _eval_text = self._normalize_eval_text(eval_input)
+        t_context_elapsed = time.perf_counter() - t_context_start
+        logger.info("[TIMING] Context prep: %.3f sec", t_context_elapsed)
 
-        # In case the input is numeric/distribution (e.g. from logic service tests),
-        # parse it appropriately.
-        eval_input: Any = llm_output
+        logger.info(f"[DSE] Texto evaluado por el Notario: {repr(_eval_text[:200])}")
+
+        t_viol_start = time.perf_counter()
+        evaluator = PropertyGraphEvaluator(active_graph, self.config)
+        violations = self._collect_violated_policies(evaluator, eval_input)
+        t_viol_elapsed = time.perf_counter() - t_viol_start
+        logger.info(
+            "[TIMING] Violated policies collection: %.3f sec | violations=%d",
+            t_viol_elapsed,
+            len(violations),
+        )
+
+        t_dims_start = time.perf_counter()
+        d_logic = self._calculate_d_logic(evaluator, eval_input, _eval_text)
+        d_context, contradictory_contexts = self._calculate_d_context(
+            eval_input, context_input, session_context, evaluator
+        )
+        t_dims_elapsed = time.perf_counter() - t_dims_start
+        logger.info(
+            "[TIMING] Dissonance dimensions (d_logic, d_context): %.3f sec | d_logic=%.6f d_context=%.6f",
+            t_dims_elapsed,
+            float(d_logic),
+            float(d_context),
+        )
+
+        for ctx_text in contradictory_contexts:
+            violations.append(f"Contradicción RAG: {ctx_text} (SOFT)")
+
+        t_d1_start = time.perf_counter()
+        d1, y_vector = self._calculate_d1(eval_input, session_context, active_graph)
+        t_d1_elapsed = time.perf_counter() - t_d1_start
+        logger.info("[TIMING] d_1 calculation: %.3f sec | d_1=%.6f", t_d1_elapsed, float(d1))
+
+        d_s = self._combine_dissonance(d1, d_logic, d_context)
+
+        t_emb_start = time.perf_counter()
+        context_embs_list = self._build_context_embeddings(context_input)
+        graph_metrics = self._extract_policy_graph_metrics(active_graph)
+        t_emb_elapsed = time.perf_counter() - t_emb_start
+        logger.info("[TIMING] Embeddings & metrics extraction: %.3f sec", t_emb_elapsed)
+
+        raw_metrics = {
+            "d_s": d_s,
+            "d_0": 0.0,
+            "d_1": d1,
+            "d_2": d_logic,
+            "d_3": d_context,
+            "d_4": 0.0,
+            "d_5": 0.0,
+            "d_6": 0.0,
+            "d_context": d_context,
+            "lambda_context": float(getattr(self.config, "lambda_context", 0.4)),
+            "effective_threshold": self.config.allowed_epsilon,
+            "contradictory_contexts": contradictory_contexts,
+            "violated_policies": violations,
+            "d_logic": d_logic,
+            "policy_graph_total_nodes": graph_metrics["total_nodes"],
+            "policy_graph_has_logic_policies": graph_metrics["has_logic_policies"],
+            "policy_graph_empty": graph_metrics["total_nodes"] == 0,
+            "y_vector": y_vector,
+            "context_embeddings": context_embs_list,
+            "llm_output_text": _eval_text[:500],
+        }
+
+        t_dse_total = time.perf_counter() - t_dse_start
+        logger.info(
+            "[TIMING] DissonanceStateEvaluator.evaluate TOTAL: %.3f sec | d_s=%.6f | violated=%d",
+            t_dse_total,
+            float(d_s),
+            len(violations),
+        )
+        raw_metrics["dse_duration_sec"] = t_dse_total
+
+        return d_s, violations, raw_metrics
+
+    def _build_context_input(self, session_context: SessionContext) -> List[str]:
+        if session_context.rag_context:
+            return [ctx.strip() for ctx in session_context.rag_context.split("\n") if ctx.strip()]
+        return []
+
+    def _prepare_eval_input(self, llm_output: Any) -> Any:
+        eval_input = llm_output
         try:
-            # Check if llm_output is actually a list or array encoded as string
             if isinstance(llm_output, str) and (
                 llm_output.startswith("[") or "array" in llm_output
             ):
-                # Import ast safely to evaluate literal lists
                 import ast
 
                 parsed = ast.literal_eval(llm_output)
                 if isinstance(parsed, (list, tuple)):
-                    eval_input = np.array(parsed, dtype=float)
+                    return np.array(parsed, dtype=float)
         except Exception:
             pass
+        return eval_input
 
-        # ── Texto real evaluado por el Notario (para trazabilidad forense) ──────
-        # Este es el texto exacto que se pasa al PropertyGraphEvaluator.
-        # Si el LLM genera texto que viola una política regex, aquí debe verse.
-        _eval_text = (
-            eval_input
-            if isinstance(eval_input, str)
-            else str(
-                getattr(
-                    eval_input, "source_text", getattr(eval_input, "text_content", str(eval_input))
-                )
+    def _normalize_eval_text(self, eval_input: Any) -> str:
+        if isinstance(eval_input, str):
+            return eval_input
+        return str(
+            getattr(
+                eval_input,
+                "source_text",
+                getattr(eval_input, "text_content", str(eval_input)),
             )
         )
-        logger.info(f"[DSE] Texto evaluado por el Notario: {repr(_eval_text[:200])}")
 
-        # Evaluate logic disonancia using PropertyGraphEvaluator
-        evaluator = PropertyGraphEvaluator(active_graph, self.config)
-        violations = []
+    def _collect_violated_policies(
+        self, evaluator: PropertyGraphEvaluator, eval_input: Any
+    ) -> List[str]:
+        violations: List[str] = []
         try:
+            t_viol_inner_start = time.perf_counter()
             violated_nodes = evaluator.get_violated_policies(eval_input)
+            t_viol_inner_elapsed = time.perf_counter() - t_viol_inner_start
+            logger.debug(f"[TIMING] get_violated_policies: {t_viol_inner_elapsed:.3f} sec")
+
             for vn in violated_nodes:
                 violations.append(f"{vn['id']}: {vn['text']} ({vn['hardness'].upper()})")
         except Exception as ex:
             logger.error(f"Error computing logical violations: {ex}", exc_info=True)
             raise
+        return violations
 
-        # Compute d_logic (d_2: policy violations) - CRITICAL METRIC
-        # NOTA: Para políticas HARD de tipo regex, evaluate() retorna float('inf').
-        # El try/except sólo captura errores de SISTEMA (embedding, etc.), NO viola la política.
-        d_logic = 0.0
+    def _calculate_d_logic(
+        self, evaluator: PropertyGraphEvaluator, eval_input: Any, eval_text: str
+    ) -> float:
         try:
             d_logic = evaluator.evaluate(eval_input)
             if d_logic == float("inf"):
                 logger.info(
-                    f"[DSE] d_2=inf: Violación HARD detectada. Texto: {repr(_eval_text[:100])}"
+                    f"[DSE] d_2=inf: Violación HARD detectada. Texto: {repr(eval_text[:100])}"
                 )
             elif not isinstance(d_logic, (int, float)):
                 logger.warning(f"d_logic returned invalid type: {type(d_logic)}, defaulting to 0.0")
                 d_logic = 0.0
+            return d_logic
         except Exception as ex:
             logger.error(f"CRITICAL: Error computing d_logic (d_2): {ex}", exc_info=True)
             raise
 
-        # Compute d_temporal (d_3: temporal constraints) - CRITICAL METRIC
-        # If exception occurs, default to 0.0 (no temporal violation)
-        d_temporal = 0.0
-        try:
-            d_temporal = evaluator.compute_temporal(eval_input)
-            if not isinstance(d_temporal, (int, float)):
-                logger.warning(
-                    f"d_temporal returned invalid type: {type(d_temporal)}, defaulting to 0.0"
-                )
-                d_temporal = 0.0
-        except Exception as ex:
-            logger.error(f"CRITICAL: Error computing d_temporal (d_3): {ex}", exc_info=True)
-            raise
 
-        # Semantic/RAG contradiction - CRITICAL METRIC
-        d_context = 0.0
-        contradictory_contexts = []
+
+    def _calculate_d_context(
+        self,
+        eval_input: Any,
+        context_input: List[str],
+        session_context: SessionContext,
+        evaluator: PropertyGraphEvaluator,
+    ) -> Tuple[float, List[str]]:
         try:
             d_context, contradictory_contexts = _compute_context_contradiction(
                 eval_input, context_input, self.config, session_context.user_prompt, evaluator
@@ -802,20 +900,19 @@ class DissonanceStateEvaluator:
                 logger.warning(
                     f"d_context returned invalid type: {type(d_context)}, defaulting to 0.0"
                 )
-                d_context = 0.0
-                contradictory_contexts = []
+                return 0.0, []
+            return d_context, contradictory_contexts
         except Exception as ex:
             logger.error(f"CRITICAL: Error computing d_context (RAG): {ex}", exc_info=True)
             raise
 
-        for ctx_text in contradictory_contexts:
-            violations.append(f"Contradicción RAG: {ctx_text} (SOFT)")
-
-        # ── D_s: Normalized weights from config ──────────────────────────────────
-        weights = self.config._normalized_weights
-
-        # ── d_1: stage 1 - Divergencia de Proyección ─────────────────────────────
-        # Mide cuánto se alejó el LLM del estado canónico V_hat generado por el ISG.
+    def _calculate_d1(
+        self,
+        eval_input: Any,
+        session_context: SessionContext,
+        active_graph: PropertyGraph,
+    ) -> Tuple[float, Optional[np.ndarray]]:
+        y_vector: Optional[np.ndarray] = None
         d1 = 0.0
         try:
             if (
@@ -823,14 +920,11 @@ class DissonanceStateEvaluator:
                 or hasattr(eval_input, "distribution")
                 or isinstance(eval_input, list)
             ):
-                # Numeric/distribution input: compute KL-divergence to canonical state
                 mu_raw = self.strategy._validate_input(eval_input, 4)
                 total = mu_raw.sum()
                 mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
                 n_ref = mu.size
 
-                # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
-                # es la distribución uniforme o el vector de V_hat si es compatible.
                 if session_context.v_hat is not None and hasattr(
                     session_context.v_hat, "semantic_vector"
                 ):
@@ -843,7 +937,6 @@ class DissonanceStateEvaluator:
                     target_state = np.ones(n_ref, dtype=float) / float(n_ref)
                 d1 = _compute_d_1(mu, target_state)
             else:
-                # Text input: compute Projection Divergence against CanonicalState V_hat
                 if session_context.v_hat is not None and hasattr(
                     session_context.v_hat, "semantic_vector"
                 ):
@@ -855,10 +948,11 @@ class DissonanceStateEvaluator:
                         DEFAULT_SEMANTIC_EMBEDDING_MODEL,
                     )
                     y_vector_raw = StringUtils.to_vector(eval_input, model_name=model_name)
-                    if active_graph is not None:
-                        y_vector = active_graph.project_to_manifold(y_vector_raw)
-                    else:
-                        y_vector = y_vector_raw
+                    y_vector = (
+                        active_graph.project_to_manifold(y_vector_raw)
+                        if active_graph is not None
+                        else y_vector_raw
+                    )
 
                     v_hat_vector = session_context.v_hat.semantic_vector
                     if not isinstance(v_hat_vector, np.ndarray):
@@ -871,112 +965,89 @@ class DissonanceStateEvaluator:
                     if norm_v > 1e-12:
                         v_hat_vector = v_hat_vector / norm_v
 
-                    # Kantorovich metric simplified to normalized L2 distance (simplified Wasserstein)
                     distancia = float(np.linalg.norm(y_vector - v_hat_vector))
                     d1 = float(np.clip(distancia / 2.0, 0.0, 1.0))
         except Exception as ex:
             logger.warning(f"Error computing d_1 (uniqueness/projection distance): {ex}")
+        return d1, y_vector
 
-        # ── D_s: Weighted Coalgebraic Dissonance ─────────────────────────────────
-        # Dimensiones activas para texto:
-        #   d_2 = violaciones del grafo de políticas    (λ_2)
-        #   d_3 = restricciones temporales              (λ_3)
-        #   d_context = disonancia de fase RAG→LLM      (λ_context)
-        #
-        # d_context tiene su propio coeficiente porque es la dimensión del
-        # Middleware de Integridad: mide si el LLM alucina respecto al RAG.
-        # Si d_2=inf (violación HARD), D_s=inf independientemente del resto.
+    def _combine_dissonance(
+        self,
+        d1: float,
+        d_logic: float,
+        d_context: float,
+    ) -> float:
+        """Combines three dissonance dimensions:
+        - d1: Uniqueness/Projection distance (vs source anchor K)
+        - d_logic: Policy dissonance (logic policies from PropertyGraph)
+        - d_context: RAG context contradiction
+        """
+        if d_logic == float("inf"):
+            return float("inf")
+
         lambda_context = float(getattr(self.config, "lambda_context", 0.4))
+        weights = self.config._normalized_weights
+        # d_s = (1 - λ_context) * (w1*d1 + w2*d_logic) + λ_context * d_context
+        policy_dissonance = weights[1] * d1 + weights[2] * d_logic
+        d_s = (1.0 - lambda_context) * policy_dissonance + lambda_context * d_context
+        return max(d_s, d_context * lambda_context)
 
-        if d_logic == float("inf") or d_temporal == float("inf"):
-            d_s = float("inf")
-        else:
-            if active_graph is not None:
-                if hasattr(active_graph, "nodes") and isinstance(active_graph.nodes, dict):
-                    has_logic_policies = any(
-                        ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values()
-                    )
-                    has_temporal_policies = any(
-                        ax.get("policy_type") == "temporal" for ax in active_graph.nodes.values()
-                    )
-                else:
-                    has_logic_policies = True
-                    has_temporal_policies = True
-            else:
-                has_logic_policies = False
-                has_temporal_policies = False
+    def _build_context_embeddings(self, context_input: List[str]) -> List[np.ndarray]:
+        context_embs_list: List[np.ndarray] = []
+        if not context_input:
+            return context_embs_list
 
-            policy_dissonance = weights[1] * d1 + weights[2] * d_logic + weights[3] * d_temporal
+        from idicoc_core.utils.embedding_service import EmbeddingService
+        from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
 
-            # Integrar d_context como término ponderado + floor de seguridad
-            # D_s = (1 - λ_context) * D_policy + λ_context * d_context
-            # El max() garantiza que una contradicción RAG severa siempre escale D_s
-            weighted_context = lambda_context * d_context
-            d_s = (1.0 - lambda_context) * policy_dissonance + weighted_context
-            d_s = max(d_s, d_context * lambda_context)  # floor proporcional
-
-        # Build context embeddings list
-        context_embs_list = []
-        if context_input:
-            from idicoc_core.utils.embedding_service import EmbeddingService
-            from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
-
-            try:
-                embed_service = EmbeddingService()
-                model_name = getattr(
-                    self.config,
-                    "semantic_embedding_model",
-                    DEFAULT_SEMANTIC_EMBEDDING_MODEL,
-                )
-                embedder = embed_service.get_embedder(model_name)
-                if embedder is not None and hasattr(embedder, "encode"):
-                    for ctx in context_input:
-                        if not ctx.strip():
-                            continue
+        try:
+            embed_service = EmbeddingService()
+            model_name = getattr(
+                self.config,
+                "semantic_embedding_model",
+                DEFAULT_SEMANTIC_EMBEDDING_MODEL,
+            )
+            embedder = embed_service.get_embedder(model_name)
+            if embedder is not None and hasattr(embedder, "encode"):
+                for ctx in context_input:
+                    if not ctx.strip():
+                        continue
+                    try:
                         try:
+                            ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
+                        except TypeError:
                             try:
-                                ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
+                                ctx_emb = embedder.encode(ctx, model_name=model_name)
                             except TypeError:
-                                try:
-                                    ctx_emb = embedder.encode(ctx, model_name=model_name)
-                                except TypeError:
-                                    ctx_emb = embedder.encode(ctx)
-                            if isinstance(ctx_emb, np.ndarray):
-                                ctx_emb = ctx_emb.astype(float)
-                            else:
-                                ctx_emb = np.asarray(ctx_emb, dtype=float)
-                            ctx_norm = np.linalg.norm(ctx_emb)
-                            if ctx_norm > 1e-12:
-                                context_embs_list.append(ctx_emb / ctx_norm)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                                ctx_emb = embedder.encode(ctx)
+                        if isinstance(ctx_emb, np.ndarray):
+                            ctx_emb = ctx_emb.astype(float)
+                        else:
+                            ctx_emb = np.asarray(ctx_emb, dtype=float)
+                        ctx_norm = np.linalg.norm(ctx_emb)
+                        if ctx_norm > 1e-12:
+                            context_embs_list.append(ctx_emb / ctx_norm)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return context_embs_list
 
-        # Raw metrics breakdown — incluye texto evaluado para trazabilidad forense
-        raw_metrics = {
-            "d_s": d_s,
-            "d_0": 0.0,
-            "d_1": d1,
-            "d_2": d_logic,
-            "d_3": d_temporal,
-            "d_4": 0.0,
-            "d_5": 0.0,
-            "d_6": 0.0,
-            "d_context": d_context,
-            "lambda_context": lambda_context,
-            "effective_threshold": self.config.allowed_epsilon,
-            "contradictory_contexts": contradictory_contexts,
-            "violated_policies": violations,
-            "d_logic": d_logic,
-            "d_temporal": d_temporal,
-            "y_vector": y_vector if "y_vector" in locals() else None,
-            "context_embeddings": context_embs_list,
-            # Texto real evaluado por el notario (trazabilidad forense)
-            "llm_output_text": _eval_text[:500],
+    def _extract_policy_graph_metrics(self, active_graph: PropertyGraph) -> Dict[str, Any]:
+        if active_graph is None or not hasattr(active_graph, "nodes"):
+            return {
+                "total_nodes": 0,
+                "has_logic_policies": False,
+                "has_temporal_policies": False,
+            }
+
+        total_nodes = len(active_graph.nodes) if isinstance(active_graph.nodes, dict) else 0
+        return {
+            "total_nodes": total_nodes,
+            "has_logic_policies": any(
+                ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values()
+            ),
         }
-
-        return d_s, violations, raw_metrics
 
     def _compute_rag_divergence(self, vec: np.ndarray, context_embs: List[np.ndarray]) -> float:
         import numpy as np
@@ -991,157 +1062,6 @@ class DissonanceStateEvaluator:
         if max_sim == -1.0:
             return 0.0
         return 1.0 - max_sim
-
-    def project_spsa(
-        self,
-        y_vec: np.ndarray,
-        v_hat_vec: np.ndarray,
-        const_metrics: Dict[str, Any],
-        context_embs: List[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, float, List[Dict[str, Any]]]:
-        """
-        Operador de convergencia.
-        Runs SPSA to project y_vec closer to v_hat_vec on the unit sphere,
-        minimizing d1 while keeping policy and context constraints constant/static.
-        Performs backtracking if candidate vector drifts too far from RAG context embeddings.
-        """
-        import numpy as np
-
-        if context_embs is None:
-            context_embs = []
-
-        # Enforce copy and unit normalization for z
-        z = np.copy(np.asarray(y_vec, dtype=float))
-        norm_z = np.linalg.norm(z)
-        if norm_z > 1e-12:
-            z = z / norm_z
-
-        v_hat = np.asarray(v_hat_vec, dtype=float)
-        norm_v = np.linalg.norm(v_hat)
-        if norm_v > 1e-12:
-            v_hat = v_hat / norm_v
-
-        # Retrieve weights and constants
-        weights = self.config._normalized_weights
-        lambda_1 = weights[1]
-        lambda_2 = weights[2]
-        lambda_3 = weights[3]
-
-        const_d2 = const_metrics.get("d_logic", 0.0)
-        const_d3 = const_metrics.get("d_temporal", 0.0)
-        const_d_context = const_metrics.get("d_context", 0.0)
-        lambda_context = float(getattr(self.config, "lambda_context", 0.4))
-
-        def _cost_function(vec: np.ndarray) -> float:
-            # Enforce unit norm at each step
-            norm_val = np.linalg.norm(vec)
-            if norm_val > 1e-12:
-                vec_norm = vec / norm_val
-            else:
-                vec_norm = vec
-
-            # Compute d1: normalized L2 distance (simplified Kantorovich)
-            dist = float(np.linalg.norm(vec_norm - v_hat))
-            d1 = float(np.clip(dist / 2.0, 0.0, 1.0))
-
-            # Policy Dissonance (with const_d2 and const_d3)
-            policy_diss = lambda_1 * d1 + lambda_2 * const_d2 + lambda_3 * const_d3
-
-            # Total Coalgebraic Dissonance
-            d_s_val = (1.0 - lambda_context) * policy_diss + lambda_context * const_d_context
-            d_s_val = max(d_s_val, const_d_context * lambda_context)
-            return d_s_val
-
-        # Initial evaluation
-        best_z = np.copy(z)
-        best_loss = _cost_function(z)
-
-        # Initialize convergence history
-        history = []
-        init_rag_div = 0.0
-        if context_embs:
-            init_rag_div = float(self._compute_rag_divergence(z, context_embs))
-        history.append(
-            {
-                "iteration": 0,
-                "dissonance": float(best_loss),
-                "rag_divergence": init_rag_div,
-                "backtracked": False,
-            }
-        )
-
-        # Early stop if already in the green band
-        if best_loss <= self.config.diss_threshold_green:
-            return best_z, best_loss, history
-
-        a = getattr(self.config, "spsa_a", 0.1)
-        c = getattr(self.config, "spsa_c", 0.05)
-        max_iters = self.config.spsa_max_iters
-        max_rag_div_threshold = getattr(self.config, "max_rag_divergence", 0.35)
-
-        for k in range(max_iters):
-            # Simultaneous perturbation using Rademacher distribution (discrete ±1)
-            delta = np.random.choice([-1.0, 1.0], size=z.size)
-
-            # Evaluate cost at perturbed vectors
-            z_plus = z + c * delta
-            z_minus = z - c * delta
-
-            loss_plus = _cost_function(z_plus)
-            loss_minus = _cost_function(z_minus)
-
-            # Gradient approximation
-            diff = loss_plus - loss_minus
-            grad = (diff / (2.0 * c)) * delta
-
-            # Update step
-            z_next = z - a * grad
-
-            # Normalize to unit sphere (enforce unit norm constraint)
-            norm_next = np.linalg.norm(z_next)
-            if norm_next > 1e-12:
-                z_next = z_next / norm_next
-
-            # Integrity boundary check (Backtracking/Cerca Forense)
-            current_rag_div = 0.0
-            backtracked = False
-            if context_embs:
-                current_rag_div = float(self._compute_rag_divergence(z_next, context_embs))
-                if current_rag_div > max_rag_div_threshold:
-                    backtracked = True
-                    history.append(
-                        {
-                            "iteration": k + 1,
-                            "dissonance": float(_cost_function(z_next)),
-                            "rag_divergence": current_rag_div,
-                            "backtracked": True,
-                        }
-                    )
-                    # Reject this update step, continue searching in another direction
-                    continue
-
-            loss_next = _cost_function(z_next)
-            history.append(
-                {
-                    "iteration": k + 1,
-                    "dissonance": float(loss_next),
-                    "rag_divergence": current_rag_div,
-                    "backtracked": False,
-                }
-            )
-
-            # Update best if improved
-            if loss_next < best_loss:
-                best_loss = loss_next
-                best_z = np.copy(z_next)
-
-            z = z_next
-
-            # Early stop if we successfully reach the green band
-            if best_loss <= self.config.diss_threshold_green:
-                break
-
-        return best_z, best_loss, history
 
 
 class AuditEntropyModule:
