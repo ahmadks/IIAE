@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Dict, List, Optional
+import numpy as np
 
 
 class PropertyGraph:
@@ -39,6 +40,32 @@ class PropertyGraph:
     def validate(self, raw_input: Any) -> bool:
         """Validación estructural básica."""
         return len(self._conflicts) == 0
+
+    def project_to_manifold(self, input_vector: np.ndarray) -> np.ndarray:
+        """
+        Projects the input vector onto the policy graph manifold.
+        """
+        active_policies = self.get_active_policies()
+        if not active_policies or input_vector.size == 0:
+            return input_vector
+
+        policy_vectors = []
+        for p in active_policies:
+            emb = p.get("embedding")
+            if emb is not None:
+                policy_vectors.append(np.asarray(emb, dtype=float))
+
+        if not policy_vectors:
+            return input_vector
+
+        projected = input_vector.copy()
+        for pv in policy_vectors:
+            norm_pv = np.linalg.norm(pv)
+            if norm_pv > 1e-12:
+                unit_pv = pv / norm_pv
+                projected = projected - np.dot(projected, unit_pv) * unit_pv
+
+        return projected
 
     def get_active_policies(self) -> List[Dict[str, Any]]:
         """Retorna todos los políticas activos."""

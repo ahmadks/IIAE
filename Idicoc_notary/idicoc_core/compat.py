@@ -1,5 +1,4 @@
-from __future__ import annotations
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from datetime import datetime, timezone
 from idicoc_core.api.facade import NotaryClient as RealNotaryClient
 from idicoc_core.api.schemas import SessionContext
@@ -50,6 +49,72 @@ class NotaryClient:
             context_policies=context_policies,
             epsilon_override=epsilon_override
         )
+
+    def generate(
+        self,
+        user_prompt: str,
+        rag_context: str | List[str],
+        context_policies: Optional[List[Any]] = None,
+        epsilon_override: Optional[float] = None,
+        **kwargs
+    ) -> Tuple[str, CanonicalStateDTO]:
+        """
+        Generates output under Generative Containment (PromptProjector)
+        and performs post-generation audit on the output, returning CanonicalStateDTO.
+        """
+        if isinstance(rag_context, list):
+            rag_str = "\n".join(rag_context)
+        else:
+            rag_str = rag_context or ""
+
+        # Call pipeline.generate to get the output and raw audit result
+        llm_output, audit_res = self.client.generate(
+            user_prompt=user_prompt,
+            rag_context=rag_context,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override,
+            **kwargs
+        )
+
+        # Build algebraic components mapping for legacy code
+        ac = {
+            "d_0": audit_res.metrics.get("d_0", 0.0),
+            "d_1": audit_res.metrics.get("d_1", 0.0),
+            "d_2": audit_res.metrics.get("d_2", 0.0),
+            "d_3": audit_res.metrics.get("d_3", 0.0),
+            "d_4": audit_res.metrics.get("d_4", 0.0),
+            "d_5": audit_res.metrics.get("d_5", 0.0),
+            "d_6": audit_res.metrics.get("d_6", 0.0),
+        }
+
+        # Format metadata dictionary
+        timestamp_str = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "admission_breach": not audit_res.is_admitted,
+            "d_s": audit_res.dissonance_ds,
+            "violated_policies": audit_res.violated_policies,
+            "epsilon_used": audit_res.allowed_epsilon,
+            "epsilon": audit_res.allowed_epsilon,
+            "correction_flag": not audit_res.is_admitted,
+            "d_context": audit_res.metrics.get("d_context", 0.0),
+            "algebraic_components": ac,
+            "timestamp": timestamp_str,
+            "audit_metrics": audit_res.metrics,
+        }
+
+        # Fetch integrity hash from CTM if active
+        integrity_hash = sha256_hex(llm_output)
+        if self.pipeline.ctm and self.pipeline.ctm.root_hash:
+            integrity_hash = self.pipeline.ctm.root_hash
+
+        dto = CanonicalStateDTO(
+            metadata=metadata,
+            integrity_hash=integrity_hash,
+            timestamp=timestamp_str,
+            data=llm_output
+        )
+
+        return llm_output, dto
 
     def process_interaction(
         self,

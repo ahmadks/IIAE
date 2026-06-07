@@ -1,5 +1,4 @@
-from __future__ import annotations
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from idicoc_core.api.schemas import NotaryAuditResult
 from idicoc_core.pipeline.orchestrator import AuditPipeline
@@ -33,6 +32,26 @@ class NotaryClient:
             llm_output=llm_output,
             context_policies=context_policies,
             epsilon_override=epsilon_override
+        )
+
+    def generate(
+        self,
+        user_prompt: str,
+        rag_context: str | List[str],
+        context_policies: Optional[List[Any]] = None,
+        epsilon_override: Optional[float] = None,
+        **kwargs
+    ) -> Tuple[str, NotaryAuditResult]:
+        """
+        Generates output under Generative Containment (PromptProjector)
+        and performs post-generation audit on the output.
+        """
+        return self.pipeline.generate(
+            user_prompt=user_prompt,
+            rag_context=rag_context,
+            context_policies=context_policies,
+            epsilon_override=epsilon_override,
+            **kwargs
         )
 
     def get_aem_counters(self) -> dict[str, float]:

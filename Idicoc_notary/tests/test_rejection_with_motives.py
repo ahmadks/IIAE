@@ -164,12 +164,13 @@ class DummyEmbedder:
     basado en sus bytes UTF-8. No requiere carga de modelos externos.
     """
     def encode(self, text, model_name=None):
+        import hashlib
         if isinstance(text, list):
             text = " ".join(str(t) for t in text)
-        text_bytes = str(text).encode("utf-8")
+        h = hashlib.sha256(str(text).encode("utf-8")).digest()
         vec = np.zeros(32, dtype=float)
-        for idx, byte in enumerate(text_bytes[:32]):
-            vec[idx] = float(byte) / 255.0
+        for idx in range(32):
+            vec[idx] = (float(h[idx]) - 127.5) / 127.5
         norm = float(np.linalg.norm(vec))
         return vec / norm if norm > 0.0 else vec
 
@@ -338,7 +339,7 @@ class TestSoftRejectionWithContext:
         """
         # DummyEmbedder produce D_s~0.03 con políticas SOFT semánticas;
         # usamos epsilon=0.01 para garantizar rechazo con esa disonancia
-        client = _build_client(epsilon=0.01)
+        client = _build_client(epsilon=0.01, rag_d_context_cap=1.0)
         context_input = [
             "El límite máximo de transferencia diaria es 1000 EUR.",
             "Las transferencias superiores requieren autorización adicional.",

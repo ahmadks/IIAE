@@ -556,52 +556,37 @@ with col_chat:
         user_msg = query_to_process
         st.session_state.chat_history.append({"role": "user", "content": user_msg})
 
-        # 1. Generar Respuesta
-        with st.spinner("🤖 Generando respuesta..."):
-            if forced_response:
-                assistant_res = forced_response
-            else:
-                # Interceptar logits en el Hot Loop si el Notario está disponible
-                processor = None
-                if "notary_client" in st.session_state:
-                    processor = (
-                        st.session_state.notary_client.pipeline.config.logits_processor
-                    )
-
-                # Pasar processor a generate() si el llm_provider lo soporta
-                # ── Construir prompt enriquecido con contexto RAG ─────────────────
-                context_list = st.session_state.get("context_list") or []
-                if context_list:
-                    rag_block = "\n".join(context_list)
-                    llm_prompt = (
-                        f"CONTEXTO:\n{rag_block}\n\n"
-                        f"PREGUNTA DEL USUARIO:\n{user_msg}"
-                    )
-                else:
-                    llm_prompt = user_msg
-
-                import inspect
-
-                sig = inspect.signature(llm_provider.generate)
-                if "logits_processor" in sig.parameters:
-                    assistant_res = llm_provider.generate(
-                        llm_prompt, logits_processor=processor
-                    )
-                else:
-                    assistant_res = llm_provider.generate(llm_prompt)
-
-        # 2. Auditar Respuesta
-        with st.spinner("🛡️ Evaluando respuesta en el Notario IDICOC..."):
+        # Generación y Auditoría bajo Contención Preventiva
+        with st.spinner("🤖 Generando y auditando respuesta bajo Contención Preventiva..."):
             try:
-                # El Notario evalúa la salida generada por el LLM
-                payload = SemanticPayload(assistant_res)
+                if forced_response:
+                    assistant_res = forced_response
+                    payload = SemanticPayload(assistant_res)
+                    audit_result = st.session_state.notary_client.process_interaction(
+                        audit_input=payload,
+                        user_input=user_msg,
+                        context_input=st.session_state.get("context_list"),
+                        epsilon_override=epsilon,
+                    )
+                else:
+                    # Interceptar logits en el Hot Loop si el Notario está disponible
+                    kwargs = {}
+                    if "notary_client" in st.session_state:
+                        processor = (
+                            st.session_state.notary_client.pipeline.config.logits_processor
+                        )
+                        import inspect
+                        sig = inspect.signature(llm_provider.generate)
+                        if "logits_processor" in sig.parameters:
+                            kwargs["logits_processor"] = processor
 
-                audit_result = st.session_state.notary_client.process_interaction(
-                    audit_input=payload,
-                    user_input=user_msg,
-                    context_input=st.session_state.get("context_list"),
-                    epsilon_override=epsilon,
-                )
+                    context_list = st.session_state.get("context_list") or []
+                    assistant_res, audit_result = st.session_state.notary_client.generate(
+                        user_prompt=user_msg,
+                        rag_context=context_list,
+                        epsilon_override=epsilon,
+                        **kwargs
+                    )
 
                 # Extraer métricas y hashes
                 d_s = audit_result.metadata.get("d_s")

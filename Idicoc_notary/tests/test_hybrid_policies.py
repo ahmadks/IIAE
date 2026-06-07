@@ -71,21 +71,20 @@ IDICOCPipeline = IDICOCPipelineWrapper
 
 
 def test_unified_evaluation():
-    config = AuditConfig(ctm_mode="disabled")
-
     # Deterministic embedder for tests to avoid external model loads
     class DummyEmbedder:
         def encode(self, text, model_name=None):
+            import hashlib
             if isinstance(text, list):
                 text = " ".join(str(item) for item in text)
-            text_bytes = str(text).encode("utf-8")
+            h = hashlib.sha256(str(text).encode("utf-8")).digest()
             vec = np.zeros(32, dtype=float)
-            for idx, byte in enumerate(text_bytes[:32]):
-                vec[idx] = float(byte) / 255.0
+            for idx in range(32):
+                vec[idx] = (float(h[idx]) - 127.5) / 127.5
             norm = float(np.linalg.norm(vec))
             return vec / norm if norm > 0.0 else vec
 
-    config.embedding_provider = DummyEmbedder()
+    config = AuditConfig(ctm_mode="disabled", rag_d_context_cap=1.0, embedding_provider=DummyEmbedder())
     pipeline = IDICOCPipeline(config)
 
     # Context RAG y politicas híbridos
@@ -208,8 +207,6 @@ def test_property_graph_evaluator_respects_policy_mode_for_text_input():
 
 def test_pipeline_normalizes_semantic_payload_for_canonical_state():
     # Use real pipeline with lightweight deterministic embedder
-    config = AuditConfig(ctm_mode="disabled")
-
     class DummyEmbedder:
         def encode(self, text, model_name=None):
             if isinstance(text, list):
@@ -221,7 +218,7 @@ def test_pipeline_normalizes_semantic_payload_for_canonical_state():
             norm = float(np.linalg.norm(vec))
             return vec / norm if norm > 0.0 else vec
 
-    config.embedding_provider = DummyEmbedder()
+    config = AuditConfig(ctm_mode="disabled", embedding_provider=DummyEmbedder())
     pipeline = IDICOCPipeline(config)
     pipeline.initialize()
 

@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional, Dict, Tuple
 
 from idicoc_core.api.schemas import NotaryAuditResult, SessionContext
-from idicoc_core.dqe.context_parser import ContextParser
+from idicoc_core.dqe import ContextParser, InvarianceProjector
 from idicoc_core.gating.hardware_mask import HardwareMask
+from idicoc_core.exceptions import InvariantStateBreach
 from idicoc_core.isg.graph_manager import PropertyGraph
 from idicoc_core.isg.loader import parse_policy_line
 from idicoc_core.dse.evaluator import DissonanceStateEvaluator
@@ -73,8 +74,9 @@ class AuditPipeline:
         self.llm_provider = llm_provider
         self.source_anchor = SourceAnchor() if getattr(config, "record_k_fingerprint", True) else None
 
-        # 1. Initialize DQE (Context Parser)
+        # 1. Initialize DQE (Context Parser & Invariance Projector)
         self.dqe = ContextParser(config)
+        self.invariance_projector = InvarianceProjector(config, self.source_anchor)
 
         # 2. Initialize Gating (Hardware Mask)
         self.gating = HardwareMask(config)
@@ -361,6 +363,102 @@ class AuditPipeline:
             )
 
             return result
+        finally:
+            if added_dynamic_ids:
+                for ax_id in added_dynamic_ids:
+                    self.isg.nodes.pop(ax_id, None)
+                self.isg.detect_conflicts()
+
+    def generate(
+        self,
+        user_prompt: str,
+        rag_context: str | List[str],
+        context_policies: Optional[List[Any]] = None,
+        epsilon_override: Optional[float] = None,
+        **kwargs
+    ) -> Tuple[str, NotaryAuditResult]:
+        """
+        Generates LLM output under containment using the InvarianceProjector,
+        and then runs post-audit verification on the response.
+        """
+        added_dynamic_ids = []
+        if context_policies:
+            try:
+                from idicoc_core.utils.embedding_service import EmbeddingService
+
+                embed_service = EmbeddingService()
+
+                for idx, ax_item in enumerate(context_policies):
+                    if not ax_item:
+                        continue
+                    if isinstance(ax_item, dict):
+                        policy_dict = dict(ax_item)
+                        policy_id = (
+                            policy_dict.get("id")
+                            or policy_dict.get("policy_id")
+                            or f"dynamic_policy_{idx}"
+                        )
+                    elif isinstance(ax_item, str):
+                        policy_dict = parse_policy_line(ax_item, idx)
+                        policy_id = policy_dict["id"]
+                    else:
+                        continue
+
+                    if "embedding" not in policy_dict:
+                        raw_text = (
+                            policy_dict.get("text") or policy_dict.get("description") or policy_dict
+                        )
+                        try:
+                            policy_dict["embedding"] = embed_service.encode(
+                                str(raw_text),
+                                model_name=self.config.semantic_embedding_model,
+                            ).tolist()
+                        except Exception as e:
+                            logger.warning(f"Failed to embed dynamic policy {policy_id}: {e}")
+
+                    self.isg.add_policy(policy_id, policy_dict)
+                    added_dynamic_ids.append(policy_id)
+
+                self.isg.detect_conflicts()
+            except Exception as e:
+                logger.error(f"Error compiling dynamic context policies: {e}")
+
+        if isinstance(rag_context, list):
+            rag_str = "\n".join(rag_context)
+        else:
+            rag_str = rag_context or ""
+
+        try:
+            # 1. Proyección de Input (Contención Preventiva)
+            # Evalúa consistencia lógica de la entrada y proyecta su vector
+            try:
+                self.invariance_projector.project(user_prompt, self.isg)
+            except InvariantStateBreach as e:
+                session_context = self.dqe.build_context(user_prompt, rag_str)
+                reject_reason = f"Stage 1: Input Invariance Containment Breach - {str(e)}"
+                return "", self._build_hard_rejection(reject_reason, session_context)
+
+            # 2. Generación con Prompt Limpio (Cero Prompting)
+            if not self.llm_provider:
+                raise ValueError("No llm_provider configured for generate().")
+
+            if rag_str:
+                clean_prompt = f"CONTEXT:\n{rag_str}\n\nUSER REQUEST:\n{user_prompt}"
+            else:
+                clean_prompt = user_prompt
+
+            llm_output = self.llm_provider.generate(clean_prompt, **kwargs)
+
+            # 3. Auditoría (Post-verificación reactiva)
+            audit_result = self.execute_audit(
+                user_prompt=user_prompt,
+                rag_context=rag_str,
+                llm_output=llm_output,
+                context_policies=None,
+                epsilon_override=epsilon_override,
+            )
+
+            return llm_output, audit_result
         finally:
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:

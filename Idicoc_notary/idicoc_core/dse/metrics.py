@@ -334,6 +334,7 @@ def _compute_context_contradiction(
                 min_similarity = similarity
 
             is_contradiction = False
+            score_contra = 0.0
             
             # 1. Try NLI pipeline first
             nli_pipeline = getattr(config, "nli_pipeline", None)
@@ -345,8 +346,9 @@ def _compute_context_contradiction(
                         hypothesis_template=f"Based on the context: {ctx}, this statement is {{}}."
                     )
                     idx_contra = nli_res["labels"].index("contradiction")
-                    score_contra = nli_res["scores"][idx_contra]
+                    score_contra = float(nli_res["scores"][idx_contra])
                     top_label = nli_res["labels"][0]
+                    print("DEBUG CONTRADICTION:", "top_label:", top_label, "score_contra:", score_contra, "text_y:", text_y, "ctx:", ctx)
                     nli_threshold = float(getattr(config, "semantic_nli_conflict_threshold", 0.5))
                     if top_label == "contradiction" or score_contra > nli_threshold:
                         is_contradiction = True
@@ -357,14 +359,12 @@ def _compute_context_contradiction(
             # 2. Fallback to embedding distance/similarity
             contradiction_score = float(1.0 - similarity)
             if not is_contradiction:
-                if getattr(config, "nli_pipeline", None) is None:
-                    if similarity < 0.0 and contradiction_score > contradiction_alert_threshold:
-                        is_contradiction = True
-                else:
-                    if (similarity < 0.0 or len(context_input) == 1) and contradiction_score > contradiction_alert_threshold:
-                        is_contradiction = True
+                if contradiction_score > contradiction_alert_threshold:
+                    is_contradiction = True
 
             if is_contradiction:
+                if nli_pipeline is not None and score_contra > 0.0:
+                    contradiction_score = max(score_contra, contradiction_score)
                 contradictory_contexts.append(ctx)
                 max_contradiction_score = max(max_contradiction_score, contradiction_score)
             else:
