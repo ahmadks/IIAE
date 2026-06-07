@@ -90,6 +90,18 @@ class AuditConfig:
     # Límite superior (cap) de d_context para respetar el umbral de corrección.
     rag_d_context_cap: float = 0.15
 
+    # ── 2.5 Thresholds de Estabilidad y SPSA (Stage 6) ───────────────────────
+    diss_threshold_green: float = 0.10      # Aceptación automática
+    diss_threshold_red: float = 0.25        # Hard Halt (Bloqueo)
+    spsa_convergence_epsilon: float = 0.08   # Umbral objetivo para convergencia
+    spsa_max_iters: int = 5                  # Iteraciones máximas
+    enforce_unit_norm: bool = True          # Normalización L2 unitaria
+    spsa_a: float = 0.1                      # Parámetro de ganancia de SPSA (step size)
+    spsa_c: float = 0.05                     # Parámetro de perturbación de SPSA
+    max_rag_divergence: float = 0.35         # Cerca forense: Máxima divergencia RAG permitida durante SPSA
+
+
+
     # ── 3. Pesos de disonancia y estrategia ─────────────────────────────────
     dissonance_weights: tuple[float, float, float, float, float, float, float] = (
         DEFAULT_DISSONANCE_WEIGHTS

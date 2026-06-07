@@ -854,7 +854,44 @@ class DissonanceStateEvaluator:
             d_s = (1.0 - lambda_context) * policy_dissonance + weighted_context
             d_s = max(d_s, d_context * lambda_context)  # floor proporcional
 
-        # Raw metrics breakdown
+        # Build context embeddings list
+        context_embs_list = []
+        if context_input:
+            from idicoc_core.utils.embedding_service import EmbeddingService
+            from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
+            try:
+                embed_service = EmbeddingService()
+                model_name = getattr(
+                    self.config,
+                    "semantic_embedding_model",
+                    DEFAULT_SEMANTIC_EMBEDDING_MODEL,
+                )
+                embedder = embed_service.get_embedder(model_name)
+                if embedder is not None and hasattr(embedder, "encode"):
+                    for ctx in context_input:
+                        if not ctx.strip():
+                            continue
+                        try:
+                            try:
+                                ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
+                            except TypeError:
+                                try:
+                                    ctx_emb = embedder.encode(ctx, model_name=model_name)
+                                except TypeError:
+                                    ctx_emb = embedder.encode(ctx)
+                            if isinstance(ctx_emb, np.ndarray):
+                                ctx_emb = ctx_emb.astype(float)
+                            else:
+                                ctx_emb = np.asarray(ctx_emb, dtype=float)
+                            ctx_norm = np.linalg.norm(ctx_emb)
+                            if ctx_norm > 1e-12:
+                                context_embs_list.append(ctx_emb / ctx_norm)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+         # Raw metrics breakdown
         raw_metrics = {
             "d_s": d_s,
             "d_0": 0.0,
@@ -871,9 +908,144 @@ class DissonanceStateEvaluator:
             "violated_policies": violations,
             "d_logic": d_logic,
             "d_temporal": d_temporal,
+            "y_vector": y_vector if "y_vector" in locals() else None,
+            "context_embeddings": context_embs_list,
         }
 
         return d_s, violations, raw_metrics
+
+    def _compute_rag_divergence(self, vec: np.ndarray, context_embs: List[np.ndarray]) -> float:
+        import numpy as np
+        max_sim = -1.0
+        for c_emb in context_embs:
+            if c_emb is None:
+                continue
+            sim = float(np.dot(vec, c_emb))
+            if sim > max_sim:
+                max_sim = sim
+        if max_sim == -1.0:
+            return 0.0
+        return 1.0 - max_sim
+
+    def project_spsa(
+        self,
+        y_vec: np.ndarray,
+        v_hat_vec: np.ndarray,
+        const_metrics: Dict[str, Any],
+        context_embs: List[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Operador de convergencia.
+        Runs SPSA to project y_vec closer to v_hat_vec on the unit sphere,
+        minimizing d1 while keeping policy and context constraints constant/static.
+        Performs backtracking if candidate vector drifts too far from RAG context embeddings.
+        """
+        import numpy as np
+
+        if context_embs is None:
+            context_embs = []
+
+        # Enforce copy and unit normalization for z
+        z = np.copy(np.asarray(y_vec, dtype=float))
+        norm_z = np.linalg.norm(z)
+        if norm_z > 1e-12:
+            z = z / norm_z
+
+        v_hat = np.asarray(v_hat_vec, dtype=float)
+        norm_v = np.linalg.norm(v_hat)
+        if norm_v > 1e-12:
+            v_hat = v_hat / norm_v
+
+        # Retrieve weights and constants
+        weights = self.config._normalized_weights
+        lambda_1 = weights[1]
+        lambda_2 = weights[2]
+        lambda_3 = weights[3]
+
+        const_d2 = const_metrics.get("d_logic", 0.0)
+        const_d3 = const_metrics.get("d_temporal", 0.0)
+        const_d_context = const_metrics.get("d_context", 0.0)
+        lambda_context = float(getattr(self.config, "lambda_context", 0.4))
+
+        def _cost_function(vec: np.ndarray) -> float:
+            # Enforce unit norm at each step
+            norm_val = np.linalg.norm(vec)
+            if norm_val > 1e-12:
+                vec_norm = vec / norm_val
+            else:
+                vec_norm = vec
+
+            # Compute d1: normalized L2 distance (simplified Kantorovich)
+            dist = float(np.linalg.norm(vec_norm - v_hat))
+            d1 = float(np.clip(dist / 2.0, 0.0, 1.0))
+
+            # Policy Dissonance (with const_d2 and const_d3)
+            policy_diss = lambda_1 * d1 + lambda_2 * const_d2 + lambda_3 * const_d3
+
+            # Total Coalgebraic Dissonance
+            d_s_val = (1.0 - lambda_context) * policy_diss + lambda_context * const_d_context
+            d_s_val = max(d_s_val, const_d_context * lambda_context)
+            return d_s_val
+
+        # Initial evaluation
+        best_z = np.copy(z)
+        best_loss = _cost_function(z)
+
+        # Early stop if already in the green band
+        if best_loss <= self.config.diss_threshold_green:
+            return best_z, best_loss
+
+        a = getattr(self.config, "spsa_a", 0.1)
+        c = getattr(self.config, "spsa_c", 0.05)
+        max_iters = self.config.spsa_max_iters
+        max_rag_div_threshold = getattr(self.config, "max_rag_divergence", 0.35)
+
+        for k in range(max_iters):
+            # Simultaneous perturbation using Rademacher distribution (discrete ±1)
+            delta = np.random.choice([-1.0, 1.0], size=z.size)
+
+            # Evaluate cost at perturbed vectors
+            z_plus = z + c * delta
+            z_minus = z - c * delta
+
+            loss_plus = _cost_function(z_plus)
+            loss_minus = _cost_function(z_minus)
+
+            # Gradient approximation
+            diff = loss_plus - loss_minus
+            grad = (diff / (2.0 * c)) * delta
+
+            # Update step
+            z_next = z - a * grad
+
+            # Normalize to unit sphere (enforce unit norm constraint)
+            norm_next = np.linalg.norm(z_next)
+            if norm_next > 1e-12:
+                z_next = z_next / norm_next
+
+            # Integrity boundary check (Backtracking/Cerca Forense)
+            if context_embs:
+                current_rag_div = self._compute_rag_divergence(z_next, context_embs)
+                if current_rag_div > max_rag_div_threshold:
+                    # Reject this update step, continue searching in another direction
+                    continue
+
+            loss_next = _cost_function(z_next)
+
+            # Update best if improved
+            if loss_next < best_loss:
+                best_loss = loss_next
+                best_z = np.copy(z_next)
+
+            z = z_next
+
+            # Early stop if we successfully reach the green band
+            if best_loss <= self.config.diss_threshold_green:
+                break
+
+        return best_z, best_loss
+
+
 
 
 class AuditEntropyModule:

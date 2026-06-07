@@ -256,12 +256,13 @@ class AuditPipeline:
             except Exception as e:
                 logger.error(f"Error compiling dynamic context policies: {e}")
 
+        old_eps = self.dse.strategy.config.allowed_epsilon
+
         try:
             # 3. ISG: Cargar Invariantes
             graph = self.isg
 
             # 4. DSE: Evaluación Kantorovich-Lifted (Cálculo de D_s)
-            old_eps = self.dse.strategy.config.allowed_epsilon
             if epsilon_override is not None:
                 self.config.allowed_epsilon = epsilon_override
 
@@ -273,10 +274,81 @@ class AuditPipeline:
                 epsilon_override if epsilon_override is not None else self.config.allowed_epsilon
             )
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
+
+            spsa_corrected = False
+            original_d_s = d_s
+
+            # Check for SPSA capability
+            y_vec = raw_metrics.get("y_vector")
+            v_hat_vec = None
+            if context.v_hat is not None and hasattr(context.v_hat, "semantic_vector"):
+                v_hat_vec = context.v_hat.semantic_vector
+
+            has_spsa_capability = (y_vec is not None and v_hat_vec is not None)
+
+            # Gray Zone Optimization check using SPSA
+            if has_spsa_capability and (self.config.diss_threshold_green < d_s < self.config.diss_threshold_red):
+                import numpy as np
+                context_embs = raw_metrics.get("context_embeddings")
+                best_z, best_loss = self.dse.project_spsa(
+                    y_vec=y_vec,
+                    v_hat_vec=v_hat_vec,
+                    const_metrics=raw_metrics,
+                    context_embs=context_embs
+                )
+                
+                if best_loss < d_s:
+                    d_s = best_loss
+                    raw_metrics["d_s"] = best_loss
+                    
+                    dist = float(np.linalg.norm(best_z - v_hat_vec))
+                    raw_metrics["d_1"] = float(np.clip(dist / 2.0, 0.0, 1.0))
+                    raw_metrics["y_vector"] = best_z
+                    
+                    spsa_corrected = True
+                    
+                    if not context.metadata:
+                        context.metadata = {}
+                    context.metadata["spsa_corrected"] = True
+                    context.metadata["spsa_original_dissonance"] = original_d_s
+                    raw_metrics["spsa_corrected"] = True
+                    raw_metrics["spsa_original_dissonance"] = original_d_s
+
+                    # If converged to compliance, clear violations
+                    if d_s <= effective_threshold:
+                        violations = []
+                        raw_metrics["violated_policies"] = []
+
             is_admitted = bool(d_s <= effective_threshold)
+
+            # Enforce hard halt and SPSA convergence exceptions
+            if math.isinf(d_s):
+                raise InvariantStateBreach(
+                    message="Hard Policy Violation: Infinite dissonance detected.",
+                    invalid_state=llm_output,
+                    origin="execute_audit.hard_violation"
+                )
+
+            if has_spsa_capability:
+                # Red Zone breach (Integrity Breach / Hard Halt)
+                if math.isinf(d_s):
+                    raise InvariantStateBreach(
+                        message="Post-generation Red Zone Integrity Breach: Infinite dissonance detected.",
+                        invalid_state=llm_output,
+                        origin="execute_audit.evaluate_red_zone"
+                    )
+                # SPSA convergence failure
+                elif (self.config.diss_threshold_green < original_d_s < self.config.diss_threshold_red) and not is_admitted:
+                    raise InvariantStateBreach(
+                        message=f"Post-generation SPSA audit failed to converge below acceptable threshold {effective_threshold:.3f}. Dissonance = {d_s:.3f}",
+                        invalid_state=llm_output,
+                        origin="execute_audit.spsa_check"
+                    )
+
 
             # Restore original config epsilon
             self.config.allowed_epsilon = old_eps
+
 
             # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
             if self.config.ctm_mode == "full":
@@ -291,6 +363,10 @@ class AuditPipeline:
                     "violations": violations,
                     "timestamp": timestamp,
                 }
+                if spsa_corrected:
+                    wal_payload["spsa_corrected"] = True
+                    wal_payload["spsa_original_dissonance"] = original_d_s
+                    
                 if self.source_anchor:
                     wal_payload["k_fingerprint"] = self.source_anchor.fingerprint
 
@@ -376,11 +452,60 @@ class AuditPipeline:
             )
 
             return result
+        except InvariantStateBreach as e:
+            logger.warning(f"Post-generation audit aborted due to InvariantStateBreach: {e}")
+            self.config.allowed_epsilon = old_eps
+            
+            # Construct a hard rejection result that preserves violations and metrics
+            if 'violations' not in locals() or not violations:
+                local_violations = [f"[CRITICAL_HARD_HALT] {str(e)}"]
+            else:
+                local_violations = list(violations)
+                local_violations.append(f"[CRITICAL_HARD_HALT] {str(e)}")
+                
+            if 'raw_metrics' not in locals() or not raw_metrics:
+                local_metrics = {
+                    "d_s": float("inf"),
+                    "error": str(e),
+                    "violated_policies": local_violations,
+                }
+            else:
+                local_metrics = dict(raw_metrics)
+                local_metrics["d_s"] = float("inf")
+                local_metrics["violated_policies"] = local_violations
+                local_metrics["error"] = str(e)
+
+            result = NotaryAuditResult(
+                is_admitted=False,
+                integrity_score=0.0,
+                dissonance_ds=float("inf"),
+                allowed_epsilon=effective_threshold if 'effective_threshold' in locals() else self.config.correction_base_tolerance,
+                violated_policies=local_violations,
+                session_context=context,
+                metrics=local_metrics,
+            )
+
+            # Record in AEM
+            self.aem.record(
+                {
+                    "admission_breach": True,
+                    "d_s": float("inf"),
+                    "violated_policies": local_violations,
+                    "epsilon_used": effective_threshold if 'effective_threshold' in locals() else self.config.correction_base_tolerance,
+                    "epsilon": effective_threshold if 'effective_threshold' in locals() else self.config.correction_base_tolerance,
+                    "user_input": user_prompt,
+                    "audit_input": llm_output,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            return result
+
         finally:
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:
                     self.isg.nodes.pop(ax_id, None)
                 self.isg.detect_conflicts()
+
 
     def generate(
         self,
@@ -474,7 +599,11 @@ class AuditPipeline:
                 v_hat=v_hat,
             )
 
+            if not audit_result.is_admitted and math.isinf(audit_result.dissonance_ds):
+                return "", audit_result
+
             return llm_output, audit_result
+
         finally:
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:

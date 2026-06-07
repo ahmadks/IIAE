@@ -206,3 +206,130 @@ def test_projection_divergence_stress():
     assert audit_ok.session_context.v_hat is not None
     assert audit_ok.session_context.v_hat.is_canonical is True
 
+
+def test_projection_divergence_spsa_success():
+    """Verify that SPSA activates in the Gray Zone and successfully corrects the response vector."""
+    llm = DummyLLMProvider()
+    config = AuditConfig(
+        embedding_provider=DummyEmbedder(),
+        ctm_mode="full",  # CTM enabled to verify ledger logging
+        policy_file_path="nonexistent.txt",
+        diss_threshold_green=0.05,
+        diss_threshold_red=0.50,  # make red threshold larger so initial d_s (~0.08) is in the Gray Zone
+        spsa_max_iters=10,
+        spsa_a=0.5,
+        spsa_c=0.01,
+        correction_base_tolerance=0.15,
+        allowed_epsilon=0.0
+    )
+    pipeline = AuditPipeline(config, llm_provider=llm)
+    
+    # Add a soft semantic policy
+    pipeline.isg.add_policy("P001", {
+        "id": "P001",
+        "source_text": "No account",
+        "policy_type": "rule",
+        "polarity": "negative",
+        "hardness": "soft",
+        "priority": 1
+    })
+
+    # Set prompt that matches policy, so v_hat points to prompt vector (vec[0] = 1.0)
+    user_prompt = "Check identity"
+    # LLM response is standard, whose vector is vec[10] = 1.0 (distant from v_hat)
+    llm.response = "Hello standard customer"
+
+    output, audit_res = pipeline.generate(
+        user_prompt=user_prompt,
+        rag_context=""
+    )
+
+    # The SPSA should have run and successfully minimized d_s below effective_threshold (0.15)
+    assert audit_res.is_admitted is True
+    assert audit_res.metrics.get("spsa_corrected") is True
+    assert audit_res.metrics.get("spsa_original_dissonance") > 0.05
+    assert audit_res.dissonance_ds <= 0.15
+
+
+def test_projection_divergence_spsa_failure():
+    """Verify SPSA convergence failure causes a hard halt (returns is_admitted=False)."""
+    llm = DummyLLMProvider()
+    config = AuditConfig(
+        embedding_provider=DummyEmbedder(),
+        ctm_mode="full",
+        policy_file_path="nonexistent.txt",
+        diss_threshold_green=0.05,
+        diss_threshold_red=0.50,
+        spsa_max_iters=1,  # Only 1 iteration, won't converge
+        spsa_a=0.01,       # tiny step size
+        correction_base_tolerance=0.06,  # strict threshold (initial ds is ~0.08)
+        allowed_epsilon=0.0
+    )
+    pipeline = AuditPipeline(config, llm_provider=llm)
+
+    pipeline.isg.add_policy("P001", {
+        "id": "P001",
+        "source_text": "No account",
+        "policy_type": "rule",
+        "polarity": "negative",
+        "hardness": "soft",
+        "priority": 1
+    })
+
+    user_prompt = "Check identity"
+    llm.response = "Hello standard customer"
+
+    output, audit_res = pipeline.generate(
+        user_prompt=user_prompt,
+        rag_context=""
+    )
+
+    # It should fail to converge below the strict effective_threshold, resulting in hard halt
+    assert audit_res.is_admitted is False
+    assert audit_res.dissonance_ds == float("inf")  # Hard halt forces d_s = inf
+    assert any("[CRITICAL_HARD_HALT]" in p for p in audit_res.violated_policies)
+
+
+def test_projection_divergence_spsa_backtracking():
+    """Verify SPSA backtracks (rejects updates) when z_next exceeds max_rag_divergence."""
+    llm = DummyLLMProvider()
+    
+    # We want SPSA to backtrack if it moves too far from RAG context
+    config = AuditConfig(
+        embedding_provider=DummyEmbedder(),
+        ctm_mode="disabled",
+        policy_file_path="nonexistent.txt",
+        diss_threshold_green=0.05,
+        diss_threshold_red=0.50,
+        spsa_max_iters=10,
+        spsa_a=0.5,
+        spsa_c=0.05,
+        max_rag_divergence=0.01,  # extremely small limit forces backtracking on any move
+        correction_base_tolerance=0.08,
+        allowed_epsilon=0.0
+    )
+    pipeline = AuditPipeline(config, llm_provider=llm)
+
+    pipeline.isg.add_policy("P001", {
+        "id": "P001",
+        "source_text": "No account",
+        "policy_type": "rule",
+        "polarity": "negative",
+        "hardness": "soft",
+        "priority": 1
+    })
+
+    user_prompt = "Check identity"
+    # LLM response is standard, RAG is standard
+    llm.response = "Hello standard customer"
+    rag_context = "Bank policy mat"
+
+    output, audit_res = pipeline.generate(
+        user_prompt=user_prompt,
+        rag_context=rag_context
+    )
+
+    # SPSA should fail to converge because backtracking prevented z from moving, so it halts
+    assert audit_res.is_admitted is False
+
+

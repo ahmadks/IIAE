@@ -367,9 +367,24 @@ class CustodialTraceManager:
             "violations": violations,
             "timestamp": timestamp,
         }
+        
+        # Extract SPSA metadata if present
+        if isinstance(context, dict):
+            spsa_corrected = context.get("spsa_corrected", False)
+            spsa_orig = context.get("spsa_original_dissonance")
+        else:
+            spsa_corrected = (context.metadata or {}).get("spsa_corrected", False) if context.metadata else False
+            spsa_orig = (context.metadata or {}).get("spsa_original_dissonance") if context.metadata else None
+
+        if spsa_corrected:
+            logical_payload["spsa_corrected"] = True
+            if spsa_orig is not None:
+                logical_payload["spsa_original_dissonance"] = spsa_orig
+
         if k_fingerprint is not None:
             logical_payload["k_fingerprint"] = k_fingerprint
             logical_payload["k_anchor"] = k_fingerprint
+
 
         # Extract/Include distribution vector if present for the full state hash
         if dist_val is None:
