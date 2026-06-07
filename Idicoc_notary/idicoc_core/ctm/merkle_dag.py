@@ -372,14 +372,22 @@ class CustodialTraceManager:
         if isinstance(context, dict):
             spsa_corrected = context.get("spsa_corrected", False)
             spsa_orig = context.get("spsa_original_dissonance")
+            spsa_history = context.get("spsa_history")
+            spsa_trace_file = context.get("spsa_trace_file")
         else:
             spsa_corrected = (context.metadata or {}).get("spsa_corrected", False) if context.metadata else False
             spsa_orig = (context.metadata or {}).get("spsa_original_dissonance") if context.metadata else None
+            spsa_history = (context.metadata or {}).get("spsa_history") if context.metadata else None
+            spsa_trace_file = (context.metadata or {}).get("spsa_trace_file") if context.metadata else None
 
         if spsa_corrected:
             logical_payload["spsa_corrected"] = True
             if spsa_orig is not None:
                 logical_payload["spsa_original_dissonance"] = spsa_orig
+        if spsa_history is not None:
+            logical_payload["spsa_history"] = spsa_history
+        if spsa_trace_file is not None:
+            logical_payload["spsa_trace_file"] = spsa_trace_file
 
         if k_fingerprint is not None:
             logical_payload["k_fingerprint"] = k_fingerprint

@@ -185,6 +185,64 @@ class AuditPipeline:
         except Exception as exc:
             logger.error(f"Error loading initial policies: {exc}")
 
+    def compute_dynamic_thresholds(self) -> Tuple[float, float]:
+        """
+        Calculates the dynamic thresholds (green, red) based on the last 100 successful transactions.
+        If history is insufficient (e.g. < 10 transactions), returns defaults from config.
+        """
+        default_green = self.config.diss_threshold_green
+        default_red = self.config.diss_threshold_red
+        
+        if self.config.ctm_mode == "disabled" or not self.ctm or not self.ctm._dag or not self.ctm._dag._storage:
+            return default_green, default_red
+            
+        try:
+            nodes_dict = self.ctm._dag._storage.load_all_nodes()
+            if not nodes_dict:
+                return default_green, default_red
+                
+            # Filter successful transactions
+            commits = []
+            for node_hash, node_data in nodes_dict.items():
+                payload = node_data.get("logical_payload", {})
+                if payload.get("type") == "COMMIT":
+                    dissonance = payload.get("dissonance")
+                    ts = node_data.get("timestamp") or payload.get("timestamp") or ""
+                    if dissonance is not None:
+                        try:
+                            commits.append((ts, float(dissonance)))
+                        except (ValueError, TypeError):
+                            pass
+                            
+            if len(commits) < 10:
+                # Insufficient history, return defaults
+                return default_green, default_red
+                
+            # Sort by timestamp ascending to get chronological order
+            commits.sort(key=lambda x: x[0])
+            
+            # Take last 100 successful transactions
+            recent_dissonances = [x[1] for x in commits[-100:]]
+            
+            import numpy as np
+            mean_ds = float(np.mean(recent_dissonances))
+            std_ds = float(np.std(recent_dissonances))
+            
+            # Dynamic thresholds:
+            # Green Zone: mean + 1.5 * std_ds
+            # Red Zone: mean + 3.0 * std_ds
+            dynamic_green = max(0.02, mean_ds + 1.5 * std_ds)
+            dynamic_red = max(0.05, mean_ds + 3.0 * std_ds)
+            
+            # Clamp red to be at least greater than green
+            if dynamic_red <= dynamic_green:
+                dynamic_red = dynamic_green + 0.05
+                
+            return dynamic_green, dynamic_red
+        except Exception as e:
+            logger.warning(f"Error calculating dynamic SPSA thresholds: {e}")
+            return default_green, default_red
+
     def execute_audit(
         self,
         user_prompt: str,
@@ -225,12 +283,8 @@ class AuditPipeline:
                     if not ax_item:
                         continue
                     if isinstance(ax_item, dict):
-                        policy_dict = dict(ax_item)
-                        policy_id = (
-                            policy_dict.get("id")
-                            or policy_dict.get("policy_id")
-                            or f"dynamic_policy_{idx}"
-                        )
+                        policy_dict = ax_item
+                        policy_id = policy_dict.get("policy_id") or policy_dict.get("id") or f"dyn_ctx_{idx}"
                     elif isinstance(ax_item, str):
                         policy_dict = parse_policy_line(ax_item, idx)
                         policy_id = policy_dict["id"]
@@ -256,6 +310,15 @@ class AuditPipeline:
             except Exception as e:
                 logger.error(f"Error compiling dynamic context policies: {e}")
 
+        # Store original thresholds to restore later
+        orig_green = self.config.diss_threshold_green
+        orig_red = self.config.diss_threshold_red
+
+        # Calculate and apply dynamic thresholds for this audit execution
+        dyn_green, dyn_red = self.compute_dynamic_thresholds()
+        self.config.diss_threshold_green = dyn_green
+        self.config.diss_threshold_red = dyn_red
+
         old_eps = self.dse.strategy.config.allowed_epsilon
 
         try:
@@ -278,6 +341,9 @@ class AuditPipeline:
             spsa_corrected = False
             original_d_s = d_s
 
+            tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
+            timestamp = datetime.now(timezone.utc).isoformat()
+
             # Check for SPSA capability
             y_vec = raw_metrics.get("y_vector")
             v_hat_vec = None
@@ -287,28 +353,33 @@ class AuditPipeline:
             has_spsa_capability = (y_vec is not None and v_hat_vec is not None)
 
             # Gray Zone Optimization check using SPSA
+            spsa_history = None
             if has_spsa_capability and (self.config.diss_threshold_green < d_s < self.config.diss_threshold_red):
                 import numpy as np
                 context_embs = raw_metrics.get("context_embeddings")
-                best_z, best_loss = self.dse.project_spsa(
+                best_z, best_loss, spsa_history = self.dse.project_spsa(
                     y_vec=y_vec,
                     v_hat_vec=v_hat_vec,
                     const_metrics=raw_metrics,
                     context_embs=context_embs
                 )
-                
+
+                # Store SPSA history
+                raw_metrics["spsa_history"] = spsa_history
+                if not context.metadata:
+                    context.metadata = {}
+                context.metadata["spsa_history"] = spsa_history
+
                 if best_loss < d_s:
                     d_s = best_loss
                     raw_metrics["d_s"] = best_loss
-                    
+
                     dist = float(np.linalg.norm(best_z - v_hat_vec))
                     raw_metrics["d_1"] = float(np.clip(dist / 2.0, 0.0, 1.0))
                     raw_metrics["y_vector"] = best_z
-                    
+
                     spsa_corrected = True
-                    
-                    if not context.metadata:
-                        context.metadata = {}
+
                     context.metadata["spsa_corrected"] = True
                     context.metadata["spsa_original_dissonance"] = original_d_s
                     raw_metrics["spsa_corrected"] = True
@@ -318,6 +389,36 @@ class AuditPipeline:
                     if d_s <= effective_threshold:
                         violations = []
                         raw_metrics["violated_policies"] = []
+
+            # Export SPSA convergence trace if SPSA was executed
+            if spsa_history is not None:
+                import json
+                filename = f"spsa_convergence_{timestamp.replace(':', '-')}_{tx_id}.json"
+                filepath = os.path.join(self.config.spsa_trace_dir, filename)
+
+                trace_payload = {
+                    "transaction_id": tx_id,
+                    "timestamp": timestamp,
+                    "original_dissonance": original_d_s,
+                    "final_dissonance": d_s,
+                    "converged": bool(d_s <= effective_threshold),
+                    "iterations": spsa_history,
+                    "trace_file": filename
+                }
+
+                try:
+                    os.makedirs(self.config.spsa_trace_dir, exist_ok=True)
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        json.dump(trace_payload, f, indent=2, sort_keys=True)
+                    logger.info(f"SPSA convergence trace exported to {filepath}")
+
+                    # Store trace file reference in raw_metrics and context metadata
+                    raw_metrics["spsa_trace_file"] = filename
+                    if not context.metadata:
+                        context.metadata = {}
+                    context.metadata["spsa_trace_file"] = filename
+                except Exception as trace_err:
+                    logger.warning(f"Failed to export SPSA convergence trace: {trace_err}")
 
             is_admitted = bool(d_s <= effective_threshold)
 
@@ -346,14 +447,11 @@ class AuditPipeline:
                     )
 
 
-            # Restore original config epsilon
-            self.config.allowed_epsilon = old_eps
+
 
 
             # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
             if self.config.ctm_mode == "full":
-                tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
-                timestamp = datetime.now(timezone.utc).isoformat()
                 wal_payload = {
                     "user_prompt": user_prompt,
                     "rag_context": rag_context,
@@ -366,7 +464,11 @@ class AuditPipeline:
                 if spsa_corrected:
                     wal_payload["spsa_corrected"] = True
                     wal_payload["spsa_original_dissonance"] = original_d_s
-                    
+                if spsa_history is not None:
+                    wal_payload["spsa_history"] = spsa_history
+                if "spsa_trace_file" in raw_metrics:
+                    wal_payload["spsa_trace_file"] = raw_metrics["spsa_trace_file"]
+
                 if self.source_anchor:
                     wal_payload["k_fingerprint"] = self.source_anchor.fingerprint
 
@@ -454,7 +556,6 @@ class AuditPipeline:
             return result
         except InvariantStateBreach as e:
             logger.warning(f"Post-generation audit aborted due to InvariantStateBreach: {e}")
-            self.config.allowed_epsilon = old_eps
             
             # Construct a hard rejection result that preserves violations and metrics
             if 'violations' not in locals() or not violations:
@@ -501,6 +602,9 @@ class AuditPipeline:
             return result
 
         finally:
+            self.config.allowed_epsilon = old_eps
+            self.config.diss_threshold_green = orig_green
+            self.config.diss_threshold_red = orig_red
             if added_dynamic_ids:
                 for ax_id in added_dynamic_ids:
                     self.isg.nodes.pop(ax_id, None)

@@ -933,7 +933,7 @@ class DissonanceStateEvaluator:
         v_hat_vec: np.ndarray,
         const_metrics: Dict[str, Any],
         context_embs: List[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, float]:
+    ) -> Tuple[np.ndarray, float, List[Dict[str, Any]]]:
         """
         Operador de convergencia.
         Runs SPSA to project y_vec closer to v_hat_vec on the unit sphere,
@@ -991,9 +991,21 @@ class DissonanceStateEvaluator:
         best_z = np.copy(z)
         best_loss = _cost_function(z)
 
+        # Initialize convergence history
+        history = []
+        init_rag_div = 0.0
+        if context_embs:
+            init_rag_div = float(self._compute_rag_divergence(z, context_embs))
+        history.append({
+            "iteration": 0,
+            "dissonance": float(best_loss),
+            "rag_divergence": init_rag_div,
+            "backtracked": False
+        })
+
         # Early stop if already in the green band
         if best_loss <= self.config.diss_threshold_green:
-            return best_z, best_loss
+            return best_z, best_loss, history
 
         a = getattr(self.config, "spsa_a", 0.1)
         c = getattr(self.config, "spsa_c", 0.05)
@@ -1024,13 +1036,28 @@ class DissonanceStateEvaluator:
                 z_next = z_next / norm_next
 
             # Integrity boundary check (Backtracking/Cerca Forense)
+            current_rag_div = 0.0
+            backtracked = False
             if context_embs:
-                current_rag_div = self._compute_rag_divergence(z_next, context_embs)
+                current_rag_div = float(self._compute_rag_divergence(z_next, context_embs))
                 if current_rag_div > max_rag_div_threshold:
+                    backtracked = True
+                    history.append({
+                        "iteration": k + 1,
+                        "dissonance": float(_cost_function(z_next)),
+                        "rag_divergence": current_rag_div,
+                        "backtracked": True
+                    })
                     # Reject this update step, continue searching in another direction
                     continue
 
             loss_next = _cost_function(z_next)
+            history.append({
+                "iteration": k + 1,
+                "dissonance": float(loss_next),
+                "rag_divergence": current_rag_div,
+                "backtracked": False
+            })
 
             # Update best if improved
             if loss_next < best_loss:
@@ -1043,7 +1070,7 @@ class DissonanceStateEvaluator:
             if best_loss <= self.config.diss_threshold_green:
                 break
 
-        return best_z, best_loss
+        return best_z, best_loss, history
 
 
 

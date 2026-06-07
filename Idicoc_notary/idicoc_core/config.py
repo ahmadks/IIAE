@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 _DEFAULT_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_CTM_NODES_PATH = os.path.join(_DEFAULT_BASE, "tests", "results", "ctm_nodes.json")
 _DEFAULT_CTM_ROOT_PATH = os.path.join(_DEFAULT_BASE, "ctm_root.txt")
+_DEFAULT_SPSA_TRACES_DIR = os.path.join(_DEFAULT_BASE, "tests", "results", "spsa_traces")
 
 # ── Pesos de disonancia por defecto ─────────────────────────────────────────
 # NOTE: λ_1 (d_1: Axiom of Uniqueness) es KL-divergence sólo para distribuciones
@@ -99,6 +100,7 @@ class AuditConfig:
     spsa_a: float = 0.1                      # Parámetro de ganancia de SPSA (step size)
     spsa_c: float = 0.05                     # Parámetro de perturbación de SPSA
     max_rag_divergence: float = 0.35         # Cerca forense: Máxima divergencia RAG permitida durante SPSA
+    spsa_trace_dir: str = _DEFAULT_SPSA_TRACES_DIR
 
 
 
