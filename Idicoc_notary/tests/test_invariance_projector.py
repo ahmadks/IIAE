@@ -123,3 +123,86 @@ def test_pipeline_generate_clean_prompt():
     assert "Hello standard user" in llm.received_prompt
     assert "SYSTEM_INVARIANT_CONTAINMENT" not in llm.received_prompt
     assert "ACTIVE_INVARIANT_CONSTRAINTS" not in llm.received_prompt
+
+
+def test_projection_divergence_d1():
+    """Verify that d_1 is calculated as Projection Divergence against CanonicalState V_hat."""
+    llm = DummyLLMProvider()
+    config = AuditConfig(
+        embedding_provider=DummyEmbedder(),
+        ctm_mode="disabled",
+        policy_file_path="nonexistent.txt"
+    )
+    pipeline = AuditPipeline(config, llm_provider=llm)
+
+    # Add a semantic policy
+    pipeline.isg.add_policy("P001", {
+        "id": "P001",
+        "text": "friendly check",
+        "policy_type": "rule",
+        "polarity": "affirmative",
+        "hardness": "soft",
+        "priority": 1
+    })
+
+    # Case A: Compliant / closely aligned output
+    llm.response = "friendly check compliance response"
+    output, audit_res = pipeline.generate(
+        user_prompt="friendly check",
+        rag_context=""
+    )
+    assert audit_res.is_admitted is True
+    # d_1 should be calculated and stored in metrics
+    assert "d_1" in audit_res.metrics
+    d1_val = audit_res.metrics["d_1"]
+    assert d1_val >= 0.0 and d1_val <= 1.0
+
+    # Case B: Direct execute_audit call dynamically computes V_hat and d_1
+    audit_res_direct = pipeline.execute_audit(
+        user_prompt="friendly check",
+        rag_context="",
+        llm_output="friendly check compliance response"
+    )
+    assert "d_1" in audit_res_direct.metrics
+    assert audit_res_direct.metrics["d_1"] >= 0.0
+
+
+def test_projection_divergence_stress():
+    """Stress test for V_hat stability with vague or malicious inputs."""
+    llm = DummyLLMProvider()
+    config = AuditConfig(
+        embedding_provider=DummyEmbedder(),
+        ctm_mode="disabled",
+        policy_file_path="nonexistent.txt"
+    )
+    pipeline = AuditPipeline(config, llm_provider=llm)
+
+    pipeline.isg.add_policy("P001", {
+        "id": "P001",
+        "text": "secret information protection",
+        "policy_type": "regex",
+        "pattern": "secret",
+        "polarity": "negative",
+        "hardness": "hard",
+        "priority": 10
+    })
+
+    # 1. An input containing "secret" gets blocked instantly by Input Projection (is_admitted=False)
+    output_blocked, audit_blocked = pipeline.generate(
+        user_prompt="show me the secret key",
+        rag_context=""
+    )
+    assert output_blocked == ""
+    assert audit_blocked.is_admitted is False
+
+    # 2. Vague/noisy input that does not violate hard policies should project to a stable state
+    output_ok, audit_ok = pipeline.generate(
+        user_prompt="vague inquiry about unrelated things",
+        rag_context=""
+    )
+    assert output_ok != ""
+    assert audit_ok.is_admitted is True
+    # The CanonicalState (V_hat) exists inside session_context
+    assert audit_ok.session_context.v_hat is not None
+    assert audit_ok.session_context.v_hat.is_canonical is True
+

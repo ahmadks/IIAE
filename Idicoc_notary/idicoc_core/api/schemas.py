@@ -5,6 +5,7 @@ class SessionContext(BaseModel):
     user_prompt: str = Field(..., description="El prompt original inyectado por el usuario")
     rag_context: str = Field(default="", description="El contexto extraído de la base de conocimiento (RAG)")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    v_hat: Optional[Any] = Field(default=None, description="Canonical invariant state (V_hat)")
 
 class NotaryAuditResult(BaseModel):
     is_admitted: bool = Field(..., description="Veredicto de paso (True) o contención/rechazo (False)")

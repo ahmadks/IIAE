@@ -758,14 +758,8 @@ class DissonanceStateEvaluator:
         # ── D_s: Normalized weights from config ──────────────────────────────────
         weights = self.config._normalized_weights
 
-        # ── d_1: Axiom of Uniqueness (KL-divergence for distributions only) ──────
-        # Per IDICOC formalism, d_1 is a measure-theoretic (Kantorovich) metric
-        # defined over probability distributions mu ∈ M(Σ). It is NOT a semantic
-        # distance for natural language text. For text LLM outputs, d_1 = 0.0
-        # because the audit of textual content is the sole responsibility of d_2
-        # (PropertyGraph policy violations) and d_context (RAG contradiction).
-        # Applying d_1 to text would create a permanent baseline dissonance for any
-        # response unrelated to the Axiom of Uniqueness — a category error.
+        # ── d_1: stage 1 - Divergencia de Proyección ─────────────────────────────
+        # Mide cuánto se alejó el LLM del estado canónico V_hat generado por el ISG.
         d1 = 0.0
         try:
             if (
@@ -780,12 +774,47 @@ class DissonanceStateEvaluator:
                 n_ref = mu.size
 
                 # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
-                # es la distribución uniforme.
-                target_state = np.ones(n_ref, dtype=float) / float(n_ref)
+                # es la distribución uniforme o el vector de V_hat si es compatible.
+                if session_context.v_hat is not None and hasattr(session_context.v_hat, "semantic_vector"):
+                    target_state = session_context.v_hat.semantic_vector
+                    if not isinstance(target_state, np.ndarray):
+                        target_state = np.asarray(target_state, dtype=float)
+                    if target_state.size != n_ref:
+                        target_state = np.ones(n_ref, dtype=float) / float(n_ref)
+                else:
+                    target_state = np.ones(n_ref, dtype=float) / float(n_ref)
                 d1 = _compute_d_1(mu, target_state)
-            # else: text input → d_1 = 0.0 (see docstring above)
+            else:
+                # Text input: compute Projection Divergence against CanonicalState V_hat
+                if session_context.v_hat is not None and hasattr(session_context.v_hat, "semantic_vector"):
+                    from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
+                    model_name = getattr(
+                        self.config,
+                        "semantic_embedding_model",
+                        DEFAULT_SEMANTIC_EMBEDDING_MODEL,
+                    )
+                    y_vector_raw = StringUtils.to_vector(eval_input, model_name=model_name)
+                    if active_graph is not None:
+                        y_vector = active_graph.project_to_manifold(y_vector_raw)
+                    else:
+                        y_vector = y_vector_raw
+
+                    v_hat_vector = session_context.v_hat.semantic_vector
+                    if not isinstance(v_hat_vector, np.ndarray):
+                        v_hat_vector = np.asarray(v_hat_vector, dtype=float)
+
+                    norm_y = np.linalg.norm(y_vector)
+                    if norm_y > 1e-12:
+                        y_vector = y_vector / norm_y
+                    norm_v = np.linalg.norm(v_hat_vector)
+                    if norm_v > 1e-12:
+                        v_hat_vector = v_hat_vector / norm_v
+
+                    # Kantorovich metric simplified to normalized L2 distance (simplified Wasserstein)
+                    distancia = float(np.linalg.norm(y_vector - v_hat_vector))
+                    d1 = float(np.clip(distancia / 2.0, 0.0, 1.0))
         except Exception as ex:
-            logger.warning(f"Error computing d_1 (uniqueness distance): {ex}")
+            logger.warning(f"Error computing d_1 (uniqueness/projection distance): {ex}")
 
         # ── D_s: Weighted Coalgebraic Dissonance ─────────────────────────────────
         # Dimensiones activas para texto:

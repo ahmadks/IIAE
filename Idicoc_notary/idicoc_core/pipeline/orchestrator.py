@@ -192,9 +192,22 @@ class AuditPipeline:
         llm_output: str,
         context_policies: Optional[List[Any]] = None,
         epsilon_override: Optional[float] = None,
+        v_hat: Optional[Any] = None,
     ) -> NotaryAuditResult:
         # 1. DQE: Empaquetar el Estado Observable
-        context = self.dqe.build_context(user_prompt, rag_context)
+        context = self.dqe.build_context(user_prompt, rag_context, v_hat=v_hat)
+
+        if context.v_hat is None:
+            try:
+                # Si no se pasó v_hat, lo generamos proyectando el prompt original
+                projected_vec = self.invariance_projector.project(user_prompt, self.isg)
+                from idicoc_core.kernel.projection.invariant_state_generator import CanonicalState
+                context.v_hat = CanonicalState(measure_vector=projected_vec, metadata={"origin": "execute_audit"})
+            except InvariantStateBreach as e:
+                # Si hay una violación de invarianza en el input original, se rechaza
+                return self._build_hard_rejection(f"Input Invariance Containment Breach - {str(e)}", context)
+            except Exception as e:
+                logger.warning(f"Could not compute v_hat dynamically in execute_audit: {e}")
 
         # 2. Gating: Stage 2/3 (Hardware Mask & Domain Confinement)
         if not self.gating.is_hardware_contained(context):
@@ -432,7 +445,9 @@ class AuditPipeline:
             # 1. Proyección de Input (Contención Preventiva)
             # Evalúa consistencia lógica de la entrada y proyecta su vector
             try:
-                self.invariance_projector.project(user_prompt, self.isg)
+                projected_vec = self.invariance_projector.project(user_prompt, self.isg)
+                from idicoc_core.kernel.projection.invariant_state_generator import CanonicalState
+                v_hat = CanonicalState(measure_vector=projected_vec, metadata={"origin": "invariance_projector"})
             except InvariantStateBreach as e:
                 session_context = self.dqe.build_context(user_prompt, rag_str)
                 reject_reason = f"Stage 1: Input Invariance Containment Breach - {str(e)}"
@@ -456,6 +471,7 @@ class AuditPipeline:
                 llm_output=llm_output,
                 context_policies=None,
                 epsilon_override=epsilon_override,
+                v_hat=v_hat,
             )
 
             return llm_output, audit_result

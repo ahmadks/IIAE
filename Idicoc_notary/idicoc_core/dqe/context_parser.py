@@ -12,7 +12,11 @@ class ContextParser:
         self.config = config
 
     def build_context(
-        self, user_prompt: str, rag_context: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        user_prompt: str,
+        rag_context: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        v_hat: Optional[Any] = None,
     ) -> SessionContext:
         """
         Builds a structured SessionContext DTO from raw prompt and context strings.
@@ -20,5 +24,6 @@ class ContextParser:
         return SessionContext(
             user_prompt=user_prompt or "",
             rag_context=rag_context or "",
-            metadata=metadata or {}
+            metadata=metadata or {},
+            v_hat=v_hat,
         )
