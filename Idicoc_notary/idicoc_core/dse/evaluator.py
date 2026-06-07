@@ -883,8 +883,6 @@ class DissonanceStateEvaluator:
             logger.error(f"CRITICAL: Error computing d_logic (d_2): {ex}", exc_info=True)
             raise
 
-
-
     def _calculate_d_context(
         self,
         eval_input: Any,

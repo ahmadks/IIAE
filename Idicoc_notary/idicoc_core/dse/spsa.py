@@ -137,3 +137,66 @@ class SPSACorrector:
             if sim > max_sim:
                 max_sim = sim
         return 0.0 if max_sim == -1.0 else 1.0 - max_sim
+
+    def should_apply_correction(self, d_s: float, raw_metrics: Dict[str, Any]) -> bool:
+        """
+        Decide whether SPSA correction should be attempted based on dissonance metrics.
+        Returns True if d_s is in the "gray band" for correction.
+        """
+        d2 = float(raw_metrics.get("d_2", 0.0))
+        d3 = float(raw_metrics.get("d_3", 0.0))
+
+        # Do not attempt SPSA when any discrete violation exists.
+        if d2 > 0.0 or d3 > 0.0:
+            return False
+
+        if d_s == float("inf"):
+            return False
+
+        # Do not apply SPSA if there are no active policies in the graph.
+        if raw_metrics.get("policy_graph_empty", False):
+            logger.warning(
+                "Skipping SPSA: active policy graph is empty. "
+                "d_2 and d_3 are zero by default when no policies exist."
+            )
+            return False
+
+        # SPSA is only allowed in the gray band for d_s
+        in_ds_gray = self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
+        return in_ds_gray
+
+    def attempt_correction(
+        self,
+        llm_output: str,
+        y_vector: np.ndarray,
+        v_hat_vector: np.ndarray,
+        raw_metrics: Dict[str, Any],
+        effective_threshold: float,
+    ) -> Optional[float]:
+        """
+        Attempt SPSA correction on LLM output.
+        Returns corrected dissonance if successful, None otherwise.
+        """
+        import time
+
+        t_spsa_start = time.perf_counter()
+        try:
+            corrected_vector, corrected_loss, history = self.project(
+                y_vector,
+                v_hat_vector,
+                raw_metrics,
+                context_embs=raw_metrics.get("context_embeddings", []),
+            )
+
+            raw_metrics["spsa_history"] = history
+            t_spsa_elapsed = time.perf_counter() - t_spsa_start
+            logger.info("[TIMING] SPSA correction: %.3f sec", t_spsa_elapsed)
+            raw_metrics["spsa_duration_sec"] = t_spsa_elapsed
+            return float(corrected_loss)
+
+        except Exception as exc:
+            logger.error(f"Error during SPSA correction: {exc}", exc_info=True)
+            raw_metrics["spsa_error"] = str(exc)
+            t_spsa_elapsed = time.perf_counter() - t_spsa_start
+            logger.error("[TIMING] SPSA error after %.3f sec: %s", t_spsa_elapsed, exc)
+            return None

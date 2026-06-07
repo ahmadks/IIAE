@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os
 import math
 import time
 from datetime import datetime, timezone
@@ -15,60 +14,12 @@ from idicoc_core.isg.loader import parse_policy_line
 from idicoc_core.kernel.projection.invariant_state_generator import CanonicalState
 from idicoc_core.dse.evaluator import DissonanceStateEvaluator
 from idicoc_core.dse.spsa import SPSACorrector
-from idicoc_core.ctm.merkle_dag import (
-    CustodialTraceManager,
-    MerkleDAG,
-    EnvHardwareSealer,
-    FileCTMStorage,
-)
-from idicoc_core.ctm.wal_logger import WriteAheadLogger
+from idicoc_core.dse.aem import AuditEntropyModule
+from idicoc_core.pipeline.ctm_orchestration import CTMOrchestrator
 from idicoc_core.utils.logger import get_logger
+from idicoc_core.utils.string_utils import StringUtils
 
 logger = get_logger("pipeline.orchestrator")
-
-
-class AuditEntropyModule:
-    """Audit Entropy Module (AEM) to track the audit history and rejections."""
-
-    def __init__(self) -> None:
-        self.trail: List[Dict[str, Any]] = []
-
-        # AEM Accounting Counters (valores iniciales por defecto de 1.0 según especificación)
-        self._y_total: float = 1.0  # Total signals processed by DQE
-        self._y_valid: float = 1.0  # Signals validated/corrected by DQE
-
-    def record(self, case: Dict[str, Any]) -> None:
-        self.trail.append(case)
-        total, valid, rejected = self.get_counters()
-        self._y_total = float(total)
-        self._y_valid = float(valid)
-
-    def get_audit_trail(self) -> List[Dict[str, Any]]:
-        return self.trail
-
-    def get_counters(self) -> Tuple[int, int, int]:
-        total = len(self.trail)
-        rejected = sum(1 for c in self.trail if c.get("admission_breach"))
-        valid = total - rejected
-        return total, valid, rejected
-
-    @property
-    def y_total(self) -> float:
-        """Total signals processed by DQE (as float)"""
-        return self._y_total
-
-    @y_total.setter
-    def y_total(self, value: float) -> None:
-        self._y_total = float(value)
-
-    @property
-    def y_valid(self) -> float:
-        """Signals validated/corrected by DQE (as float)"""
-        return self._y_valid
-
-    @y_valid.setter
-    def y_valid(self, value: float) -> None:
-        self._y_valid = float(value)
 
 
 class AuditPipeline:
@@ -89,62 +40,8 @@ class AuditPipeline:
         self.dse = DissonanceStateEvaluator(config)
         self.spsa = SPSACorrector(config)
 
-        # 5. Initialize CTM (Custodial Trace Manager)
-        ctm_storage = FileCTMStorage(
-            self.config.ctm_nodes_path,
-            self.config.ctm_root_path,
-        )
-        self.ctm = CustodialTraceManager(
-            dag=MerkleDAG(
-                sealer=EnvHardwareSealer(
-                    key_env=self.config.hardware_key_env_var,
-                    require_key=self.config.require_hardware_seal,
-                ),
-                storage_backend=ctm_storage,
-            )
-        )
-
-        # Initialize Genesis metadata
-        genesis_metadata = {
-            "instance_name": self.config.instance_name,
-            "ctm_mode": self.config.ctm_mode,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        self.ctm.initialize_genesis(
-            genesis_metadata,
-            timestamp=genesis_metadata["timestamp"],
-        )
-
-        # Initialize WAL
-        wal_path = self.config.ctm_wal_path
-        if not wal_path:
-            wal_path = os.path.join(
-                os.path.dirname(self.config.ctm_nodes_path or "."), "ctm_wal.log"
-            )
-        self.wal = WriteAheadLogger(wal_path)
-
-        # Reconcile WAL transactions on startup
-        try:
-            pending = self.wal.recover_pending_transactions()
-            if pending:
-                logger.warning(f"Reconciling {len(pending)} pending WAL transactions...")
-                for tx_id, payload in pending.items():
-                    try:
-                        self.ctm.commit(
-                            canonical_state=payload,
-                            timestamp=payload.get(
-                                "timestamp", datetime.now(timezone.utc).isoformat()
-                            ),
-                            dissonance=payload.get("dissonance", 0.0),
-                            transaction_id=tx_id,
-                            violations=payload.get("violations"),
-                            dissonance_components=payload.get("dissonance_components"),
-                        )
-                        self.wal.mark_completed(tx_id)
-                    except Exception as exc:
-                        logger.error(f"Failed to reconcile WAL tx {tx_id}: {exc}")
-        except Exception as exc:
-            logger.error(f"WAL recovery failed: {exc}")
+        # 5. Initialize CTM & WAL orchestrator
+        self.ctm_orchestrator = CTMOrchestrator(config)
 
         # 6. Initialize AEM (Audit Entropy Module)
         self.aem = AuditEntropyModule()
@@ -262,10 +159,11 @@ class AuditPipeline:
         raw_metrics: Dict[str, Any],
         effective_threshold: float,
     ) -> Optional[float]:
-        t_spsa_start = time.perf_counter()
+        """
+        Delegate to SPSACorrector to attempt dissonance correction.
+        Returns corrected dissonance or None if correction fails.
+        """
         try:
-            from idicoc_core.utils.string_utils import StringUtils
-
             y_vec = StringUtils.to_vector(
                 llm_output,
                 model_name=self.config.semantic_embedding_model,
@@ -278,47 +176,14 @@ class AuditPipeline:
             if v_hat_vec is None:
                 return None
 
-            corrected_vector, corrected_loss, history = self.spsa.project(
-                y_vec,
-                v_hat_vec,
-                raw_metrics,
-                context_embs=raw_metrics.get("context_embeddings", []),
+            return self.spsa.attempt_correction(
+                llm_output, y_vec, v_hat_vec, raw_metrics, effective_threshold
             )
 
-            raw_metrics["spsa_history"] = history
-            t_spsa_elapsed = time.perf_counter() - t_spsa_start
-            logger.info("[TIMING] SPSA correction: %.3f sec", t_spsa_elapsed)
-            raw_metrics["spsa_duration_sec"] = t_spsa_elapsed
-            return float(corrected_loss)
         except Exception as exc:
             logger.error(f"Error during SPSA correction: {exc}", exc_info=True)
             raw_metrics["spsa_error"] = str(exc)
-            t_spsa_elapsed = time.perf_counter() - t_spsa_start
-            logger.error("[TIMING] SPSA error after %.3f sec: %s", t_spsa_elapsed, exc)
             return None
-
-    def _should_apply_spsa(self, d_s: float, raw_metrics: Dict[str, Any]) -> bool:
-        d1 = float(raw_metrics.get("d_1", 0.0))
-        d2 = float(raw_metrics.get("d_2", 0.0))
-        d3 = float(raw_metrics.get("d_3", 0.0))
-
-        # Do not attempt SPSA when any discrete violation exists.
-        if d2 > 0.0 or d3 > 0.0:
-            return False
-        if d_s == float("inf"):
-            return False
-
-        # Do not apply SPSA if there are no active policies in the graph.
-        if raw_metrics.get("policy_graph_empty", False):
-            logger.warning(
-                "Skipping SPSA because the active policy graph is empty. "
-                "d_2 and d_3 are zero by default when no policies are evaluated."
-            )
-            return False
-
-        # SPSA is only allowed in the gray band for d_s.
-        in_ds_gray = self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
-        return in_ds_gray
 
     def execute_audit(
         self,
@@ -377,8 +242,9 @@ class AuditPipeline:
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
             is_admitted = bool(d_s <= effective_threshold)
 
+            # Attempt SPSA correction if applicable
             if (
-                self._should_apply_spsa(d_s, raw_metrics)
+                self.spsa.should_apply_correction(d_s, raw_metrics)
                 and getattr(context, "v_hat", None) is not None
             ):
                 logger.info("[TIMING] Attempting SPSA correction...")
@@ -436,74 +302,16 @@ class AuditPipeline:
             self.config.allowed_epsilon = old_eps
 
             # 5. CTM: Efecto Secundario Criptográfico (Silent Emission)
-            t_ctm_start = time.perf_counter()
-            if self.config.ctm_mode == "full":
-                tx_id = f"tx_{hash(llm_output)}_{int(datetime.now(timezone.utc).timestamp())}"
-                timestamp = datetime.now(timezone.utc).isoformat()
-                wal_payload = {
-                    "user_prompt": user_prompt,
-                    "rag_context": rag_context,
-                    "output": llm_output,
-                    "dissonance": d_s,
-                    "is_admitted": is_admitted,
-                    "violations": violations,
-                    "timestamp": timestamp,
-                }
-
-                # Check for distribution to include in WAL payload
-                dist_val = None
-                if isinstance(context, dict):
-                    dist_val = context.get("distribution") or context.get("metadata", {}).get(
-                        "distribution"
-                    )
-                else:
-                    dist_val = getattr(context, "distribution", None) or (
-                        context.metadata or {}
-                    ).get("distribution")
-
-                if dist_val is None:
-                    try:
-                        if isinstance(llm_output, str) and (
-                            llm_output.startswith("[") or "array" in llm_output
-                        ):
-                            import ast
-
-                            parsed = ast.literal_eval(llm_output)
-                            if isinstance(parsed, (list, tuple)):
-                                dist_val = list(parsed)
-                    except Exception:
-                        pass
-
-                if dist_val is not None:
-                    if hasattr(dist_val, "tolist"):
-                        dist_val = dist_val.tolist()
-                    wal_payload["distribution"] = dist_val
-
-                dissonance_components = {
-                    "d_axiomatic": float(raw_metrics.get("d_logic", d_s)),
-                    "d_context": float(raw_metrics.get("d_context", 0.0)),
-                }
-                wal_payload["dissonance_components"] = dissonance_components
-
-                self.wal.write(tx_id, wal_payload)
-                try:
-                    self.ctm.commit_trace(
-                        context,
-                        llm_output,
-                        d_s,
-                        is_admitted,
-                        violations,
-                        transaction_id=tx_id,
-                        timestamp=timestamp,
-                        dissonance_components=dissonance_components,
-                    )
-                    self.wal.mark_completed(tx_id)
-                except Exception as exc:
-                    logger.error(f"CTM commit failure: {exc}")
-                t_ctm_elapsed = time.perf_counter() - t_ctm_start
-                logger.info("[TIMING] CTM commit: %.3f sec", t_ctm_elapsed)
-            else:
-                logger.info("[TIMING] CTM mode: %s (skipped)", self.config.ctm_mode)
+            self.ctm_orchestrator.commit_audit_trace(
+                user_prompt=user_prompt,
+                rag_context=self._normalize_rag_context(rag_context),
+                llm_output=llm_output,
+                session_context=context,
+                d_s=d_s,
+                is_admitted=is_admitted,
+                violations=violations,
+                raw_metrics=raw_metrics,
+            )
 
             # 6. Mapeo de Terminalidad Coálgebraica:
             integrity_score = (
