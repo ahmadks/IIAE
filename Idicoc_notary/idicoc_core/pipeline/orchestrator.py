@@ -10,9 +10,15 @@ from idicoc_core.gating.hardware_mask import HardwareMask
 from idicoc_core.isg.graph_manager import PropertyGraph
 from idicoc_core.isg.loader import parse_policy_line
 from idicoc_core.dse.evaluator import DissonanceStateEvaluator
-from idicoc_core.ctm.merkle_dag import CustodialTraceManager, MerkleDAG, EnvHardwareSealer, FileCTMStorage
+from idicoc_core.ctm.merkle_dag import (
+    CustodialTraceManager,
+    MerkleDAG,
+    EnvHardwareSealer,
+    FileCTMStorage,
+)
 from idicoc_core.ctm.wal_logger import WriteAheadLogger
 from idicoc_core.utils.logger import get_logger
+from idicoc_core.kernel.source.anchor import SourceAnchor
 
 logger = get_logger("pipeline.orchestrator")
 
@@ -22,7 +28,7 @@ class AuditEntropyModule:
 
     def __init__(self) -> None:
         self.trail: List[Dict[str, Any]] = []
-        
+
         # AEM Accounting Counters (valores iniciales por defecto de 1.0 según especificación)
         self._y_total: float = 1.0  # Total signals processed by DQE
         self._y_valid: float = 1.0  # Signals validated/corrected by DQE
@@ -65,19 +71,20 @@ class AuditPipeline:
     def __init__(self, config: Any, llm_provider: Any = None):
         self.config = config
         self.llm_provider = llm_provider
-        
+        self.source_anchor = SourceAnchor() if getattr(config, "record_k_fingerprint", True) else None
+
         # 1. Initialize DQE (Context Parser)
         self.dqe = ContextParser(config)
-        
+
         # 2. Initialize Gating (Hardware Mask)
         self.gating = HardwareMask(config)
-        
+
         # 3. Initialize ISG (Active Graph Manager)
         self.isg = PropertyGraph(embedding_signature=self.config.embedding_signature)
-        
+
         # 4. Initialize DSE (Dissonance State Evaluator)
         self.dse = DissonanceStateEvaluator(config)
-        
+
         # 5. Initialize CTM (Custodial Trace Manager)
         ctm_storage = FileCTMStorage(
             self.config.ctm_nodes_path,
@@ -92,7 +99,7 @@ class AuditPipeline:
                 storage_backend=ctm_storage,
             )
         )
-        
+
         # Initialize Genesis metadata
         genesis_metadata = {
             "instance_name": self.config.instance_name,
@@ -103,7 +110,7 @@ class AuditPipeline:
             genesis_metadata,
             timestamp=genesis_metadata["timestamp"],
         )
-        
+
         # Initialize WAL
         wal_path = self.config.ctm_wal_path
         if not wal_path:
@@ -111,7 +118,7 @@ class AuditPipeline:
                 os.path.dirname(self.config.ctm_nodes_path or "."), "ctm_wal.log"
             )
         self.wal = WriteAheadLogger(wal_path)
-        
+
         # Reconcile WAL transactions on startup
         try:
             pending = self.wal.recover_pending_transactions()
@@ -121,11 +128,13 @@ class AuditPipeline:
                     try:
                         self.ctm.commit(
                             canonical_state=payload,
-                            timestamp=payload.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            timestamp=payload.get(
+                                "timestamp", datetime.now(timezone.utc).isoformat()
+                            ),
                             dissonance=payload.get("dissonance", 0.0),
                             transaction_id=tx_id,
                             violations=payload.get("violations"),
-                            dissonance_components=payload.get("dissonance_components")
+                            dissonance_components=payload.get("dissonance_components"),
                         )
                         self.wal.mark_completed(tx_id)
                     except Exception as exc:
@@ -146,15 +155,16 @@ class AuditPipeline:
         try:
             policies_data = self.config.policy_loader.load_policies()
             from idicoc_core.utils.embedding_service import EmbeddingService
+
             embed_service = EmbeddingService()
 
             for idx, policy_dict in enumerate(policies_data):
-                policy_id = (
-                    policy_dict.get("policy_id") or policy_dict.get("id") or f"static_{idx}"
-                )
+                policy_id = policy_dict.get("policy_id") or policy_dict.get("id") or f"static_{idx}"
                 if "embedding" not in policy_dict:
                     text_to_embed = (
-                        policy_dict.get("text") or policy_dict.get("description") or str(policy_dict)
+                        policy_dict.get("text")
+                        or policy_dict.get("description")
+                        or str(policy_dict)
                     )
                     try:
                         policy_dict["embedding"] = embed_service.encode(
@@ -162,7 +172,9 @@ class AuditPipeline:
                             model_name=self.config.semantic_embedding_model,
                         ).tolist()
                     except Exception as e:
-                        logger.warning(f"Could not compute embedding for static policy {policy_id}: {e}")
+                        logger.warning(
+                            f"Could not compute embedding for static policy {policy_id}: {e}"
+                        )
 
                 self.isg.add_policy(policy_id, policy_dict)
 
@@ -177,7 +189,7 @@ class AuditPipeline:
         rag_context: str,
         llm_output: str,
         context_policies: Optional[List[Any]] = None,
-        epsilon_override: Optional[float] = None
+        epsilon_override: Optional[float] = None,
     ) -> NotaryAuditResult:
         # 1. DQE: Empaquetar el Estado Observable
         context = self.dqe.build_context(user_prompt, rag_context)
@@ -191,6 +203,7 @@ class AuditPipeline:
         if context_policies:
             try:
                 from idicoc_core.utils.embedding_service import EmbeddingService
+
                 embed_service = EmbeddingService()
 
                 for idx, ax_item in enumerate(context_policies):
@@ -241,7 +254,9 @@ class AuditPipeline:
             d_s = float(d_s)
 
             # Umbral efectivo = base_tolerance + epsilon (permite omisiones suaves)
-            allowed_eps = float(epsilon_override if epsilon_override is not None else self.config.allowed_epsilon)
+            allowed_eps = float(
+                epsilon_override if epsilon_override is not None else self.config.allowed_epsilon
+            )
             effective_threshold = self.config.correction_base_tolerance + allowed_eps
             is_admitted = bool(d_s <= effective_threshold)
 
@@ -261,18 +276,27 @@ class AuditPipeline:
                     "violations": violations,
                     "timestamp": timestamp,
                 }
+                if self.source_anchor:
+                    wal_payload["k_fingerprint"] = self.source_anchor.fingerprint
 
                 # Check for distribution to include in WAL payload
                 dist_val = None
                 if isinstance(context, dict):
-                    dist_val = context.get("distribution") or context.get("metadata", {}).get("distribution")
+                    dist_val = context.get("distribution") or context.get("metadata", {}).get(
+                        "distribution"
+                    )
                 else:
-                    dist_val = getattr(context, "distribution", None) or (context.metadata or {}).get("distribution")
-                
+                    dist_val = getattr(context, "distribution", None) or (
+                        context.metadata or {}
+                    ).get("distribution")
+
                 if dist_val is None:
                     try:
-                        if isinstance(llm_output, str) and (llm_output.startswith("[") or "array" in llm_output):
+                        if isinstance(llm_output, str) and (
+                            llm_output.startswith("[") or "array" in llm_output
+                        ):
                             import ast
+
                             parsed = ast.literal_eval(llm_output)
                             if isinstance(parsed, (list, tuple)):
                                 dist_val = list(parsed)
@@ -286,7 +310,7 @@ class AuditPipeline:
 
                 dissonance_components = {
                     "d_axiomatic": float(raw_metrics.get("d_logic", d_s)),
-                    "d_context": float(raw_metrics.get("d_context", 0.0))
+                    "d_context": float(raw_metrics.get("d_context", 0.0)),
                 }
                 wal_payload["dissonance_components"] = dissonance_components
 
@@ -300,14 +324,17 @@ class AuditPipeline:
                         violations,
                         transaction_id=tx_id,
                         timestamp=timestamp,
-                        dissonance_components=dissonance_components
+                        dissonance_components=dissonance_components,
+                        k_fingerprint=self.source_anchor.fingerprint if self.source_anchor else None,
                     )
                     self.wal.mark_completed(tx_id)
                 except Exception as exc:
                     logger.error(f"CTM commit failure: {exc}")
 
             # 6. Mapeo de Terminalidad Coálgebraica:
-            integrity_score = 0.0 if math.isinf(d_s) or math.isnan(d_s) else float(max(0.0, 1.0 - d_s))
+            integrity_score = (
+                0.0 if math.isinf(d_s) or math.isnan(d_s) else float(max(0.0, 1.0 - d_s))
+            )
 
             result = NotaryAuditResult(
                 is_admitted=is_admitted,
@@ -316,20 +343,22 @@ class AuditPipeline:
                 allowed_epsilon=effective_threshold,
                 violated_policies=violations,
                 session_context=context,
-                metrics=raw_metrics
+                metrics=raw_metrics,
             )
 
             # Record in AEM
-            self.aem.record({
-                "admission_breach": not is_admitted,
-                "d_s": d_s,
-                "violated_policies": violations,
-                "epsilon_used": effective_threshold,
-                "epsilon": effective_threshold,
-                "user_input": user_prompt,
-                "audit_input": llm_output,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            self.aem.record(
+                {
+                    "admission_breach": not is_admitted,
+                    "d_s": d_s,
+                    "violated_policies": violations,
+                    "epsilon_used": effective_threshold,
+                    "epsilon": effective_threshold,
+                    "user_input": user_prompt,
+                    "audit_input": llm_output,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
 
             return result
         finally:
@@ -348,20 +377,23 @@ class AuditPipeline:
             allowed_epsilon=effective_threshold,
             violated_policies=[reason],
             session_context=session_context,
-            metrics={"error": reason}
+            metrics={"error": reason},
         )
-        self.aem.record({
-            "admission_breach": True,
-            "d_s": float("inf"),
-            "violated_policies": [reason],
-            "epsilon_used": effective_threshold,
-            "epsilon": effective_threshold,
-            "user_input": session_context.user_prompt,
-            "audit_input": "Stage 2: Hardware Mask Containment Breach",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+        self.aem.record(
+            {
+                "admission_breach": True,
+                "d_s": float("inf"),
+                "violated_policies": [reason],
+                "epsilon_used": effective_threshold,
+                "epsilon": effective_threshold,
+                "user_input": session_context.user_prompt,
+                "audit_input": "Stage 2: Hardware Mask Containment Breach",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         return result
 
-    def _build_hard_rejection(self, reason: str, session_context: SessionContext) -> NotaryAuditResult:
+    def _build_hard_rejection(
+        self, reason: str, session_context: SessionContext
+    ) -> NotaryAuditResult:
         return self._build_rejection(reason, session_context)
-

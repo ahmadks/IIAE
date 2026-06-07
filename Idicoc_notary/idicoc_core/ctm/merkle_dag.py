@@ -57,6 +57,7 @@ class EnvHardwareSealer:
             return payload
 
         import copy
+
         payload_copy = copy.deepcopy(payload)
         serialized = canonical_json(payload)
         signature = hmac_sha256_hex(self.key, serialized)
@@ -242,7 +243,11 @@ class CustodialTraceManager:
     @staticmethod
     def _strip_distribution(obj: Any) -> Any:
         if isinstance(obj, dict):
-            return {k: CustodialTraceManager._strip_distribution(v) for k, v in obj.items() if k != "distribution"}
+            return {
+                k: CustodialTraceManager._strip_distribution(v)
+                for k, v in obj.items()
+                if k != "distribution"
+            }
         if isinstance(obj, list):
             return [CustodialTraceManager._strip_distribution(v) for v in obj]
         return obj
@@ -260,9 +265,10 @@ class CustodialTraceManager:
         transaction_id: Optional[str] = None,
         violations: Optional[List[str]] = None,
         dissonance_components: Optional[Dict[str, float]] = None,
+        k_fingerprint: Optional[str] = None,
     ) -> MerkleNode:
         pg_val = getattr(property_graph, "nodes", property_graph)
-        
+
         # Compute canonical state hash (includes distribution vector if present)
         cs_hash = invariant_state_hash or self._hash_commitment(canonical_state)
         pg_hash = property_graph_hash or self._hash_commitment(pg_val)
@@ -274,16 +280,22 @@ class CustodialTraceManager:
             # Build lightweight forensic fingerprint instead of serializing the full state
             import math
             from datetime import datetime, timezone
+
             integrity_score = max(0.0, 1.0 - dissonance)
             if math.isinf(dissonance) or math.isnan(dissonance):
                 integrity_score = 0.0
 
             cs_payload = {
-                "transaction_id": transaction_id or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
+                "transaction_id": transaction_id
+                or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
                 "integrity_score": integrity_score,
                 "canonical_state_hash": cs_hash,
                 "violated_policies": violations or [],
-                "is_admitted": float(dissonance) <= float(epsilon) if not (math.isinf(dissonance) or math.isnan(dissonance)) else False
+                "is_admitted": (
+                    float(dissonance) <= float(epsilon)
+                    if not (math.isinf(dissonance) or math.isnan(dissonance))
+                    else False
+                ),
             }
             if dissonance_components is not None:
                 cs_payload["dissonance_components"] = dissonance_components
@@ -299,6 +311,9 @@ class CustodialTraceManager:
             "epsilon": epsilon,
             "property_graph": pg_payload,
         }
+        if k_fingerprint is not None:
+            logical_payload["k_fingerprint"] = k_fingerprint
+            logical_payload["k_anchor"] = k_fingerprint
         if aem_counters is not None:
             logical_payload["aem_counters"] = aem_counters
 
@@ -321,12 +336,14 @@ class CustodialTraceManager:
         transaction_id: Optional[str] = None,
         timestamp: Optional[str] = None,
         dissonance_components: Optional[Dict[str, float]] = None,
+        k_fingerprint: Optional[str] = None,
     ) -> None:
         """
         Commit a trace to the cryptographic Merkle DAG.
         This represents the forensic immutable trace logging.
         """
         from datetime import datetime, timezone
+
         if timestamp is None:
             timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -348,14 +365,18 @@ class CustodialTraceManager:
             "dissonance": d_s,
             "is_admitted": is_admitted,
             "violations": violations,
-            "timestamp": timestamp
+            "timestamp": timestamp,
         }
+        if k_fingerprint is not None:
+            logical_payload["k_fingerprint"] = k_fingerprint
+            logical_payload["k_anchor"] = k_fingerprint
 
         # Extract/Include distribution vector if present for the full state hash
         if dist_val is None:
             try:
                 if isinstance(output, str) and (output.startswith("[") or "array" in output):
                     import ast
+
                     parsed = ast.literal_eval(output)
                     if isinstance(parsed, (list, tuple)):
                         dist_val = list(parsed)
@@ -370,18 +391,19 @@ class CustodialTraceManager:
         invariant_state_hash = sha256_hex(canonical_json(logical_payload))
 
         if dissonance_components is None:
-            dissonance_components = {
-                "d_axiomatic": d_s,
-                "d_context": 0.0
-            }
+            dissonance_components = {"d_axiomatic": d_s, "d_context": 0.0}
             if isinstance(context, dict):
                 metrics = context.get("metrics") or context.get("metadata", {}).get("audit_metrics")
             else:
-                metrics = getattr(context, "metrics", None) or (context.metadata or {}).get("audit_metrics")
+                metrics = getattr(context, "metrics", None) or (context.metadata or {}).get(
+                    "audit_metrics"
+                )
 
             if isinstance(metrics, dict):
                 dissonance_components["d_context"] = float(metrics.get("d_context", 0.0))
-                dissonance_components["d_axiomatic"] = float(metrics.get("d_logic", metrics.get("d_2", d_s)))
+                dissonance_components["d_axiomatic"] = float(
+                    metrics.get("d_logic", metrics.get("d_2", d_s))
+                )
 
         if is_admitted:
             self.commit(
@@ -391,7 +413,8 @@ class CustodialTraceManager:
                 invariant_state_hash=invariant_state_hash,
                 transaction_id=transaction_id,
                 violations=violations,
-                dissonance_components=dissonance_components
+                dissonance_components=dissonance_components,
+                k_fingerprint=k_fingerprint,
             )
         else:
             self.seal_failure(
@@ -399,7 +422,8 @@ class CustodialTraceManager:
                 timestamp=timestamp,
                 transaction_id=transaction_id,
                 violations=violations,
-                dissonance_components=dissonance_components
+                dissonance_components=dissonance_components,
+                k_fingerprint=k_fingerprint,
             )
 
     def prepare_payload_for_ctm(self, metrics: Dict) -> Dict:
@@ -408,13 +432,14 @@ class CustodialTraceManager:
         Optimiza el tamaño del payload sin perder información crítica.
         """
         from datetime import datetime, timezone
+
         return {
             "integrity_score": float(1.0 - min(1.0, max(0.0, metrics.get("d_s", 0.0)))),
             "is_admitted": not metrics.get("correction_flag", False),
             "violated_policies_count": len(metrics.get("violated_policies", [])),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "d_context": float(metrics.get("d_context", 0.0)),
-            "d_axiomatic": float(metrics.get("d_logic", 0.0))
+            "d_axiomatic": float(metrics.get("d_logic", 0.0)),
         }
 
     def seal_failure(
@@ -424,6 +449,7 @@ class CustodialTraceManager:
         transaction_id: Optional[str] = None,
         violations: Optional[List[str]] = None,
         dissonance_components: Optional[Dict[str, float]] = None,
+        k_fingerprint: Optional[str] = None,
     ) -> MerkleNode:
         # Calculate full hash first
         snapshot_hash = self._hash_commitment(snapshot)
@@ -433,12 +459,14 @@ class CustodialTraceManager:
         else:
             # Build lightweight forensic fingerprint instead of serializing the full state
             from datetime import datetime, timezone
+
             snapshot_payload = {
-                "transaction_id": transaction_id or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
+                "transaction_id": transaction_id
+                or f"tx_{int(datetime.now(timezone.utc).timestamp())}",
                 "integrity_score": 0.0,
                 "canonical_state_hash": snapshot_hash,
                 "violated_policies": violations or snapshot.get("violations") or [],
-                "is_admitted": False
+                "is_admitted": False,
             }
             if dissonance_components is not None:
                 snapshot_payload["dissonance_components"] = dissonance_components
@@ -449,6 +477,9 @@ class CustodialTraceManager:
             "timestamp": timestamp,
             "snapshot": snapshot_payload,
         }
+        if k_fingerprint is not None:
+            logical_payload["k_fingerprint"] = k_fingerprint
+            logical_payload["k_anchor"] = k_fingerprint
         return self._dag.append(
             logical_payload,
             timestamp=timestamp,
@@ -530,7 +561,9 @@ def _atomic_write_json(filepath: str, payload: Any) -> None:
             try:
                 fcntl.flock(lock_handle, fcntl.LOCK_EX)
             except OSError as exc:
-                raise PersistenceError(f"No se pudo adquirir bloqueo exclusivo para {filepath}: {exc}")
+                raise PersistenceError(
+                    f"No se pudo adquirir bloqueo exclusivo para {filepath}: {exc}"
+                )
         try:
             with open(tmp_path, "w", encoding="utf-8") as tmp_handle:
                 json.dump(payload, tmp_handle, indent=2, sort_keys=True)
@@ -550,7 +583,9 @@ def _atomic_write_text(filepath: str, value: str) -> None:
             try:
                 fcntl.flock(lock_handle, fcntl.LOCK_EX)
             except OSError as exc:
-                raise PersistenceError(f"No se pudo adquirir bloqueo exclusivo para {filepath}: {exc}")
+                raise PersistenceError(
+                    f"No se pudo adquirir bloqueo exclusivo para {filepath}: {exc}"
+                )
         try:
             with open(tmp_path, "w", encoding="utf-8") as tmp_handle:
                 tmp_handle.write(value)
@@ -571,7 +606,9 @@ def _load_json_locked(filepath: str) -> Any:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH)
             except OSError as exc:
-                raise PersistenceError(f"No se pudo adquirir bloqueo compartido para {filepath}: {exc}")
+                raise PersistenceError(
+                    f"No se pudo adquirir bloqueo compartido para {filepath}: {exc}"
+                )
         try:
             return json.load(handle)
         except json.JSONDecodeError as exc:
@@ -590,7 +627,9 @@ def _load_text_locked(filepath: str) -> str:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH)
             except OSError as exc:
-                raise PersistenceError(f"No se pudo adquirir bloqueo compartido para {filepath}: {exc}")
+                raise PersistenceError(
+                    f"No se pudo adquirir bloqueo compartido para {filepath}: {exc}"
+                )
         try:
             return handle.read().strip()
         finally:
@@ -607,7 +646,9 @@ def _iter_nodes_file(nodes_file: str) -> Generator[Dict[str, Any], None, None]:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH)
             except OSError as exc:
-                raise PersistenceError(f"No se pudo adquirir bloqueo compartido para {nodes_file}: {exc}")
+                raise PersistenceError(
+                    f"No se pudo adquirir bloqueo compartido para {nodes_file}: {exc}"
+                )
         try:
             for line_number, line in enumerate(handle, start=1):
                 line = line.strip()
@@ -662,7 +703,9 @@ class FileCTMStorage(CTMStorageBackend):
                     try:
                         fcntl.flock(lock_handle, fcntl.LOCK_EX)
                     except OSError as exc:
-                        raise PersistenceError(f"No se pudo adquirir bloqueo exclusivo para {self.root_file}: {exc}")
+                        raise PersistenceError(
+                            f"No se pudo adquirir bloqueo exclusivo para {self.root_file}: {exc}"
+                        )
                 try:
                     os.remove(self.root_file)
                 finally:
@@ -680,7 +723,9 @@ class FileCTMStorage(CTMStorageBackend):
                 try:
                     fcntl.flock(lock_handle, fcntl.LOCK_EX)
                 except OSError as exc:
-                    raise PersistenceError(f"No se pudo adquirir bloqueo exclusivo para {self.nodes_file}: {exc}")
+                    raise PersistenceError(
+                        f"No se pudo adquirir bloqueo exclusivo para {self.nodes_file}: {exc}"
+                    )
             try:
                 lock_handle.write(serialized + "\n")
                 lock_handle.flush()

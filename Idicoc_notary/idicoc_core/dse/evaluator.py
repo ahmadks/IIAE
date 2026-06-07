@@ -563,6 +563,7 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
         self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None
     ) -> float:
         from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
+
         model_name = getattr(
             self.config,
             "semantic_embedding_model",
@@ -587,7 +588,9 @@ class StructuralDissonanceStrategy(DissonanceStrategy):
 
         d_context = 0.0
         if context_input:
-            evaluator_instance = PropertyGraphEvaluator(G_t, self.config) if G_t is not None else None
+            evaluator_instance = (
+                PropertyGraphEvaluator(G_t, self.config) if G_t is not None else None
+            )
             d_context, _ = _compute_context_contradiction(
                 y, context_input, self.config, evaluator=evaluator_instance
             )
@@ -800,8 +803,12 @@ class DissonanceStateEvaluator:
         else:
             if active_graph is not None:
                 if hasattr(active_graph, "nodes") and isinstance(active_graph.nodes, dict):
-                    has_logic_policies = any(ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values())
-                    has_temporal_policies = any(ax.get("policy_type") == "temporal" for ax in active_graph.nodes.values())
+                    has_logic_policies = any(
+                        ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values()
+                    )
+                    has_temporal_policies = any(
+                        ax.get("policy_type") == "temporal" for ax in active_graph.nodes.values()
+                    )
                 else:
                     has_logic_policies = True
                     has_temporal_policies = True
@@ -838,7 +845,6 @@ class DissonanceStateEvaluator:
         }
 
         return d_s, violations, raw_metrics
-
 
 
 class AuditEntropyModule:

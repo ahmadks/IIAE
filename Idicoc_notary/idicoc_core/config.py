@@ -128,6 +128,7 @@ class AuditConfig:
     ctm_wal_path: str | None = None  # None → se deriva de ctm_nodes_path
     hardware_key_env_var: str = "IIAE_HARDWARE_KEY"
     require_hardware_seal: bool = False
+    record_k_fingerprint: bool = True
 
     # ── 7. Hot Loop: logits interception (LLM en tiempo real) ───────────────
     # Habilita la interceptación de logits durante la generación del LLM.
@@ -189,6 +190,7 @@ class AuditConfig:
             self.llm_model = self.llama_model
 
         from idicoc_core.utils.embedding_service import EmbeddingService
+
         EmbeddingService.set_provider(self.embedding_provider)
 
         # Cargar / cachear pipeline NLI
@@ -241,6 +243,7 @@ class AuditConfig:
         # Calcular firma del modelo de embeddings si no se proporcionó
         if not self.embedding_signature:
             from idicoc_core.utils.embedding_utils import compute_embedding_signature
+
             self.embedding_signature = compute_embedding_signature(self.semantic_embedding_model)
 
         if not os.path.isabs(self.ctm_nodes_path):
@@ -254,6 +257,7 @@ class AuditConfig:
                 policy_path = os.path.abspath(os.path.join(package_root, policy_path))
             if os.path.exists(policy_path):
                 from idicoc_core.isg.loader import FilePolicyLoader
+
                 self.policy_loader = FilePolicyLoader(policy_path)
 
         if self.enable_hard_halt:
@@ -277,6 +281,7 @@ class AuditConfig:
 
             if not policies:
                 import warnings
+
                 warnings.warn(
                     "[Fase 1 - Cold Loop] No se encontraron políticas. "
                     "W_bank estará vacío y no se aplicará contención.",
@@ -292,7 +297,9 @@ class AuditConfig:
                     hf_token = os.getenv("HF_TOKEN")
                     auth_token = hf_token if hf_token else True
                     force_update = os.getenv("IIAE_FORCE_UPDATE", "").lower() in (
-                        "true", "1", "yes",
+                        "true",
+                        "1",
+                        "yes",
                     )
 
                     print(f"[Fase 1 - Cold Loop] Cargando tokenizador LLM: {self.llm_model_name}")
@@ -320,6 +327,7 @@ class AuditConfig:
                             )
                 except Exception as e:
                     import warnings
+
                     warnings.warn(
                         f"[Fase 1 - Cold Loop] Error cargando tokenizador LLM: {e}. "
                         "Se omitirá compilación de W_bank.",
@@ -363,6 +371,7 @@ class AuditConfig:
         except Exception as e:
             import warnings
             import traceback
+
             warnings.warn(
                 f"[Fase 1 - Cold Loop] Error durante inicialización: {e}\n{traceback.format_exc()}",
                 UserWarning,
@@ -376,6 +385,7 @@ class AuditConfig:
     def _initialize_hot_loop_processor(self) -> None:
         if not self.w_bank:
             import warnings
+
             warnings.warn(
                 "[Fase 3 - Hot Loop] W_bank está vacío. "
                 "No se inicializará procesador de logits.",
@@ -402,6 +412,7 @@ class AuditConfig:
         except Exception as e:
             import warnings
             import traceback
+
             warnings.warn(
                 f"[Fase 3 - Hot Loop] Error inicializando procesador: {e}\n{traceback.format_exc()}",
                 UserWarning,
