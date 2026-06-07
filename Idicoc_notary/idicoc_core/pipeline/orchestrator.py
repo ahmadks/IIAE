@@ -49,6 +49,11 @@ class AuditPipeline:
         # Load initial policies
         self._load_initial_policies()
 
+    @property
+    def ctm(self) -> Any:
+        """Backward compatibility property for ctm_orchestrator."""
+        return self.ctm_orchestrator
+
     @staticmethod
     def _normalize_rag_context(rag_context: Any) -> str:
         if rag_context is None:

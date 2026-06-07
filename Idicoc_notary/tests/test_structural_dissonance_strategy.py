@@ -40,7 +40,7 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
 
     # Mock the PropertyGraphEvaluator methods since the strategy now instantiates it
     with patch(
-        "idicoc_core.dse.evaluator.PropertyGraphEvaluator.evaluate", return_value=0.8
+        "idicoc_core.dse.evaluator.PropertyGraphEvaluator.evaluate", return_value=(0.8, [])
     ) as mock_eval:
         d_s = strategy.compute_dissonance("candidato", "ancla", mock_graph)
 
@@ -48,7 +48,7 @@ def test_compute_dissonance_with_property_graph(mock_d1_vec, mock_to_vector, str
         # d_s = lambda_1 * d1 + lambda_2 * d2 = 0.5*0.2 + 0.4*0.8 = 0.42
         assert abs(d_s - 0.42) < 1e-6
 
-        mock_eval.assert_called_once_with("candidato")
+        mock_eval.assert_called_once_with("candidato", return_violations=True)
 
 
 @patch("idicoc_core.dse.evaluator.DissonanceStateEvaluator.evaluate")

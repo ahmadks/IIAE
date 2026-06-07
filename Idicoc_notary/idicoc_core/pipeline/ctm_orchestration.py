@@ -192,3 +192,8 @@ class CTMOrchestrator:
                 pass
 
         return dist_val
+
+    @property
+    def root_hash(self) -> Optional[str]:
+        """Get the root hash of the MerkleDAG."""
+        return self.ctm._dag.root_hash

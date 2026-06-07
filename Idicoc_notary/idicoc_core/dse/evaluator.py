@@ -1,10 +1,9 @@
-from __future__ import annotations
 import math
 import re
-import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 from transformers import LogitsProcessor
@@ -14,140 +13,100 @@ from idicoc_core.api.schemas import SessionContext
 from idicoc_core.utils.logger import get_logger
 from idicoc_core.utils.string_utils import StringUtils
 from idicoc_core.dse.metrics import (
-    _cosine_distance,
-    _compute_d_0,
     _compute_d_1,
     _compute_d_1_vectorized,
-    _compute_d_2,
     _compute_d_3,
-    _compute_d_4,
-    _compute_d_5,
-    _compute_d_6,
-    _compute_context_contradiction,
+    _cosine_distance,
 )
 
 logger = get_logger("dse.evaluator")
 
 
-class DimensionalityMismatchError(ValueError):
-    """Excepción para discordancia de dimensiones en cálculo de distancias."""
+@dataclass
+class DissonanceEvaluationResult:
+    d_s: float
+    d_1: float = 0.0
+    d_2: float = 0.0
+    d_3: float = 0.0
+    violations: Optional[List[str]] = None
+    correction_flag: bool = False
+    corrected_output: Any = None
+    metrics: Optional[Dict[str, Any]] = None
 
+
+class DimensionalityMismatchError(ValueError):
     pass
 
 
 class PropertyGraphEvaluator:
     """
-    Separates evaluation logic from the PropertyGraph data structure.
-    Computes dissonance scores using deterministic logical/temporal evaluations.
+    Evalúa el Grafo de Propiedades (d_2).
+    Unifica restricciones lógicas, semánticas y temporales en una única dimensión de disonancia interna.
     """
 
     def __init__(self, graph: PropertyGraph, config: Any = None):
         self.graph = graph
         self.config = config
 
-    def evaluate(self, y: Any) -> float:
+    def evaluate(
+        self,
+        y: Any,
+        return_violations: bool = False,
+    ) -> float | Tuple[float, List[Dict[str, Any]]]:
+        """Evalúa TODAS las políticas del grafo.
+
+        Por compatibilidad con llamadas legacy, devuelve d_2 por defecto.
+        Si `return_violations` es True, devuelve `(d_2, violations)`.
         """
-        Evalúa la disonancia lógica de un estado candidato ``y`` contra los
-        políticas no-temporales activos en el grafo.
-        """
-        t_eval_start = time.perf_counter()
-        policies = [ax for ax in self.graph.nodes.values() if ax.get("policy_type") != "temporal"]
-        if not policies:
-            logger.debug("[TIMING] PropertyGraphEvaluator.evaluate: no policies, 0 sec")
-            return 0.0
+        if not self.graph or not self.graph.nodes:
+            return (0.0, []) if return_violations else 0.0
 
         y_tokens = self._tokenize(self._to_str(y))
         y_vec = self._to_vec(y)
+        now = datetime.now(timezone.utc)
 
         total_weight = 0.0
         weighted_penalty = 0.0
+        violations = []
+        has_hard_violation = False
 
-        for ax in policies:
+        for ax in self.graph.nodes.values():
             if not self._policy_matches_mode(ax, y):
                 continue
 
-            raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
-            hardness = ax.get("hardness", "hard")
+            # Ruteo unificado: Tiempo o Lógica
+            if ax.get("policy_type") == "temporal":
+                raw_penalty = self._temporal_penalty(ax, now)
+            else:
+                raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
 
-            if hardness == "hard" and raw_penalty > 0:
-                return float("inf")
-
-            weight = self._policy_weight(ax, self.config)
-            weighted_penalty += raw_penalty * weight
-            total_weight += weight
-
-        if total_weight == 0.0:
-            t_eval_elapsed = time.perf_counter() - t_eval_start
-            logger.debug(
-                "[TIMING] PropertyGraphEvaluator.evaluate: zero weight, %.3f sec", t_eval_elapsed
-            )
-            return 0.0
-
-        result = min(1.0, weighted_penalty / total_weight)
-        t_eval_elapsed = time.perf_counter() - t_eval_start
-        logger.debug(
-            "[TIMING] PropertyGraphEvaluator.evaluate: %.3f sec | policies=%d | penalty=%.6f",
-            t_eval_elapsed,
-            len(policies),
-            result,
-        )
-        return result
-
-    def get_violated_policies(self, y: Any) -> List[Dict[str, Any]]:
-        violated = []
-        policies = [ax for ax in self.graph.nodes.values() if ax.get("policy_type") != "temporal"]
-        if not policies:
-            return violated
-
-        y_tokens = self._tokenize(self._to_str(y))
-        y_vec = self._to_vec(y)
-
-        for ax in policies:
-            if not self._policy_matches_mode(ax, y):
-                continue
-
-            raw_penalty = self._logical_penalty(y, y_tokens, y_vec, ax)
             if raw_penalty > 0.0:
-                violated.append(
+                hardness = ax.get("hardness", "hard")
+                if hardness == "hard":
+                    has_hard_violation = True
+                violations.append(
                     {
                         "id": ax.get("id"),
                         "text": ax.get("text", ax.get("description", "")),
-                        "hardness": ax.get("hardness", "hard"),
+                        "hardness": hardness,
                         "penalty": raw_penalty,
                     }
                 )
-        return violated
-
-    def compute_temporal(self, y: Any) -> float:
-        temporal_policies = [
-            ax for ax in self.graph.nodes.values() if ax.get("policy_type") == "temporal"
-        ]
-        if not temporal_policies:
-            return 0.0
-
-        now = datetime.now(timezone.utc)
-        total_weight = 0.0
-        weighted_penalty = 0.0
-
-        for ax in temporal_policies:
-            if not self._policy_matches_mode(ax, y):
-                continue
-
-            raw_penalty = self._temporal_penalty(ax, now)
-            hardness = ax.get("hardness", "hard")
-
-            if hardness == "hard" and raw_penalty > 0:
-                return float("inf")
 
             weight = self._policy_weight(ax, self.config)
             weighted_penalty += raw_penalty * weight
             total_weight += weight
 
-        if total_weight == 0.0:
-            return 0.0
-        return min(1.0, weighted_penalty / total_weight)
+        d_2 = (
+            float("inf")
+            if has_hard_violation
+            else (min(1.0, weighted_penalty / total_weight) if total_weight > 0 else 0.0)
+        )
+        return (d_2, violations) if return_violations else d_2
 
-    compute_d_temporal = compute_temporal
+    def get_violated_policies(self, y: Any) -> List[Dict[str, Any]]:
+        """Compatibility helper for legacy policy violation inspection."""
+        return self.evaluate(y, return_violations=True)[1]
 
     @staticmethod
     def _to_str(y: Any) -> str:
@@ -155,20 +114,11 @@ class PropertyGraphEvaluator:
             return ""
         if isinstance(y, str):
             return y
-        try:
-            import numpy as np
-
-            if isinstance(y, np.ndarray):
-                return str(y.tolist())
-        except Exception:
-            pass
+        if isinstance(y, np.ndarray):
+            return str(y.tolist())
         if isinstance(y, (list, tuple)):
             return str(list(y))
-        if hasattr(y, "source_text"):
-            return str(y.source_text)
-        if hasattr(y, "data") and not hasattr(y, "shape"):
-            return str(y.data)
-        return str(y)
+        return str(getattr(y, "source_text", getattr(y, "data", y)))
 
     @staticmethod
     def _input_mode(y: Any) -> str:
@@ -176,456 +126,127 @@ class PropertyGraphEvaluator:
             return str(getattr(y, "payload_type") or "all").lower()
         if isinstance(y, str):
             return "semantic"
-        try:
-            import numpy as np
-
-            if isinstance(y, np.ndarray):
-                return "numeric"
-        except Exception:
-            pass
-
-        if isinstance(y, (list, tuple)):
+        if isinstance(y, (list, tuple)) or isinstance(y, np.ndarray) or hasattr(y, "distribution"):
             return "numeric"
-        if hasattr(y, "distribution"):
-            return getattr(y, "payload_type", "numeric")
         return "semantic"
 
-    @staticmethod
-    def _policy_mode(policy: Dict[str, Any]) -> str:
-        return str(policy.get("mode", "all")).lower()
-
     def _policy_matches_mode(self, policy: Dict[str, Any], y: Any) -> bool:
-        policy_mode = self._policy_mode(policy)
-        if policy_mode == "all":
+        pmode = str(policy.get("mode", "all")).lower()
+        if pmode == "all":
             return True
-        input_mode = self._input_mode(y)
-        if input_mode == "semantic":
-            return policy_mode in ("semantic", "all")
-        if input_mode == "numeric":
-            return policy_mode in ("numeric", "all")
-        return True
+        imode = self._input_mode(y)
+        return pmode in (imode, "all")
 
     @staticmethod
     def _tokenize(text: str) -> Set[str]:
-        tokens = re.split(r"[\s,;:.!?()\[\]{}'\"]+", text.lower())
-        return {t for t in tokens if t}
-
-    @staticmethod
-    def _policy_text(policy: Dict[str, Any]) -> str:
-        parts = [
-            str(policy.get("source_text", "")),
-            str(policy.get("subject", "")),
-            str(policy.get("predicate", "")),
-            str(policy.get("object", "")),
-        ]
-        return " ".join(p for p in parts if p and p != "None")
+        return {t for t in re.split(r"[\s,;:.!?()\[\]{}'\"]+", text.lower()) if t}
 
     @staticmethod
     def _to_vec(y: Any) -> Optional[list]:
         try:
-            import numpy as np
-
-            candidate = getattr(y, "measure_vector", getattr(y, "distribution", y))
-            if isinstance(candidate, str):
-                nums = [float(m.group(0)) for m in re.finditer(r"[-+]?[0-9]*\.?[0-9]+", candidate)]
+            c = getattr(y, "measure_vector", getattr(y, "distribution", y))
+            if isinstance(c, str):
+                nums = [float(m.group(0)) for m in re.finditer(r"[-+]?[0-9]*\.?[0-9]+", c)]
                 if nums:
                     return nums
-            arr = np.asarray(candidate, dtype=float)
+            arr = np.asarray(c, dtype=float)
             if arr.ndim == 1 and arr.size > 0:
                 return arr.tolist()
-        except Exception:
+        except:
             pass
         return None
-
-    def _cosine_distance(self, a: list, b: list) -> float:
-        return _cosine_distance(a, b)
 
     def _evaluate_regex(self, ax: dict, y: Any) -> float:
         text_y = self._to_str(y)
         pattern = ax.get("pattern", ax.get("text", ""))
-
         if not pattern:
             return 0.0
         try:
             match = re.search(pattern, text_y, re.IGNORECASE)
         except re.error:
             match = re.search(pattern, text_y)
-
-        polarity = ax.get("polarity", "affirmative")
-        if polarity == "affirmative":
-            return 0.0 if match else 1.0
-        else:
-            return 1.0 if match else 0.0
+        return (
+            (0.0 if match else 1.0)
+            if ax.get("polarity", "affirmative") == "affirmative"
+            else (1.0 if match else 0.0)
+        )
 
     def _logical_penalty(
         self, y: Any, y_tokens: Set[str], y_vec: Optional[list], policy: Dict[str, Any]
     ) -> float:
-        a_type = policy.get("policy_type", "fact")
-        polarity = policy.get("polarity", "affirmative")
-
-        if a_type in ("regex", "numeric"):
+        if policy.get("policy_type", "fact") in ("regex", "numeric"):
             return self._evaluate_regex(policy, y)
 
-        ax_embedding: Optional[list] = policy.get("embedding")
-        if ax_embedding is None:
-            from idicoc_core.utils.embedding_service import EmbeddingService
+        from idicoc_core.utils.embedding_service import EmbeddingService
 
-            try:
-                policy_id = policy.get("id", "unknown")
-                logger.debug(f"[CACHE] Computing embedding for policy {policy_id}")
-                ax_embedding = EmbeddingService().encode(self._policy_text(policy)).tolist()
-                policy["embedding"] = ax_embedding
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to generate embedding for policy text: '{self._policy_text(policy)}' due to: {e}"
-                ) from e
-        else:
-            # Embedding already cached
-            policy_id = policy.get("id", "unknown")
-            logger.debug(f"[CACHE] Using cached embedding for policy {policy_id}")
+        embed_service = EmbeddingService()
 
-        if y_vec is None:
-            from idicoc_core.utils.embedding_service import EmbeddingService
+        ax_emb = policy.get("embedding")
+        if ax_emb is None:
+            text = " ".join(
+                str(policy.get(k, ""))
+                for k in ["source_text", "subject", "predicate", "object"]
+                if policy.get(k)
+            )
+            ax_emb = embed_service.encode(text).tolist()
+            policy["embedding"] = ax_emb
 
-            try:
-                y_text = self._to_str(y)
-                y_vec = EmbeddingService().encode(y_text).tolist()
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to generate embedding for input text: '{y_text}' due to: {e}"
-                ) from e
-        elif ax_embedding is not None and len(y_vec) != len(ax_embedding):
-            from idicoc_core.utils.embedding_service import EmbeddingService
+        if y_vec is None or len(y_vec) != len(ax_emb):
+            y_vec = embed_service.encode(self._to_str(y)).tolist()
 
-            try:
-                y_text = self._to_str(y)
-                y_vec = EmbeddingService().encode(y_text).tolist()
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to generate embedding for input text: '{self._to_str(y)}' due to: {e}"
-                ) from e
-
-        dist = self._cosine_distance(y_vec, ax_embedding)
-        similarity = 1.0 - dist
-
-        if polarity == "affirmative":
-            return 1.0 - similarity
-        else:
-            return similarity
+        similarity = 1.0 - _cosine_distance(y_vec, ax_emb)
+        return (
+            1.0 - similarity
+            if policy.get("polarity", "affirmative") == "affirmative"
+            else similarity
+        )
 
     def _temporal_penalty(self, policy: Dict[str, Any], now: datetime) -> float:
-        valid_from = self._parse_dt(policy.get("valid_from"))
-        valid_until = self._parse_dt(policy.get("valid_until"))
-        ttl_val = None
-
-        if valid_until is None and policy.get("ttl_seconds") is not None:
-            base = valid_from or self._parse_dt(policy.get("timestamp"))
-            if base is not None:
-                try:
-                    ttl_val = float(policy["ttl_seconds"])
-                    from datetime import timedelta
-
-                    valid_until = base + timedelta(seconds=ttl_val)
-                except (ValueError, TypeError):
-                    pass
-
-        if valid_from is None and valid_until is None:
-            return 0.0
-
-        if ttl_val is not None:
-            window = max(1.0, ttl_val)
-        elif valid_until is not None and valid_from is not None:
-            window = max(1.0, (valid_until - valid_from).total_seconds())
-        else:
-            window = 86400.0
-
-        if valid_from is not None and now < valid_from:
-            lag = (valid_from - now).total_seconds()
-            return 2.0 / (1.0 + math.exp(-lag / window)) - 1.0
-
-        if valid_until is not None and now > valid_until:
-            overrun = (now - valid_until).total_seconds()
-            return 2.0 / (1.0 + math.exp(-overrun / window)) - 1.0
-
-        return 0.0
-
-    @staticmethod
-    def _parse_dt(value: Any) -> Optional[datetime]:
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(float(value), tz=timezone.utc)
-        if isinstance(value, str):
-            try:
-                dt = datetime.fromisoformat(value)
-                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-            except ValueError:
+        def _parse(v):
+            if v is None:
                 return None
-        return None
+            if isinstance(v, datetime):
+                return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+            if isinstance(v, (int, float)):
+                return datetime.fromtimestamp(float(v), tz=timezone.utc)
+            try:
+                dt = datetime.fromisoformat(str(v))
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            except:
+                return None
+
+        v_from, v_until = _parse(policy.get("valid_from")), _parse(policy.get("valid_until"))
+        ttl = policy.get("ttl_seconds")
+
+        if not v_until and ttl:
+            base = v_from or _parse(policy.get("timestamp"))
+            if base:
+                from datetime import timedelta
+
+                v_until = base + timedelta(seconds=float(ttl))
+
+        if not v_from and not v_until:
+            return 0.0
+        window = (
+            max(1.0, float(ttl))
+            if ttl
+            else (max(1.0, (v_until - v_from).total_seconds()) if v_until and v_from else 86400.0)
+        )
+
+        if v_from and now < v_from:
+            return 2.0 / (1.0 + math.exp(-((v_from - now).total_seconds()) / window)) - 1.0
+        if v_until and now > v_until:
+            return 2.0 / (1.0 + math.exp(-((now - v_until).total_seconds()) / window)) - 1.0
+        return 0.0
 
     @staticmethod
     def _policy_weight(policy: Dict[str, Any], config: Any = None) -> float:
         priority = max(1, min(10, int(policy.get("priority", 1))))
-        hard_mult = float(getattr(config, "policy_hard_weight_multiplier", 2.0))
-        hardness_mult = hard_mult if policy.get("hardness") == "hard" else 1.0
-        return (priority / 10.0) * hardness_mult
-
-
-@dataclass(frozen=True)
-class DissonanceEvaluationResult:
-    structural_dissonance_ds: float
-    factual_dissonance_df: float
-    corrected_output: Any
-    correction_applied: bool
-    metrics: Dict[str, Any]
-
-    def __iter__(self):
-        yield self.structural_dissonance_ds
-        yield self.factual_dissonance_df
-        yield self.corrected_output
-        yield self.correction_applied
-        yield self.metrics
-
-
-class DissonanceStrategy:
-    def __init__(self, config: Any) -> None:
-        self.config = config
-
-
-class StructuralDissonanceStrategy(DissonanceStrategy):
-    def __init__(
-        self,
-        config: Any,
-        property_graph: Optional[PropertyGraph] = None,
-        lambda_0: float = 0.0,
-        lambda_1: float = 0.0,
-        lambda_2: float = 0.0,
-        lambda_3: float = 0.0,
-        lambda_4: float = 0.0,
-        lambda_5: float = 0.0,
-        lambda_6: float = 0.0,
-    ) -> None:
-        super().__init__(config)
-        self.correction_base_tolerance = getattr(config, "correction_base_tolerance", 0.15)
-        self._graph: Optional[PropertyGraph] = property_graph
-
-        weights = getattr(config, "_normalized_weights", None) or getattr(
-            config, "dissonance_weights", None
+        return (priority / 10.0) * (
+            float(getattr(config, "policy_hard_weight_multiplier", 2.0))
+            if policy.get("hardness") == "hard"
+            else 1.0
         )
-        if (
-            weights is not None
-            and len(weights) == 7
-            and all(
-                w == 0.0
-                for w in [lambda_0, lambda_1, lambda_2, lambda_3, lambda_4, lambda_5, lambda_6]
-            )
-        ):
-            self.lambda_0 = weights[0]
-            self.lambda_1 = weights[1]
-            self.lambda_2 = weights[2]
-            self.lambda_3 = weights[3]
-            self.lambda_4 = weights[4]
-            self.lambda_5 = weights[5]
-            self.lambda_6 = weights[6]
-        else:
-            self.lambda_0 = lambda_0
-            self.lambda_1 = lambda_1
-            self.lambda_2 = lambda_2
-            self.lambda_3 = lambda_3
-            self.lambda_4 = lambda_4
-            self.lambda_5 = lambda_5
-            self.lambda_6 = lambda_6
-
-        sum_lambda = sum(
-            [
-                self.lambda_0,
-                self.lambda_1,
-                self.lambda_2,
-                self.lambda_3,
-                self.lambda_4,
-                self.lambda_5,
-                self.lambda_6,
-            ]
-        )
-        if sum_lambda == 0:
-            self.lambda_1 = 1.0
-        elif abs(sum_lambda - 1.0) > 1e-5:
-            self.lambda_0 /= sum_lambda
-            self.lambda_1 /= sum_lambda
-            self.lambda_2 /= sum_lambda
-            self.lambda_3 /= sum_lambda
-            self.lambda_4 /= sum_lambda
-            self.lambda_5 /= sum_lambda
-            self.lambda_6 /= sum_lambda
-
-    def set_graph(self, graph: PropertyGraph) -> None:
-        self._graph = graph
-
-    def _validate_input(self, audit_input: Any, expected_size: int) -> np.ndarray:
-        try:
-            measure = np.asarray(getattr(audit_input, "distribution", audit_input), dtype=float)
-        except (ValueError, TypeError):
-            raise TypeError("El input no es una señal numérica válida.")
-        if expected_size and expected_size > 0:
-            if measure.size != expected_size:
-                if measure.size < expected_size:
-                    padded = np.zeros(expected_size, dtype=float)
-                    padded[: measure.size] = measure
-                    measure = padded
-                else:
-                    measure = measure[:expected_size]
-        return measure
-
-    def compute(
-        self,
-        audit_input: Any,
-        context_input: List[str],
-        context_policies: List[str],
-        epsilon: float = 0.0,
-        validate_conflicts: bool = False,
-    ) -> DissonanceEvaluationResult:
-        _ = validate_conflicts
-        mu_raw = self._validate_input(audit_input, 4)
-        total = mu_raw.sum()
-        mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
-
-        s0_str = getattr(audit_input, "text_content", "")
-        d0 = _compute_d_0(s0_str, "")
-
-        n_ref = mu.size
-        if n_ref > 0:
-            # Para entradas de distribución/numéricas, el estado canónico (ancla canónica uniforme)
-            # es la distribución uniforme. No se debe calcular usando el embedding de texto de la unicidad,
-            # ya que la dimensionalidad y semántica son incompatibles.
-            target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-            d1 = _compute_d_1(mu, target_state)
-        else:
-            d1 = 0.0
-
-        d2 = 0.0
-        if self._graph is not None:
-            evaluator = PropertyGraphEvaluator(self._graph, self.config)
-            try:
-                d2 = float(evaluator.evaluate(audit_input))
-            except Exception as ex:
-                logger.error(f"Error computing d2 (policy dissonance): {ex}", exc_info=True)
-                raise
-
-        d3 = 0.0
-        if self._graph is not None:
-            evaluator = PropertyGraphEvaluator(self._graph, self.config)
-            try:
-                d3 = float(evaluator.compute_temporal(audit_input))
-            except Exception as ex:
-                logger.error(f"Error computing d3 (temporal dissonance): {ex}", exc_info=True)
-                raise
-
-        d4 = 0.0
-        d5 = 0.0
-        d6 = 0.0
-
-        evaluator_instance = None
-        if self._graph is not None:
-            evaluator_instance = PropertyGraphEvaluator(self._graph, self.config)
-
-        d_context, contradictory_contexts = _compute_context_contradiction(
-            audit_input, context_input, self.config, evaluator=evaluator_instance
-        )
-
-        if d2 == float("inf") or d3 == float("inf"):
-            d_s = float("inf")
-        else:
-            d_s = (
-                self.lambda_0 * d0
-                + self.lambda_1 * d1
-                + self.lambda_2 * d2
-                + self.lambda_3 * d3
-                + self.lambda_4 * d4
-                + self.lambda_5 * d5
-                + self.lambda_6 * d6
-            )
-
-        d_s = max(d_s, d_context)
-
-        effective_threshold = self.correction_base_tolerance + epsilon
-        is_compliant = d_s <= effective_threshold
-
-        metrics: Dict[str, Any] = {
-            "d_s": d_s,
-            "d_0": d0,
-            "d_1": d1,
-            "d_2": d2,
-            "d_3": d3,
-            "d_4": d4,
-            "d_5": d5,
-            "d_6": d6,
-            "d_context": d_context,
-            "effective_threshold": effective_threshold,
-            "d_terminal": d_s,
-            "terminality_violation": not is_compliant,
-            "reference_count": int(mu.size),
-            "correction_flag": not is_compliant,
-            "max_policy_distance": d2,
-            "max_context_distance": d_context,
-            "violated_policies": [],
-            "contradictory_contexts": contradictory_contexts,
-            "support_found": True,
-            "snapping_flag": False,
-        }
-
-        return DissonanceEvaluationResult(
-            structural_dissonance_ds=d_s,
-            factual_dissonance_df=d_context,
-            corrected_output=audit_input,
-            correction_applied=not is_compliant,
-            metrics=metrics,
-        )
-
-    def compute_dissonance(
-        self, y: Any, V_hat: Any, G_t: Any, context_input: list | None = None
-    ) -> float:
-        from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
-
-        model_name = getattr(
-            self.config,
-            "semantic_embedding_model",
-            DEFAULT_SEMANTIC_EMBEDDING_MODEL,
-        )
-        y_vec = StringUtils.to_vector(y, model_name=model_name)
-        v_hat_vec = StringUtils.to_vector(V_hat, model_name=model_name)
-
-        d1 = _compute_d_1_vectorized(y_vec, v_hat_vec)
-
-        # d_2: policy dissonance (logical policies from PropertyGraph)
-        # d_3: RAG/context dissonance (context contradiction)
-        d2 = 0.0
-        if G_t is not None:
-            evaluator = PropertyGraphEvaluator(G_t, self.config)
-            d2 = float(evaluator.evaluate(y))
-
-        # Compute d_context (RAG) and map it to d3
-        d3 = 0.0
-        if context_input:
-            evaluator_instance = (
-                PropertyGraphEvaluator(G_t, self.config) if G_t is not None else None
-            )
-            d3, _ = _compute_context_contradiction(
-                y, context_input, self.config, evaluator=evaluator_instance
-            )
-
-        if d2 == float("inf"):
-            return float("inf")
-
-        d_s = max(0.0, min(1.0, self.lambda_1 * d1 + self.lambda_2 * d2 + self.lambda_3 * d3))
-        return max(d_s, d3)
-
-    def select_canonical_input(self, canonical_state: Any) -> np.ndarray:
-        return canonical_state.measure_vector
-
-    def canonical_axis(self) -> str:
-        return "measure"
 
 
 class DeterministicMUXLogitsProcessor(LogitsProcessor):
@@ -640,43 +261,25 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
     ) -> None:
         self.hard_only = hard_only
         self.audit_trace = audit_trace
-        self.cuda_device = cuda_device or device
-
         if forbidden_token_ids is None:
-            if w_bank is not None:
-                if hard_only:
-                    self.forbidden_token_ids = {
-                        token_id for token_id, (hardness, _) in w_bank.items() if hardness == "hard"
-                    }
-                else:
-                    self.forbidden_token_ids = set(w_bank.keys())
-            else:
-                self.forbidden_token_ids = set()
+            self.forbidden_token_ids = (
+                {tid for tid, (h, _) in w_bank.items() if h == "hard"}
+                if (w_bank and hard_only)
+                else (set(w_bank.keys()) if w_bank else set())
+            )
         else:
             self.forbidden_token_ids = set(forbidden_token_ids)
 
-        device_to_use = cuda_device or device
         self.mask_tensor = torch.tensor(
-            list(self.forbidden_token_ids), device=device_to_use, dtype=torch.long
+            list(self.forbidden_token_ids), device=(cuda_device or device), dtype=torch.long
         )
-
-        self.intercepts_log: list[Dict] = [] if audit_trace else None
-        self.intercepts_count = 0
-        self.logits_processed_count = 0
+        self.intercepts_log, self.intercepts_count = ([] if audit_trace else None), 0
 
     def __call__(
-        self,
-        _input_ids: torch.LongTensor,
-        scores: torch.FloatTensor,
+        self, _input_ids: torch.LongTensor, scores: torch.FloatTensor
     ) -> torch.FloatTensor:
-        self.logits_processed_count += 1
         if self.mask_tensor.numel() > 0:
-            if self.mask_tensor.device != scores.device:
-                raise RuntimeError(
-                    f"Device mismatch between MUX mask ({self.mask_tensor.device}) and logits ({scores.device})."
-                )
             scores[:, self.mask_tensor] = -float("inf")
-
         if self.audit_trace and self.intercepts_log is not None:
             self.intercepts_log.append(
                 {
@@ -685,145 +288,149 @@ class DeterministicMUXLogitsProcessor(LogitsProcessor):
                 }
             )
             self.intercepts_count += 1
-
         return scores
 
-    def process_logits(
-        self,
-        logits: np.ndarray | torch.Tensor,
-        _input_ids: Any = None,
-    ) -> Any:
+    def process_logits(self, logits: np.ndarray | torch.Tensor, _input_ids: Any = None) -> Any:
         is_numpy = isinstance(logits, np.ndarray)
-        if is_numpy:
-            scores = torch.tensor(logits, dtype=torch.float32)
-        else:
-            scores = logits
-
-        was_1d = False
-        if scores.dim() == 1:
+        scores = torch.tensor(logits, dtype=torch.float32) if is_numpy else logits
+        was_1d = scores.dim() == 1
+        if was_1d:
             scores = scores.unsqueeze(0)
-            was_1d = True
-
         scores = self.__call__(None, scores)
-
         if was_1d:
             scores = scores[0]
+        return scores.detach().cpu().numpy() if is_numpy else scores
 
-        if is_numpy:
-            return scores.detach().cpu().numpy()
-        return scores
+
+class StructuralDissonanceStrategy:
+    """Compatibilidad con la estrategia de disonancia estructural."""
+
+    def __init__(
+        self,
+        config: Any,
+        lambda_1: float = 0.0,
+        lambda_2: float = 0.0,
+        lambda_3: float = 0.0,
+    ):
+        self.config = config
+        self.lambda_1 = float(lambda_1)
+        self.lambda_2 = float(lambda_2)
+        self.lambda_3 = float(lambda_3)
+        self._anchor = np.array([0.25, 0.25, 0.25, 0.25], dtype=float)
+
+    def _normalize_distribution(self, distribution: np.ndarray) -> Tuple[np.ndarray, int]:
+        arr = np.asarray(distribution, dtype=float)
+        if arr.ndim != 1:
+            arr = arr.flatten()
+
+        if arr.size < 4:
+            padded = np.zeros(4, dtype=float)
+            padded[: arr.size] = arr
+            arr = padded
+        elif arr.size > 4:
+            arr = arr[:4]
+
+        arr = np.clip(arr, 0.0, None)
+        total = float(np.sum(arr))
+        if total <= 1e-12:
+            arr = np.ones_like(arr, dtype=float) / float(arr.size)
+        else:
+            arr = arr / total
+        return arr, arr.size
+
+    def _input_distribution(self, audit_input: Any) -> np.ndarray:
+        if hasattr(audit_input, "distribution"):
+            return np.asarray(getattr(audit_input, "distribution"), dtype=float)
+        if isinstance(audit_input, (list, tuple, np.ndarray)):
+            return np.asarray(audit_input, dtype=float)
+        if hasattr(audit_input, "data"):
+            return np.asarray(getattr(audit_input, "data"), dtype=float)
+        return np.asarray([], dtype=float)
+
+    def _compute_effective_threshold(self, epsilon: float = 0.0) -> float:
+        return float(getattr(self.config, "correction_base_tolerance", 0.15)) + float(epsilon)
+
+    def compute(
+        self,
+        audit_input: Any,
+        context_input: Any,
+        context_policies: Any,
+        epsilon: float = 0.0,
+        validate_conflicts: bool = False,
+    ) -> Tuple[float, float, Any, bool, Dict[str, Any]]:
+        distribution = self._input_distribution(audit_input)
+        normalized, reference_count = self._normalize_distribution(distribution)
+
+        d_1 = float(_compute_d_1_vectorized(normalized, self._anchor))
+        d_2 = 0.0
+        d_3 = 0.0
+
+        d_s = float(
+            np.clip(self.lambda_1 * d_1 + self.lambda_2 * d_2 + self.lambda_3 * d_3, 0.0, 1.0)
+        )
+        effective_threshold = self._compute_effective_threshold(epsilon)
+        correction_flag = bool(d_s > effective_threshold)
+
+        metrics = {
+            "d_1": d_1,
+            "d_2": d_2,
+            "d_3": d_3,
+            "effective_threshold": effective_threshold,
+            "terminality_violation": correction_flag,
+            "reference_count": reference_count,
+            "lambda_1": self.lambda_1,
+            "lambda_2": self.lambda_2,
+            "lambda_3": self.lambda_3,
+        }
+
+        corrected_output = normalized.tolist() if isinstance(normalized, np.ndarray) else normalized
+        return d_s, d_1, corrected_output, correction_flag, metrics
+
+    def compute_dissonance(self, audit_input: Any, anchor_input: Any, graph: Any) -> float:
+        candidate_vec = np.asarray(
+            StringUtils.to_vector(
+                audit_input,
+                model_name=getattr(self.config, "semantic_embedding_model", "all-MiniLM-L6-v2"),
+            ),
+            dtype=float,
+        )
+        anchor_vec = np.asarray(
+            StringUtils.to_vector(
+                anchor_input,
+                model_name=getattr(self.config, "semantic_embedding_model", "all-MiniLM-L6-v2"),
+            ),
+            dtype=float,
+        )
+
+        d_1 = float(_compute_d_1_vectorized(candidate_vec, anchor_vec))
+        d2_result = PropertyGraphEvaluator(graph, self.config).evaluate(
+            audit_input, return_violations=True
+        )
+        d_2 = float(d2_result[0])
+        d_3 = 0.0
+        return float(
+            np.clip(self.lambda_1 * d_1 + self.lambda_2 * d_2 + self.lambda_3 * d_3, 0.0, 1.0)
+        )
 
 
 class DissonanceStateEvaluator:
     """
-    dse/evaluator.py
-    Evaluates LLM output against active graph policies and RAG context.
+    Notario IDICOC Unificado: D_s = w1(d1) + w2(d2) + w3(d3)
+    d1: Proyección | d2: Grafo Interno | d3: Contexto RAG Externo
     """
 
     def __init__(self, config: Any):
         self.config = config
-        self.strategy = StructuralDissonanceStrategy(config=config)
+        self.strategy = StructuralDissonanceStrategy(config)
 
     def evaluate(
         self, llm_output: str, session_context: SessionContext, active_graph: PropertyGraph
     ) -> Tuple[float, List[str], Dict[str, Any]]:
-        """
-        Evaluates dissonance and collects list of violated policy IDs/descriptions.
-        Returns (d_s, list_of_violations, raw_metrics).
-        """
-        t_dse_start = time.perf_counter()
-        logger.info("[TIMING] DissonanceStateEvaluator.evaluate START")
-
-        self.strategy.set_graph(active_graph)
-
-        t_context_start = time.perf_counter()
-        context_input = self._build_context_input(session_context)
-        eval_input = self._prepare_eval_input(llm_output)
-        _eval_text = self._normalize_eval_text(eval_input)
-        t_context_elapsed = time.perf_counter() - t_context_start
-        logger.info("[TIMING] Context prep: %.3f sec", t_context_elapsed)
-
-        logger.info(f"[DSE] Texto evaluado por el Notario: {repr(_eval_text[:200])}")
-
-        t_viol_start = time.perf_counter()
-        evaluator = PropertyGraphEvaluator(active_graph, self.config)
-        violations = self._collect_violated_policies(evaluator, eval_input)
-        t_viol_elapsed = time.perf_counter() - t_viol_start
-        logger.info(
-            "[TIMING] Violated policies collection: %.3f sec | violations=%d",
-            t_viol_elapsed,
-            len(violations),
+        context_input = (
+            [ctx.strip() for ctx in session_context.rag_context.split("\n") if ctx.strip()]
+            if session_context.rag_context
+            else []
         )
-
-        t_dims_start = time.perf_counter()
-        d_logic = self._calculate_d_logic(evaluator, eval_input, _eval_text)
-        d_context, contradictory_contexts = self._calculate_d_context(
-            eval_input, context_input, session_context, evaluator
-        )
-        t_dims_elapsed = time.perf_counter() - t_dims_start
-        logger.info(
-            "[TIMING] Dissonance dimensions (d_logic, d_context): %.3f sec | d_logic=%.6f d_context=%.6f",
-            t_dims_elapsed,
-            float(d_logic),
-            float(d_context),
-        )
-
-        for ctx_text in contradictory_contexts:
-            violations.append(f"Contradicción RAG: {ctx_text} (SOFT)")
-
-        t_d1_start = time.perf_counter()
-        d1, y_vector = self._calculate_d1(eval_input, session_context, active_graph)
-        t_d1_elapsed = time.perf_counter() - t_d1_start
-        logger.info("[TIMING] d_1 calculation: %.3f sec | d_1=%.6f", t_d1_elapsed, float(d1))
-
-        d_s = self._combine_dissonance(d1, d_logic, d_context)
-
-        t_emb_start = time.perf_counter()
-        context_embs_list = self._build_context_embeddings(context_input)
-        graph_metrics = self._extract_policy_graph_metrics(active_graph)
-        t_emb_elapsed = time.perf_counter() - t_emb_start
-        logger.info("[TIMING] Embeddings & metrics extraction: %.3f sec", t_emb_elapsed)
-
-        raw_metrics = {
-            "d_s": d_s,
-            "d_0": 0.0,
-            "d_1": d1,
-            "d_2": d_logic,
-            "d_3": d_context,
-            "d_4": 0.0,
-            "d_5": 0.0,
-            "d_6": 0.0,
-            "d_context": d_context,
-            "lambda_context": float(getattr(self.config, "lambda_context", 0.4)),
-            "effective_threshold": self.config.allowed_epsilon,
-            "contradictory_contexts": contradictory_contexts,
-            "violated_policies": violations,
-            "d_logic": d_logic,
-            "policy_graph_total_nodes": graph_metrics["total_nodes"],
-            "policy_graph_has_logic_policies": graph_metrics["has_logic_policies"],
-            "policy_graph_empty": graph_metrics["total_nodes"] == 0,
-            "y_vector": y_vector,
-            "context_embeddings": context_embs_list,
-            "llm_output_text": _eval_text[:500],
-        }
-
-        t_dse_total = time.perf_counter() - t_dse_start
-        logger.info(
-            "[TIMING] DissonanceStateEvaluator.evaluate TOTAL: %.3f sec | d_s=%.6f | violated=%d",
-            t_dse_total,
-            float(d_s),
-            len(violations),
-        )
-        raw_metrics["dse_duration_sec"] = t_dse_total
-
-        return d_s, violations, raw_metrics
-
-    def _build_context_input(self, session_context: SessionContext) -> List[str]:
-        if session_context.rag_context:
-            return [ctx.strip() for ctx in session_context.rag_context.split("\n") if ctx.strip()]
-        return []
-
-    def _prepare_eval_input(self, llm_output: Any) -> Any:
         eval_input = llm_output
         try:
             if isinstance(llm_output, str) and (
@@ -833,260 +440,163 @@ class DissonanceStateEvaluator:
 
                 parsed = ast.literal_eval(llm_output)
                 if isinstance(parsed, (list, tuple)):
-                    return np.array(parsed, dtype=float)
-        except Exception:
+                    eval_input = np.array(parsed, dtype=float)
+        except:
             pass
-        return eval_input
 
-    def _normalize_eval_text(self, eval_input: Any) -> str:
-        if isinstance(eval_input, str):
-            return eval_input
-        return str(
-            getattr(
-                eval_input,
-                "source_text",
-                getattr(eval_input, "text_content", str(eval_input)),
+        _eval_text = (
+            eval_input
+            if isinstance(eval_input, str)
+            else str(
+                getattr(
+                    eval_input, "source_text", getattr(eval_input, "text_content", str(eval_input))
+                )
             )
         )
+        logger.info(f"[DSE] Evaluando: {repr(_eval_text[:200])}")
 
-    def _collect_violated_policies(
-        self, evaluator: PropertyGraphEvaluator, eval_input: Any
-    ) -> List[str]:
-        violations: List[str] = []
-        try:
-            t_viol_inner_start = time.perf_counter()
-            violated_nodes = evaluator.get_violated_policies(eval_input)
-            t_viol_inner_elapsed = time.perf_counter() - t_viol_inner_start
-            logger.debug(f"[TIMING] get_violated_policies: {t_viol_inner_elapsed:.3f} sec")
+        violations = []
+        has_hard_violation = False
 
-            for vn in violated_nodes:
-                violations.append(f"{vn['id']}: {vn['text']} ({vn['hardness'].upper()})")
-        except Exception as ex:
-            logger.error(f"Error computing logical violations: {ex}", exc_info=True)
-            raise
-        return violations
+        # --- 1. EVALUAR d_2 (Grafo: Lógica + Temporal unificados) ---
+        d2, graph_violations = PropertyGraphEvaluator(active_graph, self.config).evaluate(
+            eval_input,
+            return_violations=True,
+        )
+        for v in graph_violations:
+            if v["hardness"] == "hard":
+                has_hard_violation = True
+            violations.append(f"{v['id']}: {v['text']} ({v['hardness'].upper()})")
 
-    def _calculate_d_logic(
-        self, evaluator: PropertyGraphEvaluator, eval_input: Any, eval_text: str
-    ) -> float:
-        try:
-            d_logic = evaluator.evaluate(eval_input)
-            if d_logic == float("inf"):
-                logger.info(
-                    f"[DSE] d_2=inf: Violación HARD detectada. Texto: {repr(eval_text[:100])}"
-                )
-            elif not isinstance(d_logic, (int, float)):
-                logger.warning(f"d_logic returned invalid type: {type(d_logic)}, defaulting to 0.0")
-                d_logic = 0.0
-            return d_logic
-        except Exception as ex:
-            logger.error(f"CRITICAL: Error computing d_logic (d_2): {ex}", exc_info=True)
-            raise
+        # --- 2. EVALUAR d_3 (RAG Contexto Externo) ---
+        d3, contradictory_contexts = _compute_d_3(
+            eval_input,
+            context_input,
+            self.config,
+            session_context.user_prompt,
+            PropertyGraphEvaluator(active_graph, self.config),
+        )
+        for ctx in contradictory_contexts:
+            violations.append(f"Contradicción RAG: {ctx}")
 
-    def _calculate_d_context(
-        self,
-        eval_input: Any,
-        context_input: List[str],
-        session_context: SessionContext,
-        evaluator: PropertyGraphEvaluator,
-    ) -> Tuple[float, List[str]]:
-        try:
-            d_context, contradictory_contexts = _compute_context_contradiction(
-                eval_input, context_input, self.config, session_context.user_prompt, evaluator
-            )
-            if not isinstance(d_context, (int, float)):
-                logger.warning(
-                    f"d_context returned invalid type: {type(d_context)}, defaulting to 0.0"
-                )
-                return 0.0, []
-            return d_context, contradictory_contexts
-        except Exception as ex:
-            logger.error(f"CRITICAL: Error computing d_context (RAG): {ex}", exc_info=True)
-            raise
-
-    def _calculate_d1(
-        self,
-        eval_input: Any,
-        session_context: SessionContext,
-        active_graph: PropertyGraph,
-    ) -> Tuple[float, Optional[np.ndarray]]:
-        y_vector: Optional[np.ndarray] = None
+        # --- 3. EVALUAR d_1 (Deriva de Proyección) ---
         d1 = 0.0
+        y_vector = None
         try:
-            if (
-                isinstance(eval_input, np.ndarray)
-                or hasattr(eval_input, "distribution")
-                or isinstance(eval_input, list)
-            ):
-                mu_raw = self.strategy._validate_input(eval_input, 4)
-                total = mu_raw.sum()
-                mu = mu_raw / total if total > 1e-14 else np.ones_like(mu_raw) / mu_raw.size
-                n_ref = mu.size
-
-                if session_context.v_hat is not None and hasattr(
-                    session_context.v_hat, "semantic_vector"
-                ):
-                    target_state = session_context.v_hat.semantic_vector
-                    if not isinstance(target_state, np.ndarray):
-                        target_state = np.asarray(target_state, dtype=float)
-                    if target_state.size != n_ref:
-                        target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-                else:
-                    target_state = np.ones(n_ref, dtype=float) / float(n_ref)
-                d1 = _compute_d_1(mu, target_state)
+            if isinstance(eval_input, (np.ndarray, list)) or hasattr(eval_input, "distribution"):
+                m = np.asarray(getattr(eval_input, "distribution", eval_input), dtype=float)
+                m = m / m.sum() if m.sum() > 1e-14 else np.ones_like(m) / m.size
+                t = np.ones(m.size, dtype=float) / float(m.size)
+                if session_context.v_hat and hasattr(session_context.v_hat, "semantic_vector"):
+                    if len(session_context.v_hat.semantic_vector) == m.size:
+                        t = np.asarray(session_context.v_hat.semantic_vector, dtype=float)
+                d1 = _compute_d_1(m, t)
             else:
-                if session_context.v_hat is not None and hasattr(
-                    session_context.v_hat, "semantic_vector"
-                ):
-                    from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
-
-                    model_name = getattr(
-                        self.config,
-                        "semantic_embedding_model",
-                        DEFAULT_SEMANTIC_EMBEDDING_MODEL,
-                    )
-                    y_vector_raw = StringUtils.to_vector(eval_input, model_name=model_name)
-                    y_vector = (
-                        active_graph.project_to_manifold(y_vector_raw)
-                        if active_graph is not None
-                        else y_vector_raw
-                    )
-
-                    v_hat_vector = session_context.v_hat.semantic_vector
-                    if not isinstance(v_hat_vector, np.ndarray):
-                        v_hat_vector = np.asarray(v_hat_vector, dtype=float)
-
-                    norm_y = np.linalg.norm(y_vector)
-                    if norm_y > 1e-12:
-                        y_vector = y_vector / norm_y
-                    norm_v = np.linalg.norm(v_hat_vector)
-                    if norm_v > 1e-12:
-                        v_hat_vector = v_hat_vector / norm_v
-
-                    distancia = float(np.linalg.norm(y_vector - v_hat_vector))
-                    d1 = float(np.clip(distancia / 2.0, 0.0, 1.0))
+                y_vector = StringUtils.to_vector(
+                    eval_input,
+                    model_name=getattr(self.config, "semantic_embedding_model", "all-MiniLM-L6-v2"),
+                )
+                if active_graph:
+                    y_vector = active_graph.project_to_manifold(y_vector)
+                if session_context.v_hat and hasattr(session_context.v_hat, "semantic_vector"):
+                    v_hat = np.asarray(session_context.v_hat.semantic_vector, dtype=float)
+                    ny, nv = np.linalg.norm(y_vector), np.linalg.norm(v_hat)
+                    y_vec_n = y_vector / ny if ny > 1e-12 else y_vector
+                    v_hat_n = v_hat / nv if nv > 1e-12 else v_hat
+                    d1 = float(np.clip(float(np.linalg.norm(y_vec_n - v_hat_n)) / 2.0, 0.0, 1.0))
         except Exception as ex:
-            logger.warning(f"Error computing d_1 (uniqueness/projection distance): {ex}")
-        return d1, y_vector
+            logger.warning(f"Error computing d_1: {ex}")
 
-    def _combine_dissonance(
-        self,
-        d1: float,
-        d_logic: float,
-        d_context: float,
-    ) -> float:
-        """Combines three dissonance dimensions:
-        - d1: Uniqueness/Projection distance (vs source anchor K)
-        - d_logic: Policy dissonance (logic policies from PropertyGraph)
-        - d_context: RAG context contradiction
-        """
-        if d_logic == float("inf"):
-            return float("inf")
+        # --- 4. CÁLCULO FINAL D_s (Matemática Pura Unificada) ---
+        weights = getattr(
+            self.config,
+            "_normalized_weights",
+            getattr(self.config, "dissonance_weights", [0.0, 0.33, 0.33, 0.33, 0.0, 0.0, 0.0]),
+        )
+        w1, w2, w3 = weights[1], weights[2], weights[3]
 
-        lambda_context = float(getattr(self.config, "lambda_context", 0.4))
-        weights = self.config._normalized_weights
-        # d_s = (1 - λ_context) * (w1*d1 + w2*d_logic) + λ_context * d_context
-        policy_dissonance = weights[1] * d1 + weights[2] * d_logic
-        d_s = (1.0 - lambda_context) * policy_dissonance + lambda_context * d_context
-        return max(d_s, d_context * lambda_context)
+        # D_s = w1*d1 + w2*d2 + w3*d3
+        d_s = w1 * d1 + w2 * d2 + w3 * d3
+        if has_hard_violation:
+            d_s = float("inf")
 
-    def _build_context_embeddings(self, context_input: List[str]) -> List[np.ndarray]:
-        context_embs_list: List[np.ndarray] = []
-        if not context_input:
-            return context_embs_list
-
-        from idicoc_core.utils.embedding_service import EmbeddingService
-        from idicoc_core.config import DEFAULT_SEMANTIC_EMBEDDING_MODEL
-
-        try:
-            embed_service = EmbeddingService()
-            model_name = getattr(
-                self.config,
-                "semantic_embedding_model",
-                DEFAULT_SEMANTIC_EMBEDDING_MODEL,
-            )
-            embedder = embed_service.get_embedder(model_name)
-            if embedder is not None and hasattr(embedder, "encode"):
-                for ctx in context_input:
-                    if not ctx.strip():
-                        continue
-                    try:
-                        try:
-                            ctx_emb = embedder.encode(ctx, convert_to_numpy=True)
-                        except TypeError:
-                            try:
-                                ctx_emb = embedder.encode(ctx, model_name=model_name)
-                            except TypeError:
-                                ctx_emb = embedder.encode(ctx)
-                        if isinstance(ctx_emb, np.ndarray):
-                            ctx_emb = ctx_emb.astype(float)
-                        else:
-                            ctx_emb = np.asarray(ctx_emb, dtype=float)
-                        ctx_norm = np.linalg.norm(ctx_emb)
-                        if ctx_norm > 1e-12:
-                            context_embs_list.append(ctx_emb / ctx_norm)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        return context_embs_list
-
-    def _extract_policy_graph_metrics(self, active_graph: PropertyGraph) -> Dict[str, Any]:
-        if active_graph is None or not hasattr(active_graph, "nodes"):
-            return {
-                "total_nodes": 0,
-                "has_logic_policies": False,
-                "has_temporal_policies": False,
-            }
-
-        total_nodes = len(active_graph.nodes) if isinstance(active_graph.nodes, dict) else 0
-        return {
-            "total_nodes": total_nodes,
-            "has_logic_policies": any(
-                ax.get("policy_type") != "temporal" for ax in active_graph.nodes.values()
-            ),
+        raw_metrics = {
+            "d_s": d_s,
+            "has_hard_violation": has_hard_violation,
+            "d_1": d1,
+            "d_2": d2,
+            "d_3": d3,
+            "d_context": d3,
+            "contradictory_contexts": contradictory_contexts,
+            "violated_policies": violations,
+            "y_vector": y_vector,
+            "llm_output_text": _eval_text[:500],
         }
+        return d_s, violations, raw_metrics
 
-    def _compute_rag_divergence(self, vec: np.ndarray, context_embs: List[np.ndarray]) -> float:
+    def project_spsa(
+        self,
+        y_vec: np.ndarray,
+        v_hat_vec: np.ndarray,
+        const_metrics: Dict[str, Any],
+        context_embs: List[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, float, List[Dict[str, Any]]]:
         import numpy as np
 
-        max_sim = -1.0
-        for c_emb in context_embs:
-            if c_emb is None:
-                continue
-            sim = float(np.dot(vec, c_emb))
-            if sim > max_sim:
-                max_sim = sim
-        if max_sim == -1.0:
-            return 0.0
-        return 1.0 - max_sim
+        if const_metrics.get("has_hard_violation", False):
+            return y_vec, 1.0, [{"iteration": 0, "dissonance": 1.0, "backtracked": True}]
 
+        z = np.copy(np.asarray(y_vec, dtype=float))
+        if np.linalg.norm(z) > 1e-12:
+            z /= np.linalg.norm(z)
+        v_hat = np.asarray(v_hat_vec, dtype=float)
+        if np.linalg.norm(v_hat) > 1e-12:
+            v_hat /= np.linalg.norm(v_hat)
 
-class AuditEntropyModule:
-    """Modulo de Entropía de Auditoría (AEM) para el conteo de señales y registro de auditorías."""
+        weights = getattr(
+            self.config,
+            "_normalized_weights",
+            getattr(self.config, "dissonance_weights", [0.0, 0.33, 0.33, 0.33, 0.0, 0.0, 0.0]),
+        )
+        w1, w2, w3 = weights[1], weights[2], weights[3]
+        const_d2, const_d3 = const_metrics.get("d_2", 0.0), const_metrics.get("d_3", 0.0)
 
-    def __init__(self) -> None:
-        self.total_signals: int = 0
-        self.valid_signals: int = 0
-        self.rejected_signals: int = 0
-        self.audit_trail_map: List[Dict[str, Any]] = []
+        def _cost(vec: np.ndarray) -> float:
+            n = np.linalg.norm(vec)
+            v = vec / n if n > 1e-12 else vec
+            d1 = float(np.clip(float(np.linalg.norm(v - v_hat)) / 2.0, 0.0, 1.0))
+            return w1 * d1 + w2 * const_d2 + w3 * const_d3
 
-    def record_admission(self, metadata: Dict[str, Any] | None = None) -> None:
-        self.total_signals += 1
-        self.valid_signals += 1
+        best_z, best_loss = np.copy(z), _cost(z)
+        history = [{"iteration": 0, "dissonance": float(best_loss), "backtracked": False}]
 
-    def record_admission_from_correction(self, metadata: Dict[str, Any] | None = None) -> None:
-        self.total_signals += 1
-        self.valid_signals += 1
+        green_zone = getattr(
+            self.config, "diss_threshold_green", getattr(self.config, "allowed_epsilon", 0.10)
+        )
+        if best_loss <= green_zone:
+            return best_z, best_loss, history
 
-    def record_rejection(self, metadata: Dict[str, Any]) -> None:
-        self.total_signals += 1
-        self.rejected_signals += 1
-        record = {"timestamp": datetime.now(timezone.utc).isoformat(), **(metadata or {})}
-        self.audit_trail_map.append(record)
+        a, c, iters = (
+            getattr(self.config, "spsa_a", 0.1),
+            getattr(self.config, "spsa_c", 0.05),
+            getattr(self.config, "spsa_max_iters", 5),
+        )
 
-    def get_counters(self) -> Tuple[int, int, int]:
-        return self.total_signals, self.valid_signals, self.rejected_signals
+        for k in range(iters):
+            delta = np.random.choice([-1.0, 1.0], size=z.size)
+            grad = ((_cost(z + c * delta) - _cost(z - c * delta)) / (2.0 * c)) * delta
+            z_next = z - a * grad
+            if np.linalg.norm(z_next) > 1e-12:
+                z_next /= np.linalg.norm(z_next)
 
-    def get_audit_trail(self) -> List[Dict[str, Any]]:
-        return self.audit_trail_map
+            loss_next = _cost(z_next)
+            history.append(
+                {"iteration": k + 1, "dissonance": float(loss_next), "backtracked": False}
+            )
+            if loss_next < best_loss:
+                best_loss, best_z = loss_next, np.copy(z_next)
+            z = z_next
+            if best_loss <= green_zone:
+                break
+
+        return best_z, best_loss, history
