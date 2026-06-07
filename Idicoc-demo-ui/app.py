@@ -23,7 +23,7 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Idicoc_notary"))
 )
 from idicoc_core.config import AuditConfig, DEFAULT_SEMANTIC_EMBEDDING_MODEL
-from idicoc_core.compat import NotaryClient, SemanticPayload
+from idicoc_core.api.facade import NotaryClient
 from idicoc_core.dse.evaluator import PropertyGraphEvaluator
 from providers.factory import get_provider
 from idicoc_core.utils.hashing import sha256_dict, sha256_hex
@@ -608,16 +608,15 @@ with col_chat:
         ):
             try:
                 if forced_response:
-                    assistant_res = forced_response
-                    payload = SemanticPayload(assistant_res)
-                    audit_result = st.session_state.notary_client.process_interaction(
-                        audit_input=payload,
-                        user_input=user_msg,
-                        context_input=st.session_state.get("context_list"),
-                        epsilon_override=epsilon,
+                    assistant_res, audit_result = (
+                        st.session_state.notary_client.process_query(
+                            user_prompt=user_msg,
+                            rag_context=st.session_state.get("context_list"),
+                            llm_output=forced_response,
+                            epsilon_override=epsilon,
+                        )
                     )
                 else:
-                    # Generar output del LLM directamente
                     kwargs = {}
                     if "notary_client" in st.session_state:
                         processor = (
@@ -629,17 +628,13 @@ with col_chat:
                         if "logits_processor" in sig.parameters:
                             kwargs["logits_processor"] = processor
 
-                    # Generar respuesta del LLM
-                    assistant_res = llm_provider.generate(user_msg, **kwargs)
-
-                    # Auditar el output generado
-                    payload = SemanticPayload(assistant_res)
-                    context_list = st.session_state.get("context_list") or []
-                    audit_result = st.session_state.notary_client.process_interaction(
-                        audit_input=payload,
-                        user_input=user_msg,
-                        context_input=context_list,
-                        epsilon_override=epsilon,
+                    assistant_res, audit_result = (
+                        st.session_state.notary_client.process_query(
+                            user_prompt=user_msg,
+                            rag_context=st.session_state.get("context_list"),
+                            epsilon_override=epsilon,
+                            **kwargs,
+                        )
                     )
 
                 # Normalizar metadata del resultado de auditoría para mayor robustez

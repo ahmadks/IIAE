@@ -281,14 +281,20 @@ class AuditPipeline:
             return None
 
     def _should_apply_spsa(self, d_s: float, raw_metrics: Dict[str, Any]) -> bool:
+        d1 = float(raw_metrics.get("d_1", 0.0))
         d2 = float(raw_metrics.get("d_2", 0.0))
         d3 = float(raw_metrics.get("d_3", 0.0))
 
+        # Do not attempt SPSA when any discrete violation exists.
         if d2 > 0.0 or d3 > 0.0:
             return False
         if d_s == float("inf"):
             return False
-        return self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
+
+        # SPSA is only allowed in the gray band for d1 and d_s.
+        in_d1_gray = self.config.diss_threshold_green < d1 <= self.config.diss_threshold_red
+        in_ds_gray = self.config.diss_threshold_green < d_s <= self.config.diss_threshold_red
+        return in_d1_gray and in_ds_gray
 
     def execute_audit(
         self,

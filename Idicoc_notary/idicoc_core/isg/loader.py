@@ -204,7 +204,6 @@ class InvariantSynthesizer:
         self.compilation_log: List[PolicyCompilationResult] = []
         self.vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size
         self.embedding_threshold = embedding_threshold
-        self.vocab_tokens_text: List[str] = []
         self.vocab_token_ids: List[int] = []
         self.vocab_embeddings: Optional[np.ndarray] = None
         self.vocab_cache_path = vocab_cache_path
@@ -367,7 +366,6 @@ class InvariantSynthesizer:
 
                     from scipy.spatial import KDTree
 
-                    self.vocab_tokens_text = tokens
                     self.vocab_token_ids = token_ids
                     self.vocab_embeddings = embeddings
                     self.kd_tree = KDTree(embeddings)
@@ -393,7 +391,6 @@ class InvariantSynthesizer:
         norms = np.where(norms < 1e-12, 1.0, norms)
         embs = embs / norms
 
-        self.vocab_tokens_text = tokens_text
         self.vocab_token_ids = token_ids
         self.vocab_embeddings = embs
         from scipy.spatial import KDTree
