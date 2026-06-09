@@ -385,7 +385,14 @@ if "llm_provider" not in st.session_state:
         )
         llm_provider, status = load_real_model(
             provider_type="phi",
-            model_path="models_cache/Phi-3.5-mini-instruct",
+            model_path=os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "models_cache",
+                    "Phi-3.5-mini-instruct",
+                )
+            ),
             embedding_model_name=DEFAULT_SEMANTIC_EMBEDDING_MODEL,
         )
         if llm_provider is None:

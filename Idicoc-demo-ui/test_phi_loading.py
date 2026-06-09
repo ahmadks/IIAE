@@ -22,7 +22,9 @@ def main():
     print(f"CUDA available: {torch.cuda.is_available()}")
 
     model_name = "microsoft/Phi-3.5-mini-instruct"
-    cache_dir = "models_cache"
+    cache_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "models_cache")
+    )
 
     print("\n⏳ Step 1: Ensuring Phi-3.5 is fully downloaded in cache...")
     try:

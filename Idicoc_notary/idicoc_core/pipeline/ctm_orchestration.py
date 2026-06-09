@@ -193,6 +193,10 @@ class CTMOrchestrator:
 
         return dist_val
 
+    def export_dag(self) -> Dict[str, Any]:
+        """Export DAG as a dictionary for serialization/display."""
+        return self.ctm._dag.to_dict()
+
     @property
     def root_hash(self) -> Optional[str]:
         """Get the root hash of the MerkleDAG."""
